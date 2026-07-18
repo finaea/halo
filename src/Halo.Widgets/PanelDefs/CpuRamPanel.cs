@@ -70,13 +70,6 @@ public static class CpuRamPanelImpl
                 FixedH = 11,
                 Advance = i == 0 ? -1 : 1,   // first row rides right on the CPU bar (row-adjustor)
             });
-            p.Elements.Add(new BarEl
-            {
-                Value = c => c.Metrics.Value(MetricNames.CpuCorePct(core)) / 100,
-                FillColor = "bar",
-                X = 47, W = 120,
-                SameRow = true, SameRowOffset = 7,
-            });
             p.Elements.Add(new TextEl
             {
                 Text = c => $"{ValueFormat.Fixed(c.Metrics.Value(MetricNames.CpuCorePct(core)), 1)}%",
@@ -86,12 +79,21 @@ public static class CpuRamPanelImpl
                 SameRow = true,
                 FixedH = 11,
             });
+            // bar sits 7 units under the row start, inset (X=47 W=120), pitch stays 12
+            p.Elements.Add(new BarEl
+            {
+                Value = c => c.Metrics.Value(MetricNames.CpuCorePct(core)) / 100,
+                FillColor = "bar",
+                X = 47, W = 120, H = 1,
+                SameRow = true, SameRowOffset = 7,
+            });
         }
 
         // Clock / FAN chip row
         p.Elements.Add(new TextEl
         {
-            Text = c => $"Clock: {ValueFormat.Int0(c.Metrics.Value(MetricNames.CpuClockMhz))} MHz",
+            Text = c => c.Metrics.TryValue(MetricNames.CpuClockMhz, out double mhz) && mhz > 0
+                ? $"Clock: {ValueFormat.Int0(mhz)} MHz" : "Clock: N/A",
             Style = TextStyle.Text8,
             Color = "text2",
             Align = TextAlign.Left,
@@ -103,7 +105,8 @@ public static class CpuRamPanelImpl
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"FAN: {ValueFormat.Int0(c.Metrics.Value(MetricNames.CpuFanRpm))}rpm",
+            Text = c => c.Metrics.TryValue(MetricNames.CpuFanRpm, out double rpm)
+                ? $"FAN: {ValueFormat.Int0(rpm)}rpm" : "FAN: N/A",
             Style = TextStyle.Text8,
             Color = "text2",
             Align = TextAlign.Right,

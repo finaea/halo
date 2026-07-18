@@ -8,7 +8,7 @@ public static class PanelFactory
     public static Panel? Create(string type, PanelContext ctx) => type switch
     {
         "clock" => ClockPanel.Build(ctx),
-        "cpu-ram" => CpuRamPanel.Build(ctx),
+        "cpu-ram" => CpuRamPanelImpl.Build(ctx),
         "gpu" => GpuPanel.Build(ctx),
         "fps" => FpsPanel.Build(ctx),
         "power" => PowerPanel.Build(ctx),

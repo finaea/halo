@@ -1,0 +1,34 @@
+<UserControl x:Class="Halo.Settings.Pages.AutostartPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,14">
+    <StackPanel>
+      <TextBlock Text="Autostart" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
+
+      <GroupBox Header="Widgets at login">
+        <StackPanel>
+          <CheckBox x:Name="LoginCheck" Content="Start widgets at login (HKCU Run)"
+                    Checked="LoginCheck_Changed" Unchecked="LoginCheck_Changed"/>
+          <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Sub}" Margin="0,6,0,0"
+                     Text="Adds/removes the 'HaloWidgets' value under HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run. No admin needed."/>
+          <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Sub}" Margin="0,4,0,0"
+                     Text="Target executable:"/>
+          <TextBlock x:Name="WidgetsExePathText" TextWrapping="Wrap" FontFamily="Consolas" FontSize="11" Margin="0,2,0,0"/>
+          <TextBlock x:Name="RunStatus" Margin="0,8,0,0" TextWrapping="Wrap"/>
+        </StackPanel>
+      </GroupBox>
+
+      <GroupBox Header="Collector scheduled task (needs admin)">
+        <StackPanel>
+          <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Sub}"
+                     Text="The collector runs elevated as a scheduled task (\Halo\Collector). Installing or repairing it requires administrator rights, so the button below launches the installer script elevated (UAC prompt)."/>
+          <TextBlock x:Name="TaskStatus" Margin="0,10,0,0" TextWrapping="Wrap"/>
+          <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+            <Button Content="Install/Repair task (elevates)" Click="InstallTask_Click"/>
+            <Button Content="Refresh status" Click="RefreshTask_Click"/>
+          </StackPanel>
+        </StackPanel>
+      </GroupBox>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

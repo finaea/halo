@@ -1,0 +1,10 @@
+<Project>
+  <!-- Agent-sandbox build dirs (obj-<name>/bin-<name> via BaseIntermediateOutputPath overrides)
+       leak generated AssemblyInfo.cs into the default compile glob. Remove them here — targets
+       evaluate after default items exist (a Remove in Directory.Build.props runs too early).
+       MSBuild can't glob a wildcard directory followed by **, so the names are enumerated. -->
+  <ItemGroup>
+    <Compile Remove="obj-set/**;obj-gpu/**;obj-fps/**;obj-power/**;obj-drives/**;obj-net/**;obj-fans/**;obj-top/**;obj.bak/**" />
+    <Compile Remove="bin-set/**;bin-gpu/**;bin-fps/**;bin-power/**;bin-drives/**;bin-net/**;bin-fans/**;bin-top/**;bin.bak/**" />
+  </ItemGroup>
+</Project>

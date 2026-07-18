@@ -20,9 +20,10 @@ Filled in as implementation proceeds; every row added here the moment it's creat
 
 | Item | Global footprint | Points to | Cleanup command | Status |
 |---|---|---|---|---|
-| Intel PresentMon Service | Service registration `PresentMonService` (SCM entry only) | `<project>\tools\presentmon\PresentMonService.exe` | `sc.exe stop PresentMonService & sc.exe delete PresentMonService` | ☐ planned |
-| Collector autostart | Scheduled task `\Halo\Collector` (highest privileges, at logon) | `<project>\bin\Halo.Collector.exe` | `schtasks /Delete /TN "\Halo\Collector" /F` | ☐ planned |
-| Widgets autostart | Registry value `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` → `HaloWidgets` | `<project>\bin\Halo.Widgets.exe` | `reg delete HKCU\...\Run /v HaloWidgets /f` | ☐ planned |
+| Intel PresentMon Service | **none** — consumed as a bundled console app child process, not a Windows service | `<project>\tools\presentmon\PresentMon-2.5.1-x64.exe` (launched/killed by the collector itself) | n/a | ✔ n/a — console client, no global footprint |
+| Collector autostart | Scheduled task `\Halo\Collector` (highest privileges, at logon) | published-or-Debug exe, resolved by `tools\install-halo.ps1` (prefers `<project>\bin\Halo.Collector\Halo.Collector.exe`, falls back to `<project>\src\Halo.Collector\bin\Debug\net9.0\win-x64\Halo.Collector.exe`) | `schtasks /Delete /TN "\Halo\Collector" /F` (done by `tools\uninstall-halo.ps1`) | ☑ script ready (`tools\install-halo.ps1`) |
+| Widgets autostart | Registry value `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` → `HaloWidgets` | published-or-Debug exe, resolved by `tools\install-halo.ps1` (prefers `<project>\bin\Halo.Widgets\Halo.Widgets.exe`, falls back to `<project>\src\Halo.Widgets\bin\Debug\net9.0\win-x64\Halo.Widgets.exe`) | `reg delete HKCU\...\Run /v HaloWidgets /f` (done by `tools\uninstall-halo.ps1`) | ☑ script ready (`tools\install-halo.ps1`) |
+| Windows Defender exclusion *(optional)* | Exclusion path entry for the whole project folder | `<project>` (whole folder) | `Remove-MpPreference -ExclusionPath <project>` (done by `tools\uninstall-halo.ps1`) | optional, off by default; see `install-halo.ps1 -AddDefenderExclusion` |
 
 ## Kept project-local by design (would normally be global)
 
@@ -37,8 +38,8 @@ Filled in as implementation proceeds; every row added here the moment it's creat
 
 ## Full removal procedure
 
-1. Run `<project>\tools\uninstall-halo.ps1` (created in M1) — stops processes, deletes the three global registrations above, verifies nothing global remains.
+1. Run `<project>\tools\uninstall-halo.ps1` — stops processes (including any bundled PresentMon child), deletes the global registrations above, verifies nothing global remains. The script self-elevates (re-launches itself with a UAC prompt if not already running as Administrator), so it can be run from a normal, non-elevated shell.
 2. Delete this folder.
 3. Leave `C:\Program Files\dotnet`, `C:\Program Files\PawnIO`, FanControl untouched (pre-existing, see above).
 
-*Runtime-only footprints that clean themselves: ETW session (only while PresentMon service runs), `Halo.Metrics.v1` shared memory (vanishes when processes exit), LHM ISA-bus mutex (namespace object, process-lifetime).*
+*Runtime-only footprints that clean themselves: ETW session (only while the bundled PresentMon console client runs, launched/killed by the collector), `Halo.Metrics.v1` shared memory (vanishes when processes exit), LHM ISA-bus mutex (namespace object, process-lifetime).*

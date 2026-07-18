@@ -162,26 +162,44 @@ public sealed unsafe class App : IDisposable
 
     public void RequestDeviceRecovery() => _deviceLost = true;
 
-    /// <summary>Collector watchdog: stale > 5 s → try to (re)start via the scheduled task.</summary>
+    private bool? _collectorTaskExists;
+
+    /// <summary>Collector watchdog: stale > 5 s → try to (re)start via the scheduled task
+    /// (backoff 1/5/30 s per plan §11). If the task isn't installed, widgets just show
+    /// their stale badges — no point spawning schtasks forever.</summary>
     private void Watchdog()
     {
-        if (!Metrics.Stale || DateTime.UtcNow < _nextWatchdogAttempt) return;
+        if (!Metrics.Stale)
+        {
+            _watchdogFailures = 0;
+            return;
+        }
+        if (DateTime.UtcNow < _nextWatchdogAttempt) return;
         int delayS = _watchdogFailures switch { 0 => 1, 1 => 5, _ => 30 };
         _nextWatchdogAttempt = DateTime.UtcNow.AddSeconds(delayS);
         _watchdogFailures++;
         try
         {
-            // preferred: elevated scheduled task (no UAC prompt)
-            var psi = new ProcessStartInfo("schtasks", "/Run /TN \"\\Halo\\Collector\"")
-            { CreateNoWindow = true, UseShellExecute = false };
-            Process.Start(psi);
-            Log.Info("watchdog: requested collector start via scheduled task");
+            if (_collectorTaskExists == null)
+            {
+                using var q = Process.Start(new ProcessStartInfo("schtasks", "/Query /TN \"\\Halo\\Collector\"")
+                { CreateNoWindow = true, UseShellExecute = false });
+                q!.WaitForExit(3000);
+                _collectorTaskExists = q.ExitCode == 0;
+                if (_collectorTaskExists == false)
+                    Log.Warn("watchdog: \\Halo\\Collector task not installed — run tools\\install-halo.ps1; widgets will show stale badges");
+            }
+            if (_collectorTaskExists == true)
+            {
+                Process.Start(new ProcessStartInfo("schtasks", "/Run /TN \"\\Halo\\Collector\"")
+                { CreateNoWindow = true, UseShellExecute = false });
+                Log.Info("watchdog: requested collector start via scheduled task");
+            }
         }
         catch (Exception ex)
         {
             Log.Warn($"watchdog: {ex.Message}");
         }
-        if (!Metrics.Stale) _watchdogFailures = 0;
     }
 
     // ---- monitors & snapping ----
