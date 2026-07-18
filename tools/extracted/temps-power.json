@@ -1,0 +1,749 @@
+{
+  "panel": "temps-power",
+  "sourceFiles": [
+    "RainformerHWiv2\\Temps\\Temps.ini",
+    "RainformerHWiv2\\@Resources\\HWiNFO.inc",
+    "RainformerHWiv2\\@Resources\\Variables.inc (cross-referenced for variable resolution)",
+    "RainformerHWiv2\\@Resources\\Styles.inc (cross-referenced for style resolution)"
+  ],
+  "rainmeterUpdateMs": 1000,
+  "otherRootSettings": {
+    "MiddleMouseDownAction": "[!Refresh]",
+    "MouseOverAction": "[!ToggleMeterGroup Controls][!UpdateMeterGroup Controls][!Redraw]  -- reveals hidden gear-icon control overlay (Group=Controls, skipped from this spec)",
+    "MouseLeaveAction": "[!ToggleMeterGroup Controls][!UpdateMeterGroup Controls][!Redraw]",
+    "AccurateText": 1,
+    "DynamicWindowSize": 1,
+    "ContextTitle/ContextAction": "right-click -> opens Settings config (SettingsGeneral.ini)",
+    "ContextTitle2/ContextAction2": "right-click -> opens Launcher config (LauncherMod.ini)",
+    "Group": "#RootConfig# | TEMPS",
+    "note": "None of these affect the static visual layout of the panel; not required for a non-interactive D2D re-render, included for completeness."
+  },
+  "localVariables": {
+    "Scale": 1.7,
+    "BgOffset": 5,
+    "BgShapeW": 196,
+    "BgShapeX": "#BgOffset# = 5",
+    "BgShapeY": "#BgOffset# = 5",
+    "BgWidth": "(BgShapeW + BgOffset*2) = 206",
+    "AbsMargin": 3,
+    "TopMargin": 28,
+    "BottomMargin": 3,
+    "RowSpacing": 1,
+    "CornerRadius": 4,
+    "Stroke_Width": 0,
+    "TopMarginFormula": "(TopMargin + BgOffset - 1) = 32",
+    "ContentMarginFormula": "((AbsMargin + BgOffset) - 1) = 7",
+    "RightAlign": "(BgWidth - (AbsMargin+BgOffset) - 1) = 197",
+    "ContentWidth": "(BgWidth - (AbsMargin+BgOffset)*2) = 190",
+    "CenterAlign": "(BgWidth / 2) = 103",
+    "FontFamily": "Trebuchet MS",
+    "textSize": 8,
+    "deg": "[\\x0x00B0] (degree glyph, unused on the 4 active rows -- only used by hidden Chipset/RAM/Air/PSU/Drive rows)",
+    "TempUnitLetter": "C (unused on the 4 active rows)",
+    "colors": {
+      "colorTitle": "0,0,0 / alpha 255",
+      "colorText": "0,0,0 / alpha 205",
+      "colorText2": "60,65,62 / alpha 205",
+      "colorActiveTitle": "255,128,0 / alpha 255 (unused on this panel)",
+      "colorBar": "93,141,172 / alpha 255 (dead value for this panel, see notes)",
+      "ColorBarWarn": "220,20,60 (crimson; dead value for this panel, see notes)",
+      "colorHistogram": "176,196,222 / alpha 250 (unused)",
+      "colorRed": "204,0,0 / alpha 255 (unused directly; equals DevTempWarnColorTh5)",
+      "EmptyBarColor": "255,255,255 / alpha 25 (unused, no Bar meter exists for the 4 active rows)",
+      "BgTopColor": "163,178,230 / opacity 180",
+      "BgBodyColor": "230,230,230 / opacity 180",
+      "StrokeColor": "96,138,203 / alpha 100 (frame outline color, but StrokeWidth resolves to 0 so invisible)",
+      "SolidColorLabel": "248,248,248 / alpha 255 (unused)",
+      "MaxTempColor": "178,190,181 / alpha 205 (defined globally but NOT used by the 4 active rows' Max meters -- they hardcode 120,120,120,255 instead; still used by hidden Chipset/RAM/Air/PSU/Drive rows)",
+      "DevTempWarnColorTh1": "47,186,255 (light blue)",
+      "DevTempWarnColorTh2": "255,255,36 (yellow)",
+      "DevTempWarnColorTh3": "255,143,30 (orange)",
+      "DevTempWarnColorTh4": "255,0,0 (red)",
+      "DevTempWarnColorTh5": "204,0,0 (dark red / crimson)"
+    },
+    "temps_vars": {
+      "MaxTemp": 1,
+      "TCPU": { "enabled": 1, "Label": "VCORE", "Max_unused_dead": 70, "WarnTh1-4_unused_dead": [25, 45, 60, 70] },
+      "TGPU1": { "enabled": 1, "Label": "GPU VOLT", "Max_unused_dead": 95, "WarnTh1-4_unused_dead": [25, 45, 60, 70] },
+      "TGPU2": { "enabled": 1, "Label": "CPU POWER", "Max_unused_dead": 95, "WarnTh1-4_unused_dead": [25, 45, 60, 70] },
+      "TMOBO": { "enabled": 1, "Label": "GPU POWER", "Max_unused_dead": 95, "WarnTh1-4_unused_dead": [25, 30, 40, 50] },
+      "TCHIPSET": { "enabled": 0, "Label": "CHIP" },
+      "TRAM": { "enabled": 0, "Label": "RAM" },
+      "TAIR": { "enabled": 0, "Label": "AIR" },
+      "TPSU": { "enabled": 0, "Label": "PSU" },
+      "TDRIVE1": { "enabled": 0, "Label": "DRIVE1" },
+      "TDRIVE2": { "enabled": 0, "Label": "DRIVE2" },
+      "note": "IMPORTANT: the *Max and *WarnTh1-4 variables listed as 'unused_dead' above are the ORIGINAL temperature-oriented thresholds (Celsius) left over from before the user's relabeling. For TCPU/TGPU1/TGPU2/TMOBO the actual per-row warning-color thresholds were hand-edited directly as LITERAL numbers inside each measureTempXValueWarn Formula= line (see warnColorLogic below), NOT sourced from these #TXWarnTh#-style variables. The #TXMax# variables are still referenced by the (now-dead, unrendered) measureTempXPerc calc -- see notes."
+    }
+  },
+  "hwinfoSensorMap": {
+    "resolutionMethod": "Temps.ini references #HWiNFO-TEMPS-<CHANNEL>-SensorId/SensorInstance/EntryId# which @Include from @Resources/HWiNFO.inc. Rainmeter variable names are case-insensitive, so #HWiNFO-TEMPS-MOBO-...# in Temps.ini resolves to the HWiNFO-TEMPS-MoBo-... keys in HWiNFO.inc.",
+    "TCPU_VCORE": {
+      "rainmeterVarPrefix": "HWiNFO-TEMPS-CPU",
+      "HWiNFOSensorId": "0xf7006687",
+      "HWiNFOSensorInstance": "0x0",
+      "HWiNFOEntryId": "0x2000012",
+      "HWiNFOType": "CurrentValue",
+      "inferredMeaning": "CPU Vcore (Volts) -- inferred from the user's 'VCORE' relabel and the displayed magnitude (~1.2-1.5V range implied by the hand-edited warn thresholds 1.1/1.3/1.4/1.5). SensorId 0xf7006687 is the same physical Super-I/O/EC chip used elsewhere in HWiNFO.inc for 'CPU Fan' and chassis fans (entry ids 0x3000000-0x3000003); entry 0x2000012 is otherwise undocumented in this HWiNFO.inc, consistent with it being a repurposed/added voltage entry not present in the original fan/temp mappings.",
+      "confidence": "inferred, not independently verified against a live HWiNFO shared-memory dump"
+    },
+    "TGPU1_GPUVOLT": {
+      "rainmeterVarPrefix": "HWiNFO-TEMPS-GPU1",
+      "HWiNFOSensorId": "0xe0002000",
+      "HWiNFOSensorInstance": "0x14",
+      "HWiNFOEntryId": "0x2000000",
+      "HWiNFOType": "CurrentValue",
+      "inferredMeaning": "GPU core voltage (Volts) -- same physical GPU sensor/instance (0xe0002000 / 0x14) as all other GPU1-* entries in HWiNFO.inc (Usage=0x7000000, original Temp=0x1000000, Fan%=0x8000000, FanRPM=0x3000000, MemAlloc=0x80000fc, MemUsg=0x7000008, Clock=0x6000000, MemClock=0x6000004); entry 0x2000000 does not collide with any of those, consistent with HWiNFO's typical GPU sensor ordering where a voltage entry follows the temperature entry. Warn thresholds hand-edited to 0.85/0.95/1.0/1.05 support a GPU-core-voltage magnitude.",
+      "confidence": "inferred, not independently verified"
+    },
+    "TGPU2_CPUPOWER": {
+      "rainmeterVarPrefix": "HWiNFO-TEMPS-GPU2",
+      "HWiNFOSensorId": "0xf0002a00",
+      "HWiNFOSensorInstance": "0x0",
+      "HWiNFOEntryId": "0x5000000",
+      "HWiNFOType": "CurrentValue",
+      "inferredMeaning": "CPU package power (Watts) -- SensorId 0xf0002a00 appears nowhere else in HWiNFO.inc (the original GPU2 channel used 0xf0000ff0); the 0xf000xxxx range is used elsewhere in this file for CPU/system-class sensors (CPU temp 0xf0000400, CPU clock 0xf0000300, drive temps 0xf0000100), so 0xf0002a00 is plausibly a distinct 'CPU power/enhanced sensor' group added by the user, with entry 0x5000000 as its package/total power reading. Warn thresholds hand-edited to 50/100/150/200W support a CPU-power magnitude (screenshot shows ~62W current / 125W max).",
+      "confidence": "inferred, not independently verified"
+    },
+    "TMOBO_GPUPOWER": {
+      "rainmeterVarPrefix": "HWiNFO-TEMPS-MoBo",
+      "HWiNFOSensorId": "0xe0002000",
+      "HWiNFOSensorInstance": "0x14",
+      "HWiNFOEntryId": "0x5000000",
+      "HWiNFOType": "CurrentValue",
+      "inferredMeaning": "GPU board/total power draw (Watts) -- same physical GPU sensor/instance as TGPU1 (0xe0002000 / 0x14); entry 0x5000000 does not collide with any other documented GPU1 entry in this file, consistent with being the GPU's 'Power' reading. Warn thresholds hand-edited to 50/150/200/250W support a GPU-power magnitude (screenshot shows ~47W current / 80W max).",
+      "confidence": "inferred, not independently verified"
+    },
+    "disabledChannelsSensorIds_forReference": {
+      "TCHIPSET": "SensorId/SensorInstance/EntryId all empty in HWiNFO.inc -- never configured, channel disabled (TCHIPSET=0)",
+      "TRAM": "SensorId/SensorInstance/EntryId all empty -- never configured, disabled (TRAM=0)",
+      "TAIR": "SensorId/SensorInstance/EntryId all empty -- never configured, disabled (TAIR=0)",
+      "TPSU": "0xf5000650 / 0x0 / 0x1000000 -- configured but channel disabled (TPSU=0)",
+      "TDRIVE1": "0xf0000100 / 0x0 / 0x1000001 -- configured but channel disabled (TDRIVE1=0)",
+      "TDRIVE2": "0xf0000100 / 0x0 / 0x1000001 -- configured but channel disabled (TDRIVE2=0)"
+    }
+  },
+  "background": "standard",
+  "backgroundGeometry": {
+    "meter": "MeterBackground",
+    "type": "Shape",
+    "meterStyle": "StyleBackground",
+    "coordinateSpace": "All numbers below are UNSCALED design-space units. Every meter in the skin (including this one) carries TransformationMatrix = Scale;0;0;Scale;Scale;Scale = 1.7;0;0;1.7;1.7;1.7, i.e. the whole design is uniformly scaled 1.7x AND then translated +1.7,+1.7 device px. Apply that matrix once to every unscaled coordinate given anywhere in this document to get final device pixels.",
+    "X": 0,
+    "Y": 0,
+    "W": "((BgShapeW + 0.06) + BgOffset*2) * Scale = ((196+0.06)+10)*1.7 = 350.302",
+    "H": "[MeterBackgroundHeight:Y] * Scale  (dynamic -- see MeterBackgroundHeight meter; equals total unscaled content height * 1.7)",
+    "shapes": [
+      {
+        "id": "Shape (top, rounded)",
+        "geometry": "Rectangle(BgShapeX*Scale, BgShapeY*Scale, BgShapeW*Scale, 21*Scale, CornerRadius*Scale) = Rectangle(8.5, 8.5, 333.2, 35.7, 6.8)",
+        "style": "StrokeWidth 0 | Fill Color BgTopColor(163,178,230), opacity 180",
+        "purpose": "rounded-corner header/title band background"
+      },
+      {
+        "id": "Shape2 (top, square, unioned)",
+        "geometry": "Rectangle(BgShapeX*Scale, (BgShapeY+8)*Scale, BgShapeW*Scale, 14*Scale) = Rectangle(8.5, 22.1, 333.2, 23.8)",
+        "purpose": "squares off the bottom of the header band (Shape3 = Combine Shape | Union Shape2) so only the TOP corners of the header stay rounded"
+      },
+      {
+        "id": "Shape4 (bottom, rounded)",
+        "geometry": "Rectangle(BgShapeX*Scale, (BgShapeY+24.5)*Scale, BgShapeW*Scale, ([CURRENTSECTION:H] - ((BgShapeX+12.3)*2)*Scale), CornerRadius*Scale) = Rectangle(8.5, 50.15, 333.2, TotalH-58.82, 6.8)",
+        "style": "StrokeWidth 0 | Fill Color BgBodyColor(230,230,230), opacity 180",
+        "purpose": "rounded-corner body/content panel background"
+      },
+      {
+        "id": "Shape5 (bottom, square, unioned)",
+        "geometry": "Rectangle(BgShapeX*Scale, (BgShapeY+24)*Scale, BgShapeW*Scale, 15*Scale) = Rectangle(8.5, 49.3, 333.2, 25.5)",
+        "purpose": "squares off the top of the body panel (Shape6 = Combine Shape4 | Union Shape5) so header and body meet with no visible seam/gap, only BOTTOM corners of body stay rounded"
+      },
+      {
+        "id": "Shape7 (outer frame)",
+        "geometry": "Rectangle((BgShapeX-0.5)*Scale, (BgShapeY-0.5)*Scale, (BgShapeW+1)*Scale, (([CURRENTSECTION:H]+Scale) - (BgShapeX*2)*Scale), (CornerRadius+0.5)*Scale)",
+        "style": "StrokeWidth = Stroke_Width*Scale = 0*1.7 = 0  |  Stroke Color StrokeColor(96,138,203) alpha 100  |  Fill Color 0,0,0,0 (transparent)",
+        "purpose": "outer border outline -- CURRENTLY INVISIBLE because Stroke_Width variable resolves to 0. Present in the style definition but has zero visual effect in this skin's current configuration."
+      }
+    ],
+    "note": "Two-zone look: a slightly blue-tinted header strip (top ~22 unscaled px, holding the 'POWER' title) sitting atop a light-gray rounded body panel (holding the 4 data rows), both drawn with StrokeWidth 0 (no outline on the fill shapes themselves), plus a would-be outer frame stroke that is disabled (width 0) in this instance."
+  },
+  "measures": [
+    {
+      "name": "measureTempCpu",
+      "type": "Plugin",
+      "plugin": "HWiNFO.dll",
+      "params": { "HWiNFOSensorId": "0xf7006687", "HWiNFOSensorInstance": "0x0", "HWiNFOEntryId": "0x2000012", "HWiNFOType": "CurrentValue" },
+      "onChangeAction": "[!UpdateMeasureGroup \"TempCpu\"][!UpdateMeter \"meterTempCpuValue\"]",
+      "disabled": "(#TCPU#=0) => false, channel enabled",
+      "channel": "VCORE",
+      "updateDivider": "default (1) -> updates every Update=1000ms tick"
+    },
+    {
+      "name": "measureTempCpuMax",
+      "type": "Calc",
+      "formula": "Max(measureTempCpu, measureTempCpuMax)",
+      "purpose": "session running-maximum, self-referential recurrence (own previous value fed back in) -- this is how MaxTemp tracking works; NOT sourced from any HWiNFO 'max' entry id",
+      "onChangeAction": "[!UpdateMeter \"meterTempCpuMax\"]",
+      "updateDivider": -1,
+      "disabled": "(#TCPU#=0)||(#MaxTemp#=0) => false",
+      "group": "TempCpu"
+    },
+    {
+      "name": "measureTempCpuPerc",
+      "type": "Calc",
+      "formula": "measureTempCpu * 100 / (#TCPUMax# + 0.000001) = value*100/70.000001",
+      "minValue": 0, "maxValue": 100,
+      "ifCondition": "(#CURRENTSECTION# < 75)",
+      "ifTrueAction": "[!SetOption meterTempCpuBar BarColor \"colorBar,colorBarAlpha\"] (93,141,172,255)",
+      "ifFalseAction": "[!SetOption meterTempCpuBar BarColor \"ColorBarWarn,colorBarAlpha\"] (220,20,60,255)",
+      "onChangeAction": "[!UpdateMeter \"meterTempCpuBar\"]",
+      "updateDivider": -1,
+      "disabled": "(#TCPU#=0) => false (measure DOES run)",
+      "group": "TempCpu",
+      "DEAD_CODE_WARNING": "meterTempCpuBar has NO corresponding [meterTempCpuBar] meter section anywhere in Temps.ini. This measure computes a value and issues SetOption/UpdateMeter calls against a non-existent meter every tick -- it is pure dead code with zero visual effect. No progress bar is rendered under the VCORE row."
+    },
+    {
+      "name": "measureTempCpuValueWarn",
+      "type": "Calc",
+      "formula": "measureTempCpu < 1.1 ? -1 : (measureTempCpu < 1.3 ? -2 : (measureTempCpu < 1.4 ? -3 : (measureTempCpu < 1.5 ? -4 : -5)))",
+      "formulaNote": "Thresholds 1.1 / 1.3 / 1.4 / 1.5 are LITERAL numbers hand-edited into the formula (Volts) -- they do NOT reference #TCPUWarnTh1..4# (which remain at their stale original temperature values 25/45/60/70 and are unused here).",
+      "substitute": { "-1": "DevTempWarnColorTh1 (47,186,255)", "-2": "DevTempWarnColorTh2 (255,255,36)", "-3": "DevTempWarnColorTh3 (255,143,30)", "-4": "DevTempWarnColorTh4 (255,0,0)", "-5": "DevTempWarnColorTh5 (204,0,0)" },
+      "colorThresholdTable_VCORE_Volts": [
+        { "range": "< 1.1 V", "color": "47,186,255 (light blue)" },
+        { "range": "1.1 – < 1.3 V", "color": "255,255,36 (yellow)" },
+        { "range": "1.3 – < 1.4 V", "color": "255,143,30 (orange)" },
+        { "range": "1.4 – < 1.5 V", "color": "255,0,0 (red)" },
+        { "range": ">= 1.5 V", "color": "204,0,0 (dark red)" }
+      ],
+      "updateDivider": -1,
+      "dynamicVariables": 1,
+      "disabled": "(#TCPU#=0) => false",
+      "group": "TempCpu",
+      "consumedBy": "meterTempCpuValue FontColor=[measureTempCpuValueWarn] -- drives the CURRENT-VALUE text color only; label and max text colors are unaffected"
+    },
+
+    {
+      "name": "measureTempGpu1",
+      "type": "Plugin",
+      "plugin": "HWiNFO.dll",
+      "params": { "HWiNFOSensorId": "0xe0002000", "HWiNFOSensorInstance": "0x14", "HWiNFOEntryId": "0x2000000", "HWiNFOType": "CurrentValue" },
+      "onChangeAction": "[!UpdateMeasureGroup \"TempGpu1\"][!UpdateMeter \"meterTempGpu1Value\"]",
+      "disabled": "(#TGPU1#=0) => false",
+      "channel": "GPU VOLT",
+      "updateDivider": "default (1)"
+    },
+    {
+      "name": "measureTempGpu1Max",
+      "type": "Calc",
+      "formula": "Max(measureTempGpu1, measureTempGpu1Max)",
+      "onChangeAction": "[!UpdateMeter \"meterTempGpu1Max\"]",
+      "updateDivider": -1,
+      "disabled": "(#TGPU1#=0)||(#MaxTemp#=0) => false",
+      "group": "TempGpu1"
+    },
+    {
+      "name": "measureTempGpu1Perc",
+      "type": "Calc",
+      "formula": "measureTempGpu1 * 100 / (#TGPU1Max# + 0.000001) = value*100/95.000001",
+      "minValue": 0, "maxValue": 100,
+      "ifCondition": "(#CURRENTSECTION# < 75)",
+      "ifTrueAction": "[!SetOption meterTempGpu1Bar BarColor \"colorBar,colorBarAlpha\"]",
+      "ifFalseAction": "[!SetOption meterTempGpu1Bar BarColor \"ColorBarWarn,colorBarAlpha\"]",
+      "onChangeAction": "[!UpdateMeter \"meterTempGpu1Bar\"]",
+      "updateDivider": -1,
+      "disabled": "(#TGPU1#=0) => false",
+      "group": "TempGpu1",
+      "DEAD_CODE_WARNING": "No [meterTempGpu1Bar] meter section exists. Dead code, no bar rendered under GPU VOLT row."
+    },
+    {
+      "name": "measureTempGpu1ValueWarn",
+      "type": "Calc",
+      "formula": "measureTempGpu1 < 0.85 ? -1 : (measureTempGpu1 < 0.95 ? -2 : (measureTempGpu1 < 1.0 ? -3 : (measureTempGpu1 < 1.05 ? -4 : -5)))",
+      "formulaNote": "Thresholds 0.85 / 0.95 / 1.0 / 1.05 are LITERAL hand-edited numbers (Volts), not #TGPU1WarnTh1..4# (stale at 25/45/60/70, unused).",
+      "substitute": { "-1": "DevTempWarnColorTh1 (47,186,255)", "-2": "DevTempWarnColorTh2 (255,255,36)", "-3": "DevTempWarnColorTh3 (255,143,30)", "-4": "DevTempWarnColorTh4 (255,0,0)", "-5": "DevTempWarnColorTh5 (204,0,0)" },
+      "colorThresholdTable_GPUVOLT_Volts": [
+        { "range": "< 0.85 V", "color": "47,186,255 (light blue)" },
+        { "range": "0.85 – < 0.95 V", "color": "255,255,36 (yellow)" },
+        { "range": "0.95 – < 1.00 V", "color": "255,143,30 (orange)" },
+        { "range": "1.00 – < 1.05 V", "color": "255,0,0 (red)" },
+        { "range": ">= 1.05 V", "color": "204,0,0 (dark red)" }
+      ],
+      "updateDivider": -1,
+      "dynamicVariables": 1,
+      "disabled": "(#TGPU1#=0) => false",
+      "group": "TempGpu1"
+    },
+
+    {
+      "name": "measureTempGpu2",
+      "type": "Plugin",
+      "plugin": "HWiNFO.dll",
+      "params": { "HWiNFOSensorId": "0xf0002a00", "HWiNFOSensorInstance": "0x0", "HWiNFOEntryId": "0x5000000", "HWiNFOType": "CurrentValue" },
+      "onChangeAction": "[!UpdateMeasureGroup \"TempGpu2\"][!UpdateMeter \"meterTempGpu2Value\"]",
+      "disabled": "(#TGPU2#=0) => false",
+      "channel": "CPU POWER",
+      "updateDivider": "default (1)"
+    },
+    {
+      "name": "measureTempGpu2Max",
+      "type": "Calc",
+      "formula": "Max(measureTempGpu2, measureTempGpu2Max)",
+      "onChangeAction": "[!UpdateMeter \"meterTempGpu2Max\"]",
+      "updateDivider": -1,
+      "disabled": "(#TGPU2#=0)||(#MaxTemp#=0) => false",
+      "group": "TempGpu2"
+    },
+    {
+      "name": "measureTempGpu2Perc",
+      "type": "Calc",
+      "formula": "measureTempGpu2 * 100 / (#TGPU2Max# + 0.000001) = value*100/95.000001",
+      "minValue": 0, "maxValue": 100,
+      "ifCondition": "(#CURRENTSECTION# < 75)",
+      "ifTrueAction": "[!SetOption meterTempGpu2Bar BarColor \"colorBar,colorBarAlpha\"]",
+      "ifFalseAction": "[!SetOption meterTempGpu2Bar BarColor \"ColorBarWarn,colorBarAlpha\"]",
+      "onChangeAction": "[!UpdateMeter \"meterTempGpu2Bar\"]",
+      "updateDivider": -1,
+      "disabled": "(#TGPU2#=0) => false",
+      "group": "TempGpu2",
+      "DEAD_CODE_WARNING": "No [meterTempGpu2Bar] meter section exists. Dead code, no bar rendered under CPU POWER row."
+    },
+    {
+      "name": "measureTempGpu2ValueWarn",
+      "type": "Calc",
+      "formula": "measureTempGpu2 < 50 ? -1 : (measureTempGpu2 < 100 ? -2 : (measureTempGpu2 < 150 ? -3 : (measureTempGpu2 < 200 ? -4 : -5)))",
+      "formulaNote": "Thresholds 50 / 100 / 150 / 200 are LITERAL hand-edited numbers (Watts), not #TGPU2WarnTh1..4# (stale at 25/45/60/70, unused).",
+      "substitute": { "-1": "DevTempWarnColorTh1 (47,186,255)", "-2": "DevTempWarnColorTh2 (255,255,36)", "-3": "DevTempWarnColorTh3 (255,143,30)", "-4": "DevTempWarnColorTh4 (255,0,0)", "-5": "DevTempWarnColorTh5 (204,0,0)" },
+      "colorThresholdTable_CPUPOWER_Watts": [
+        { "range": "< 50 W", "color": "47,186,255 (light blue)" },
+        { "range": "50 – < 100 W", "color": "255,255,36 (yellow)" },
+        { "range": "100 – < 150 W", "color": "255,143,30 (orange)" },
+        { "range": "150 – < 200 W", "color": "255,0,0 (red)" },
+        { "range": ">= 200 W", "color": "204,0,0 (dark red)" }
+      ],
+      "updateDivider": -1,
+      "dynamicVariables": 1,
+      "disabled": "(#TGPU2#=0) => false",
+      "group": "TempGpu2"
+    },
+
+    {
+      "name": "measureTempMoBo",
+      "type": "Plugin",
+      "plugin": "HWiNFO.dll",
+      "params": { "HWiNFOSensorId": "0xe0002000", "HWiNFOSensorInstance": "0x14", "HWiNFOEntryId": "0x5000000", "HWiNFOType": "CurrentValue" },
+      "onChangeAction": "[!UpdateMeasureGroup \"TempMoBo\"][!UpdateMeter \"meterTempMoBoValue\"]",
+      "disabled": "(#TMOBO#=0) => false",
+      "channel": "GPU POWER",
+      "updateDivider": "default (1)"
+    },
+    {
+      "name": "measureTempMoBoMax",
+      "type": "Calc",
+      "formula": "Max(measureTempMoBo, measureTempMoBoMax)",
+      "onChangeAction": "[!UpdateMeter \"meterTempMoBoMax\"]",
+      "updateDivider": -1,
+      "disabled": "(#TMOBO#=0)||(#MaxTemp#=0) => false",
+      "group": "TempMoBo"
+    },
+    {
+      "name": "measureTempMoBoPerc",
+      "type": "Calc",
+      "formula": "measureTempMoBo * 100 / (#TMOBOMax# + 0.000001) = value*100/95.000001",
+      "minValue": 0, "maxValue": 100,
+      "ifCondition": "(#CURRENTSECTION# < 75)",
+      "ifTrueAction": "[!SetOption meterTempMoBoBar BarColor \"colorBar,colorBarAlpha\"]",
+      "ifFalseAction": "[!SetOption meterTempMoBoBar BarColor \"ColorBarWarn,colorBarAlpha\"]",
+      "onChangeAction": "[!UpdateMeter \"meterTempMoBoBar\"]",
+      "updateDivider": -1,
+      "disabled": "(#TMOBO#=0) => false",
+      "group": "TempMoBo",
+      "DEAD_CODE_WARNING": "No [meterTempMoBoBar] meter section exists. Dead code, no bar rendered under GPU POWER row."
+    },
+    {
+      "name": "measureTempMoBoValueWarn",
+      "type": "Calc",
+      "formula": "measureTempMoBo < 50 ? -1 : (measureTempMoBo < 150 ? -2 : (measureTempMoBo < 200 ? -3 : (measureTempMoBo < 250 ? -4 : -5)))",
+      "formulaNote": "Thresholds 50 / 150 / 200 / 250 are LITERAL hand-edited numbers (Watts), not #TMOBOWarnTh1..4# (stale at 25/30/40/50, unused).",
+      "substitute": { "-1": "DevTempWarnColorTh1 (47,186,255)", "-2": "DevTempWarnColorTh2 (255,255,36)", "-3": "DevTempWarnColorTh3 (255,143,30)", "-4": "DevTempWarnColorTh4 (255,0,0)", "-5": "DevTempWarnColorTh5 (204,0,0)" },
+      "colorThresholdTable_GPUPOWER_Watts": [
+        { "range": "< 50 W", "color": "47,186,255 (light blue)" },
+        { "range": "50 – < 150 W", "color": "255,255,36 (yellow)" },
+        { "range": "150 – < 200 W", "color": "255,143,30 (orange)" },
+        { "range": "200 – < 250 W", "color": "255,0,0 (red)" },
+        { "range": ">= 250 W", "color": "204,0,0 (dark red)" }
+      ],
+      "updateDivider": -1,
+      "dynamicVariables": 1,
+      "disabled": "(#TMOBO#=0) => false",
+      "group": "TempMoBo"
+    },
+
+    {
+      "name": "measureTempChipset / measureTempChipsetMax / measureTempChipsetPerc / measureTempChipsetValueWarn",
+      "type": "Plugin+Calc group (structurally identical pattern to the four active channels above)",
+      "disabled": true,
+      "reason": "TCHIPSET=0. HWiNFOSensorId/SensorInstance/EntryId are all EMPTY strings in HWiNFO.inc (never configured -- HWiNFO-TEMPS-CHIPSET-SensorId=, -SensorInstance=, -EntryId= are blank).",
+      "warnFormula": "measureTempChipset < #TCHIPSETWarnTh1..4# (25/35/50/65, degrees C) -- variable-driven, unlike the 4 active rows",
+      "hasBarMeter": true
+    },
+    {
+      "name": "measureTempRam / *Max / *Perc / *ValueWarn",
+      "type": "Plugin+Calc group",
+      "disabled": true,
+      "reason": "TRAM=0. HWiNFO-TEMPS-RAM-SensorId/SensorInstance/EntryId all empty (never configured).",
+      "warnFormula": "measureTempRam < #TRAMWarnTh1..4# (25/35/45/55, degrees C) -- variable-driven",
+      "hasBarMeter": true
+    },
+    {
+      "name": "measureTempAir / *Max / *Perc / *ValueWarn",
+      "type": "Plugin+Calc group",
+      "disabled": true,
+      "reason": "TAIR=0. HWiNFO-TEMPS-AIR-SensorId/SensorInstance/EntryId all empty (never configured).",
+      "warnFormula": "measureTempAir < #TAIRWarnTh1..4# (15/25/30/35, degrees C) -- variable-driven",
+      "hasBarMeter": true
+    },
+    {
+      "name": "measureTempPsu / *Max / *Perc / *ValueWarn",
+      "type": "Plugin+Calc group",
+      "disabled": true,
+      "reason": "TPSU=0. HWiNFOSensorId=0xf5000650, SensorInstance=0x0, EntryId=0x1000000 (configured, but channel switched off).",
+      "warnFormula": "measureTempPsu < #TPSUWarnTh1..4# (25/40/50/60, degrees C) -- variable-driven",
+      "hasBarMeter": true
+    },
+    {
+      "name": "measureTempDrive1 / *Max / *Perc / *ValueWarn",
+      "type": "Plugin+Calc group",
+      "disabled": true,
+      "reason": "TDRIVE1=0. HWiNFOSensorId=0xf0000100, SensorInstance=0x0, EntryId=0x1000001 (configured, but channel switched off).",
+      "warnFormula": "measureTempDrive1 < #TDRIVE1WarnTh1..4# (25/35/45/55, degrees C) -- variable-driven",
+      "hasBarMeter": true
+    },
+    {
+      "name": "measureTempDrive2 / *Max / *Perc / *ValueWarn",
+      "type": "Plugin+Calc group",
+      "disabled": true,
+      "reason": "TDRIVE2=0. HWiNFOSensorId=0xf0000100, SensorInstance=0x0, EntryId=0x1000001 (configured, but channel switched off).",
+      "warnFormula": "measureTempDrive2 < #TDRIVE2WarnTh1..4# (25/35/45/55, degrees C) -- variable-driven",
+      "hasBarMeter": true
+    },
+    {
+      "name": "MeasureSettingsScript",
+      "type": "Script",
+      "scriptFile": "#scriptPath#Settings.lua",
+      "updateDivider": -1,
+      "purpose": "Skin-settings/context-menu Lua script bookkeeping (referenced by StyleStringButtonHover mouse-action strings elsewhere). Not sensor data; irrelevant to visual rendering of temps/power values."
+    }
+  ],
+  "meters": [
+    {
+      "name": "MeterBackground",
+      "type": "Shape",
+      "styles": ["StyleBackground"],
+      "notes": "See backgroundGeometry above for fully expanded shape math."
+    },
+    {
+      "name": "meterTitle",
+      "type": "STRING",
+      "styles": ["styleTitle"],
+      "text": "POWER",
+      "textIsLiteral": true,
+      "measureNames": [],
+      "x": { "expr": "#CenterAlign#", "value": 103, "mode": "absolute" },
+      "y": { "expr": "(4 + #BgOffset#)", "value": 9, "mode": "absolute" },
+      "w": 190,
+      "h": 20,
+      "align": "Center",
+      "case": "UPPER",
+      "bold": true,
+      "fontFace": "Trebuchet MS",
+      "fontSize": 9,
+      "fontColor": "0,0,0,255",
+      "updateDivider": -1
+    },
+    { "name": "ControlSettings_", "SKIPPED": true, "reason": "Group=Controls" },
+
+    {
+      "name": "meterTempCpuLabel",
+      "row": "VCORE (row 1)",
+      "type": "STRING",
+      "styles": ["styleFirstLineText", "StyleLeftAlign"],
+      "text": "#TCPULabel# = \"VCORE\"",
+      "x": { "expr": "#ContentMarginFormula#", "value": 7, "mode": "absolute" },
+      "y": { "expr": "((#TCPU#=1) ? #TopMarginFormula# : #TopMarginFormula#-2)", "value": 32, "mode": "absolute", "note": "resolves to 32 since TCPU=1" },
+      "align": "Left",
+      "case": "NONE",
+      "bold": true,
+      "fontFace": "Trebuchet MS",
+      "fontSize": 8,
+      "fontColor": "0,0,0,205",
+      "hidden": "(#TCPU#=0) => false, visible",
+      "updateDivider": -1
+    },
+    {
+      "name": "meterTempCpuMax",
+      "row": "VCORE (row 1)",
+      "type": "STRING",
+      "styles": ["styleSecondaryText", "StyleCenterAlign_r"],
+      "measureNames": ["measureTempCpuMax"],
+      "text": "\"Max: %1 V\"",
+      "numOfDecimals": 3,
+      "x": { "expr": "#CenterAlign#", "value": 103, "mode": "absolute" },
+      "y": { "expr": "r", "value": 32, "mode": "sameAsPrevMeter", "note": "copies meterTempCpuLabel's Y (same row)" },
+      "align": "Center",
+      "bold": false,
+      "fontColor": "120,120,120,255",
+      "fontColorNote": "hardcoded override, NOT #MaxTempColor# (178,190,181,205) which the disabled Chipset/RAM/Air/PSU/Drive rows use",
+      "hidden": "(#TCPU#=0) || (#MaxTemp#=0) => false, visible (MaxTemp=1)",
+      "updateDivider": -1
+    },
+    {
+      "name": "meterTempCpuValue",
+      "row": "VCORE (row 1)",
+      "type": "STRING",
+      "styles": ["stylePrimaryText", "StyleRightAlign_r"],
+      "measureNames": ["measureTempCpu"],
+      "text": "\"%1 V\"",
+      "numOfDecimals": 3,
+      "x": { "expr": "#RightAlign#", "value": 197, "mode": "absolute" },
+      "y": { "expr": "r", "value": 32, "mode": "sameAsPrevMeter", "note": "copies meterTempCpuMax's Y (same row)" },
+      "align": "Right",
+      "bold": true,
+      "fontColor": "[measureTempCpuValueWarn]",
+      "fontColorNote": "dynamic -- resolves at runtime to one of the 5 warn colors per colorThresholdTable_VCORE_Volts",
+      "dynamicVariables": true,
+      "hidden": "(#TCPU#=0) => false, visible",
+      "updateDivider": -1
+    },
+
+    {
+      "name": "meterTempGpu1Label",
+      "row": "GPU VOLT (row 2)",
+      "type": "STRING",
+      "styles": ["stylePrimaryText", "StyleLeftAlign"],
+      "text": "#TGPU1Label# = \"GPU VOLT\"",
+      "x": { "expr": "#ContentMarginFormula#", "value": 7, "mode": "absolute" },
+      "y": { "expr": "((#TGPU1#=1) ? #RowSpacing# : 0)R", "value": null, "mode": "prevBottomPlusN", "n": 1, "note": "prevBottom (of meterTempCpuValue, i.e. end of row 1's text) + 1 unscaled px; exact absolute pixel depends on rendered text-line height of the 8pt bold Trebuchet MS row text, must be measured the same way Rainmeter measures it (DirectWrite/GDI+ text metrics) for pixel-perfect stacking" },
+      "align": "Left",
+      "bold": true,
+      "fontColor": "0,0,0,205",
+      "hidden": "(#TGPU1#=0) => false, visible",
+      "updateDivider": -1
+    },
+    {
+      "name": "meterTempGpu1Max",
+      "row": "GPU VOLT (row 2)",
+      "type": "STRING",
+      "styles": ["styleSecondaryText", "StyleCenterAlign_r"],
+      "measureNames": ["measureTempGpu1Max"],
+      "text": "\"Max: %1 V\"",
+      "numOfDecimals": 3,
+      "x": { "expr": "#CenterAlign#", "value": 103, "mode": "absolute" },
+      "y": { "expr": "r", "mode": "sameAsPrevMeter", "note": "= meterTempGpu1Label's Y" },
+      "align": "Center",
+      "bold": false,
+      "fontColor": "120,120,120,255",
+      "hidden": "(#TGPU1#=0) || (#MaxTemp#=0) => false, visible",
+      "updateDivider": -1
+    },
+    {
+      "name": "meterTempGpu1Value",
+      "row": "GPU VOLT (row 2)",
+      "type": "STRING",
+      "styles": ["stylePrimaryText", "StyleRightAlign_r"],
+      "measureNames": ["measureTempGpu1"],
+      "text": "\"%1 V\"",
+      "numOfDecimals": 3,
+      "x": { "expr": "#RightAlign#", "value": 197, "mode": "absolute" },
+      "y": { "expr": "r", "mode": "sameAsPrevMeter", "note": "= meterTempGpu1Max's Y" },
+      "align": "Right",
+      "bold": true,
+      "fontColor": "[measureTempGpu1ValueWarn]",
+      "fontColorNote": "dynamic -- resolves per colorThresholdTable_GPUVOLT_Volts",
+      "dynamicVariables": true,
+      "hidden": "(#TGPU1#=0) => false, visible",
+      "updateDivider": -1
+    },
+
+    {
+      "name": "meterTempGpu2Label",
+      "row": "CPU POWER (row 3)",
+      "type": "STRING",
+      "styles": ["stylePrimaryText", "StyleLeftAlign"],
+      "text": "#TGPU2Label# = \"CPU POWER\"",
+      "x": { "expr": "#ContentMarginFormula#", "value": 7, "mode": "absolute" },
+      "y": { "expr": "((#TGPU2#=1) ? #RowSpacing# : 0)R", "value": null, "mode": "prevBottomPlusN", "n": 1, "note": "prevBottom of row 2 + 1 unscaled px" },
+      "align": "Left",
+      "bold": true,
+      "fontColor": "0,0,0,205",
+      "hidden": "(#TGPU2#=0) => false, visible",
+      "updateDivider": -1
+    },
+    {
+      "name": "meterTempGpu2Max",
+      "row": "CPU POWER (row 3)",
+      "type": "STRING",
+      "styles": ["styleSecondaryText", "StyleCenterAlign_r"],
+      "measureNames": ["measureTempGpu2Max"],
+      "text": "\"Max: %1W\"",
+      "numOfDecimals": 0,
+      "textFormatNote": "NO SPACE between number and 'W' in the ini literal (differs from the space shown in the reference screenshot description 'Max: 125 W' -- see caveats)",
+      "x": { "expr": "#CenterAlign#", "value": 103, "mode": "absolute" },
+      "y": { "expr": "r", "mode": "sameAsPrevMeter" },
+      "align": "Center",
+      "bold": false,
+      "fontColor": "120,120,120,255",
+      "hidden": "(#TGPU2#=0) || (#MaxTemp#=0) => false, visible",
+      "updateDivider": -1
+    },
+    {
+      "name": "meterTempGpu2Value",
+      "row": "CPU POWER (row 3)",
+      "type": "STRING",
+      "styles": ["stylePrimaryText", "StyleRightAlign_r"],
+      "measureNames": ["measureTempGpu2"],
+      "text": "\"%1W\"",
+      "numOfDecimals": "not set -> Rainmeter default 0",
+      "textFormatNote": "NO SPACE before 'W' in the ini literal (differs from screenshot description '62 W')",
+      "x": { "expr": "#RightAlign#", "value": 197, "mode": "absolute" },
+      "y": { "expr": "r", "mode": "sameAsPrevMeter" },
+      "align": "Right",
+      "bold": true,
+      "fontColor": "[measureTempGpu2ValueWarn]",
+      "fontColorNote": "dynamic -- resolves per colorThresholdTable_CPUPOWER_Watts",
+      "dynamicVariables": true,
+      "hidden": "(#TGPU2#=0) => false, visible",
+      "updateDivider": -1
+    },
+
+    {
+      "name": "meterTempMoBoLabel",
+      "row": "GPU POWER (row 4)",
+      "type": "STRING",
+      "styles": ["stylePrimaryText", "StyleLeftAlign"],
+      "text": "#TMOBOLabel# = \"GPU POWER\"",
+      "x": { "expr": "#ContentMarginFormula#", "value": 7, "mode": "absolute" },
+      "y": { "expr": "((#TMOBO#=1) ? #RowSpacing# : 0)R", "value": null, "mode": "prevBottomPlusN", "n": 1, "note": "prevBottom of row 3 + 1 unscaled px" },
+      "align": "Left",
+      "bold": true,
+      "fontColor": "0,0,0,205",
+      "hidden": "(#TMOBO#=0) => false, visible",
+      "updateDivider": -1
+    },
+    {
+      "name": "meterTempMoBoMax",
+      "row": "GPU POWER (row 4)",
+      "type": "STRING",
+      "styles": ["styleSecondaryText", "StyleCenterAlign_r"],
+      "measureNames": ["measureTempMoBoMax"],
+      "text": "\"Max: %1W\"",
+      "numOfDecimals": 0,
+      "x": { "expr": "#CenterAlign#", "value": 103, "mode": "absolute" },
+      "y": { "expr": "r", "mode": "sameAsPrevMeter" },
+      "align": "Center",
+      "bold": false,
+      "fontColor": "120,120,120,255",
+      "hidden": "(#TMOBO#=0) || (#MaxTemp#=0) => false, visible",
+      "updateDivider": -1
+    },
+    {
+      "name": "meterTempMoBoValue",
+      "row": "GPU POWER (row 4)",
+      "type": "STRING",
+      "styles": ["stylePrimaryText", "StyleRightAlign_r"],
+      "measureNames": ["measureTempMoBo"],
+      "text": "\"%1W\"",
+      "numOfDecimals": "not set -> default 0",
+      "x": { "expr": "#RightAlign#", "value": 197, "mode": "absolute" },
+      "y": { "expr": "r", "mode": "sameAsPrevMeter" },
+      "align": "Right",
+      "bold": true,
+      "fontColor": "[measureTempMoBoValueWarn]",
+      "fontColorNote": "dynamic -- resolves per colorThresholdTable_GPUPOWER_Watts",
+      "dynamicVariables": true,
+      "hidden": "(#TMOBO#=0) => false, visible",
+      "updateDivider": -1
+    },
+
+    {
+      "name": "meterTempChipsetLabel, meterTempChipsetMax, meterTempChipsetValue, meterTempChipsetBar",
+      "row": "CHIP (row 5, hidden)",
+      "hidden": true,
+      "reason": "TCHIPSET=0",
+      "structureNote": "Same 3-meter row pattern as above PLUS a 4th meter, meterTempChipsetBar (Meter=BAR, MeterStyle=StyleBar, MeasureName=measureTempChipsetPerc), positioned Y=((#TCHIPSET#=1)?(#RowSpacing#-1):0)R directly under the row text. This Bar meter genuinely exists for this row (unlike CPU/GPU1/GPU2/MoBo) but is moot since the whole row is hidden.",
+      "maxFontColor": "#MaxTempColor#,#MaxTempColorAlpha# = 178,190,181,205 (uses the variable, unlike the 4 active rows' hardcoded 120,120,120,255)",
+      "valueText": "\"%1#deg##TempUnitLetter#\" = e.g. \"45°C\""
+    },
+    {
+      "name": "meterTempRamLabel, meterTempRamMax, meterTempRamValue, meterTempRamBar",
+      "row": "RAM (row 6, hidden)",
+      "hidden": true,
+      "reason": "TRAM=0",
+      "structureNote": "identical pattern to Chipset row"
+    },
+    {
+      "name": "meterTempAirLabel, meterTempAirMax, meterTempAirValue, meterTempAirBar",
+      "row": "AIR (row 7, hidden)",
+      "hidden": true,
+      "reason": "TAIR=0",
+      "structureNote": "identical pattern to Chipset row"
+    },
+    {
+      "name": "meterTempPsuLabel, meterTempPsuMax, meterTempPsuValue, meterTempPsuBar",
+      "row": "PSU (row 8, hidden)",
+      "hidden": true,
+      "reason": "TPSU=0",
+      "structureNote": "identical pattern to Chipset row"
+    },
+    {
+      "name": "meterTempDrive1Label, meterTempDrive1Max, meterTempDrive1Value, meterTempDrive1Bar",
+      "row": "DRIVE1 (row 9, hidden)",
+      "hidden": true,
+      "reason": "TDRIVE1=0",
+      "structureNote": "identical pattern to Chipset row"
+    },
+    {
+      "name": "meterTempDrive2Label, meterTempDrive2Max, meterTempDrive2Value, meterTempDrive2Bar",
+      "row": "DRIVE2 (row 10, hidden)",
+      "hidden": true,
+      "reason": "TDRIVE2=0",
+      "structureNote": "identical pattern to Chipset row"
+    },
+
+    {
+      "name": "MeterBackgroundHeight",
+      "type": "Image",
+      "solidColor": "255,255,255,0 (invisible)",
+      "x": { "expr": "0", "value": 0, "mode": "absolute" },
+      "y": { "expr": "(#BottomMargin# + #BgOffset# + 3)R", "value": null, "mode": "prevBottomPlusN", "n": "BottomMargin+BgOffset+3 = 3+5+3 = 11", "note": "prevBottom = bottom of the last visible row (meterTempMoBoValue's row, since all rows below are hidden and contribute 0 height) + 11 unscaled px" },
+      "w": "(#BgWidth# * #scale#) = 206*1.7 = 350.2",
+      "h": 1,
+      "purpose": "Invisible marker meter whose own [MeterBackgroundHeight:Y] (unscaled) is read by StyleBackground's H formula to determine total panel height. Effectively: totalUnscaledContentHeight = Y-of-this-meter; deviceHeight = that * Scale.",
+      "updateDivider": -1
+    },
+    { "name": "ControlSettings", "SKIPPED": true, "reason": "Group=Controls" }
+  ],
+  "skipped": [
+    {
+      "name": "ControlSettings_",
+      "reason": "Group=Controls",
+      "detail": "Meter=String, MeterStyle=TextStyle|StyleRightAlign, FontFace=ElegantIcons (icon glyph U+E035, a gear/cog icon), FontColor=135,206,250 (light sky blue), X=(RightAlign-5), Y=1r, Hidden=1 by default, only toggled visible on MouseOver via [!ToggleMeterGroup Controls]. Purely an interactive hover affordance in the title bar corner; not part of the static data display."
+    },
+    {
+      "name": "ControlSettings",
+      "reason": "Group=Controls",
+      "detail": "Meter=Image, MeterStyle=StyleMouseRegion|StyleMouseRegionStringButtonHover, Hidden=1, LeftMouseUpAction opens SettingsSkins6.ini. Invisible mouse-hit-region overlay tied to the ControlSettings_ gear icon; purely interactive, no visual footprint of its own."
+    }
+  ],
+  "verticalFlowSummary": "Panel is a single rounded background box (title strip + body) auto-sized to its content. Layout order top-to-bottom: [Title 'POWER' centered, Y=9 abs] -> [Row1 VCORE: Label(left,X=7)/Value(right,X=197)/Max(center,X=103) all at Y=32 abs] -> [Row2 GPU VOLT: same 3-column layout, Y = Row1's rendered bottom + RowSpacing(1)] -> [Row3 CPU POWER: Y = Row2's bottom + 1] -> [Row4 GPU POWER: Y = Row3's bottom + 1] -> [6 more rows for CHIP/RAM/AIR/PSU/DRIVE1/DRIVE2, each identical 3-column layout PLUS a 1px horizontal Bar meter beneath, but ALL SIX ARE HIDDEN/DISABLED so contribute zero height/content] -> [invisible MeterBackgroundHeight spacer, 11px below the last visible content, whose Y stamps the total content height used to auto-size the rounded background]. Within every visible row, the Max (session-max) meter and Value (current-reading) meter both copy the Y of the meter immediately preceding them in the file via 'Y=r' (exact same Y, not stacked below) -- this is what keeps Label/Value/Max visually on one horizontal line despite being 3 separate meter objects. All coordinates are unscaled design units; a uniform TransformationMatrix (scale 1.7, translate +1.7/+1.7) is applied per-meter to reach final device pixels. NO progress bars are rendered anywhere on the POWER panel's 4 visible rows -- only the 6 hidden legacy temperature rows have Bar meters defined.",
+  "notes": [
+    "CRITICAL: For the 4 active rows (VCORE/GPU VOLT/CPU POWER/GPU POWER), the measureTempXPerc Calc measures and their IfCondition/IfTrueAction/IfFalseAction BarColor logic reference meter names (meterTempCpuBar, meterTempGpu1Bar, meterTempGpu2Bar, meterTempMoBoBar) that DO NOT EXIST as meter sections in Temps.ini. This is leftover/dead code from the original temperature-bar skin: it runs every tick but has no visual output. A pixel-perfect reproduction should render ONLY the 3 text columns per row (label, value, max) and NO bar underneath.",
+    "CRITICAL: warn-color thresholds for the 4 active rows were hand-edited as literal numeric constants directly inside each measureTempXValueWarn Formula line (Volts for VCORE/GPU VOLT: 1.1/1.3/1.4/1.5 and 0.85/0.95/1.0/1.05; Watts for CPU POWER/GPU POWER: 50/100/150/200 and 50/150/200/250). The corresponding #TXWarnTh1..4# variables in Variables.inc still hold their original Celsius-oriented values (25/45/60/70 etc.) and are NOT used by these four channels' color logic -- only by the hidden/disabled Chipset/RAM/Air/PSU/Drive1/Drive2 rows, which still use the variable-driven form.",
+    "The '#TXMax#' variables (TCPUMax=70, TGPU1Max=95, TGPU2Max=95, TMOBOMax=95) are still referenced by measureTempXPerc for the 4 active channels, producing a near-meaningless percentage (e.g. a ~1.3V VCORE reading / 70 = ~1.9%) -- harmless since it only ever fed the now-nonexistent bar meters.",
+    "The Max/session-max value is computed purely in Rainmeter via a self-referential Calc formula 'Max(measureX, measureXMax)' -- i.e. it is NOT sourced from any separate HWiNFO 'max' entry id. A custom renderer must replicate this by keeping its own running max-since-launch (or since-reset) per channel, seeded by the first reading, and it resets whenever the skin/renderer process restarts (Rainmeter has no built-in persistence for these Calc measures across sessions).",
+    "Text FontColor for the '%1' current-value meters is DYNAMIC, wired to FontColor=[measureTempXValueWarn] with DynamicVariables=1 -- i.e., the big current-value number changes color live based on the voltage/wattage thresholds tables above (blue -> yellow -> orange -> red -> dark red), while the row LABEL stays fixed black (0,0,0,205) and the grayed 'Max: ...' text stays fixed gray (120,120,120,255) regardless of value.",
+    "Number formatting as literally authored in Temps.ini: VCORE and GPU VOLT use Text=\"%1 V\" / \"Max: %1 V\" with NumOfDecimals=3 (e.g. '1.268 V', 'Max: 1.308 V'). CPU POWER and GPU POWER use Text=\"%1W\" / \"Max: %1W\" with NumOfDecimals=0 (Max explicit, Value defaulted) -- NOTE these have NO SPACE between the number and the unit letter (e.g. '62W', 'Max: 125W'), which differs from the reference screenshot's rendering, which appeared to show '62 W' / '125 W' with a space and did not show a 'V' suffix for the voltage rows at all. Since the .ini text is the ground truth for the skin's logic, this spec transcribes the .ini literally and flags the discrepancy -- worth a quick visual double-check against the actual running skin if byte-exact spacing matters.",
+    "The outer background 'frame' stroke (Shape7 in StyleBackground) is defined with StrokeColor 96,138,203/alpha100 but Stroke_Width=0 in Variables.inc, so the computed StrokeWidth is 0 and the frame is not actually visible in this skin instance -- do not render a visible outline unless Stroke_Width is later changed.",
+    "HWiNFO sensor id/entry id numeric values for the 4 active channels are transcribed exactly as found in HWiNFO.inc (case-insensitive variable match: Temps.ini's #HWiNFO-TEMPS-MOBO-...# resolves to HWiNFO.inc's mixed-case HWiNFO-TEMPS-MoBo-... keys). Their *meaning* (Vcore/GPU-volt/CPU-power/GPU-power) is inferred from the user's label overrides, the hand-edited threshold magnitudes, and non-collision with other documented entry ids on the same physical sensor/instance -- it was NOT verified against a live HWiNFO shared-memory/sensor-panel dump, which is the only way to get an authoritative unit+description for a raw SensorId/EntryId pair. Treat the 'inferredMeaning' fields as best-effort labeling, not certainty.",
+    "Global Update=1000 (root [Rainmeter] section) drives the base 1Hz refresh. All 4 active Plugin (HWiNFO) measures use the default UpdateDivider (effectively 1, i.e. every tick). Their dependent Calc measures (Max/Perc/ValueWarn) use UpdateDivider=-1 and instead recompute via explicit OnChangeAction chains ([!UpdateMeasureGroup ...]) fired whenever the parent Plugin measure's value changes -- a Rainmeter performance pattern, not a different effective refresh rate; treat all four rows as updating at ~1 Hz.",
+    "Styles.inc and Variables.inc were not in the original required-reads list but were additionally opened to resolve @IncludeStyles/@IncludeVariables and cross-check the pre-resolved GLOBAL VARIABLES/GLOBAL STYLES given in the task; all figures above (StyleBackground geometry, TopMarginFormula/ContentMarginFormula/RightAlign/ContentWidth/CenterAlign derivations, per-style X/Y/font defaults) were confirmed to match.",
+    "MeasureSettingsScript (Measure=Script, Settings.lua) and the Group=Controls meters (ControlSettings_/ControlSettings, a hover-revealed gear icon opening a settings config) are Rainmeter-interaction plumbing unrelated to the temps/power data display; included/noted for completeness but not required for a static/data-driven D2D re-render."
+  ]
+}

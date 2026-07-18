@@ -1,0 +1,298 @@
+{
+  "panel": "topram",
+  "sourceFile": "RainformerHWiv2/TopProcesses/TopRAM/TopRAM.ini",
+  "sameAsTopCpu": [
+    "rainmeterUpdateMs (1000)",
+    "rainmeterSectionFlags (AccurateText/DynamicWindowSize/MouseOver/MouseLeave toggling Controls group; MiddleMouseDownAction=[!Refresh])",
+    "All global styles (styleTitle, styleFirstLineText, StyleLeftAlign/StyleCenterAlign_r/StyleRightAlign_r, StyleBar, StyleHorizontalLine) -- unused decorative styles (StyleBar/StyleHorizontalLine) are declared globally but not referenced by any meter in either TopCPU.ini or TopRAM.ini.",
+    "backgroundSpec -- StyleBackground shape math is byte-for-byte identical (same include file, no per-skin overrides). See topcpu.json backgroundSpec for the full shape breakdown, including the Stroke_Width=0 (invisible frame) caveat.",
+    "Column X positions: Left=7 (ContentMarginFormula), Center=103 (CenterAlign), Right=197 (RightAlign).",
+    "Row stacking mechanics: row 1 at absolute Y=32 (TopMarginFormula), rows 2-N via Y=((count>=N)?RowSpacing:0)R chaining, sibling columns of a row share Y via Y=r.",
+    "Font: Trebuchet MS, 8pt Bold for all row text; FontColor threshold-swap uses colorRed at alpha 205 (colorTextAlpha), not colorRedAlpha(255) -- same nuance as TopCPU.",
+    "Substitute \"\":\"---\" on the primary (here: RAM) plugin measure; no other name-prettifying logic exists.",
+    "ClipString=1 + W=70 on the Left/name meter is what produces the visual ellipsis/truncation, not a text substitution.",
+    "Group=Controls meters (ControlSettings_, ControlSettings) are hover-reveal settings-gear chrome, excluded -- see 'skipped'."
+  ],
+  "keyDifferencesFromTopCpu": [
+    "Panel is driven by RAM rank (Index=N on the RAM/primary UsageMonitor measure) instead of CPU rank; the paired secondary measure fetches CPU% of that same process via Name=[MeasureTopNRam].",
+    "Threshold semantics differ: TopRAMThreshold=500 is in MEGABYTES, and the IfCondition compares the raw byte value against '1024*1024*#TopRAMThreshold#' (=524,288,000 bytes) rather than a raw percent compare like TopCPU's threshold.",
+    "Column layout differs: Left=process name, CENTER=CPU% (not RAM), RIGHT=RAM autoscaled bytes (not CPU%) -- i.e. RAM and CPU% swap which side of center they're displayed on relative to TopCPU.",
+    "No MeasureProcessCount / MeterProcessCount / MeterProcessCountMouseRegion exist in this file at all -- TopRAM does not show a total running-process count.",
+    "The row's numeric RAM meter (MeterTopNRam, right column) reads directly from MeasureTopNRamCalcThreshold (the SAME Calc measure that also drives the threshold FontColor logic) rather than from a separate passthrough Calc measure. TopCPU, by contrast, keeps its threshold-Calc and its display-Calc as two distinct measures (MeasureTopNCpuThreshold vs MeasureTopNCpuRamCalc). Functionally equivalent value, different measure-chain shape.",
+    "The secondary CPU% measure (MeasureTopNCpu) has NO extra 'Calc' wrapper step in TopRAM.ini (unlike TopCPU.ini's MeasureTopNCpuRam -> MeasureTopNCpuRamCalc pair) -- it goes straight from the UsageMonitor plugin measure to OnChangeAction=[!UpdateMeterGroup ...], and the meter reads it inline via [MeasureTopNCpu:1]%.",
+    "ControlSettings_ gear icon X = (#RightAlign#-5) in TopRAM vs (#RightAlign#-30) in TopCPU (cosmetic-only, Group=Controls, not part of data display)."
+  ],
+  "rainmeterUpdateMs": 1000,
+  "localVariables": {
+    "Scale": 1.7,
+    "BgOffset": 5,
+    "BgShapeW": 196,
+    "BgShapeX": 5,
+    "BgShapeY": 5,
+    "BgWidth": 206,
+    "AbsMargin": 3,
+    "TopMargin": 28,
+    "BottomMargin": 3,
+    "RowSpacing": 1,
+    "CornerRadius": 4,
+    "Stroke_Width": 0,
+    "TopMarginFormula": 32,
+    "ContentMarginFormula": 7,
+    "RightAlign": 197,
+    "ContentWidth": 190,
+    "CenterAlign": 103,
+    "FontFamily": "Trebuchet MS",
+    "textSize": 8,
+    "colorTitle": "0,0,0/255",
+    "colorText": "0,0,0/205",
+    "colorText2": "60,65,62/205",
+    "colorActiveTitle": "255,128,0/255",
+    "colorBar": "93,141,172/255",
+    "colorHistogram": "176,196,222/250",
+    "colorRed": "204,0,0/255",
+    "EmptyBarColor": "255,255,255/25",
+    "BgTopColor": "163,178,230/180",
+    "BgBodyColor": "230,230,230/180",
+    "StrokeColor": "96,138,203/100",
+    "SolidColorLabel": "248,248,248/255",
+    "NumberOfTopRamProc": 5,
+    "CPUUsageByRamProcess": 1,
+    "TopRAMThreshold": 500,
+    "TopRamUpdateRate": 1,
+    "TopRamBlacklist": "_Total|Idle"
+  },
+  "background": "standard-two-zone-rounded",
+  "backgroundSpec": "identical to topcpu.json's backgroundSpec -- see that file (StyleBackground include is shared, no per-skin override; Stroke_Width=0 so Shape7's outline frame is invisible here too).",
+  "measures": [
+    {
+      "rowPatternFor": "rows 1-10, RAM-primary measures",
+      "template": {
+        "MeasureTopNRam": {
+          "type": "Plugin",
+          "plugin": "UsageMonitor",
+          "alias": "RAM",
+          "index": "N (1..10)",
+          "substitute": {"\"\"": "\"---\""},
+          "blacklist": "#TopRamBlacklist# (= _Total|Idle)",
+          "onChangeAction": "[!UpdateMeasure \"MeasureTopNRamCalcThreshold\"][!UpdateMeterGroup \"TopNRam\"]",
+          "updateDivider": {"expr": "(#NumberOfTopRamProc# < N) ? (-1) : (#TopRamUpdateRate#)"},
+          "disabled": {"expr": "(#NumberOfTopRamProc# < N)"}
+        },
+        "MeasureTopNRamCalcThreshold": {
+          "type": "Calc",
+          "formula": "MeasureTopNRam",
+          "ifConditions": [
+            {"condition": "(#CURRENTSECTION# < 1024*1024*#TopRAMThreshold#)", "effect": "!SetOptionGroup TopNRam FontColor \"#colorText#,#colorTextAlpha#\" (0,0,0/205)"},
+            {"condition": "(#CURRENTSECTION# >= 1024*1024*#TopRAMThreshold#)", "effect": "!SetOptionGroup TopNRam FontColor \"#colorRed#,#colorTextAlpha#\" (204,0,0/205)"}
+          ],
+          "updateDivider": -1,
+          "disabled": {"expr": "(#NumberOfTopRamProc# < N)"},
+          "notes": [
+            "Threshold compares raw byte value to 1024*1024*TopRAMThreshold = 1024*1024*500 = 524,288,000 bytes (500 MiB), i.e. rows whose process RAM usage >= 500MB turn red.",
+            "Unlike TopCPU's Threshold measure, THIS measure is also the numeric data source for the visible right-hand RAM meter (MeterTopNRam reads MeasureName=MeasureTopNRamCalcThreshold directly) -- it does double duty as both the color-trigger and the display value."
+          ]
+        },
+        "MeasureTopNCpu": {
+          "type": "Plugin",
+          "plugin": "UsageMonitor",
+          "alias": "CPU",
+          "name": "[MeasureTopNRam]",
+          "note": "Chains to the SAME process identified by MeasureTopNRam to fetch that process's CPU usage percent.",
+          "onChangeAction": "[!UpdateMeterGroup \"TopNRamCpu\"]",
+          "dynamicVariables": 1,
+          "updateDivider": {"expr": "((#CPUUsageByRamProcess#=0) || (#NumberOfTopRamProc# < N)) ? (-1) : (#TopRamUpdateRate#)"},
+          "disabled": {"expr": "(#CPUUsageByRamProcess#=0) || (#NumberOfTopRamProc# < N)"},
+          "notes": ["No secondary 'Calc' step exists for this measure (contrast with TopCPU's MeasureTopNCpuRam->MeasureTopNCpuRamCalc pair) -- the center CPU% meter reads this plugin measure directly inline."]
+        }
+      },
+      "rows": [
+        {"n": 1, "index": 1}, {"n": 2, "index": 2}, {"n": 3, "index": 3}, {"n": 4, "index": 4}, {"n": 5, "index": 5},
+        {"n": 6, "index": 6}, {"n": 7, "index": 7}, {"n": 8, "index": 8}, {"n": 9, "index": 9}, {"n": 10, "index": 10}
+      ],
+      "effectiveNote": "Given the resolved NumberOfTopRamProc=5, rows 1-5 are live (UpdateDivider=1, Disabled=false); rows 6-10 are always Disabled=true / never update given current config (same situation as TopCPU's rows 6-10)."
+    },
+    {
+      "name": "MeasureSettingsScript",
+      "type": "Script",
+      "scriptFile": "#scriptPath#Settings.lua",
+      "updateDivider": -1,
+      "notes": ["Same Lua helper as TopCPU; drives Controls-group hover FontColor get/gsub. Not relevant to static visual rendering."]
+    }
+  ],
+  "meters": [
+    {
+      "name": "MeterBackground",
+      "type": "Shape",
+      "styles": ["StyleBackground"],
+      "notes": ["Identical to TopCPU's MeterBackground. Group=Background (via style)."]
+    },
+    {
+      "name": "meterTitle",
+      "type": "STRING",
+      "styles": ["styleTitle"],
+      "x": {"mode": "abs", "value": 103},
+      "y": {"mode": "abs", "value": 9},
+      "w": 190,
+      "h": 20,
+      "align": "Center",
+      "case": "UPPER",
+      "bold": true,
+      "fontFace": "Trebuchet MS",
+      "fontSize": 9,
+      "fontColor": "colorTitle,colorTitleAlpha (0,0,0/255)",
+      "text": "TOP RAM",
+      "updateDivider": -1
+    },
+    {
+      "name": "MeterTop1RamString",
+      "type": "String",
+      "measureNames": ["MeasureTop1Ram"],
+      "styles": ["styleFirstLineText", "StyleLeftAlign"],
+      "x": {"mode": "abs", "value": 7},
+      "y": {"mode": "abs", "value": 32, "note": "No Y override at all for row 1 (not even commented out, unlike TopCPU which had a commented Y line) -- uses styleFirstLineText's default Y=#TopMarginFormula#=32."},
+      "w": 70,
+      "align": "Left",
+      "case": "NONE",
+      "bold": true,
+      "fontFace": "Trebuchet MS",
+      "fontSize": 8,
+      "fontColor": "[MeasureTop1RamCalcThreshold] -- dynamically set via !SetOptionGroup to colorText,205 or colorRed,205 (>=500MB)",
+      "text": "%1",
+      "clipString": true,
+      "hidden": {"expr": "(#NumberOfTopRamProc# < 1)"},
+      "group": "Top1Ram",
+      "updateDivider": -1,
+      "notes": ["%1 = MeasureTop1Ram string value (process name), Substitute \"\":\"---\" applied."]
+    },
+    {
+      "name": "MeterTop1Cpu",
+      "type": "String",
+      "styles": ["styleFirstLineText", "StyleCenterAlign_r"],
+      "x": {"mode": "abs", "value": 103},
+      "y": {"mode": "r", "note": "same Y as previous meter (MeterTop1RamString) = 32"},
+      "align": "Center",
+      "case": "NONE",
+      "bold": true,
+      "fontFace": "Trebuchet MS",
+      "fontSize": 8,
+      "fontColor": "colorText2,colorText2Alpha (60,65,62/205) -- static, not threshold-colored",
+      "text": "[MeasureTop1Cpu:1]%",
+      "numOfDecimals": 1,
+      "dynamicVariables": true,
+      "hidden": {"expr": "(#CPUUsageByRamProcess#=0) || (#NumberOfTopRamProc# < 1)"},
+      "group": "Top1RamCpu",
+      "updateDivider": -1,
+      "notes": ["CENTER column here is CPU%, swapped vs TopCPU where center is RAM. Reads MeasureTopNCpu inline (no MeasureName option set on this meter, no Calc wrapper)."]
+    },
+    {
+      "name": "MeterTop1Ram",
+      "type": "String",
+      "measureNames": ["MeasureTop1RamCalcThreshold"],
+      "styles": ["styleFirstLineText", "StyleRightAlign_r"],
+      "x": {"mode": "abs", "value": 197},
+      "y": {"mode": "r", "note": "same Y as previous meter (MeterTop1Cpu) = 32"},
+      "align": "Right",
+      "bold": true,
+      "fontFace": "Trebuchet MS",
+      "fontSize": 8,
+      "fontColor": "[MeasureTop1RamCalcThreshold] -- same threshold-driven color as MeterTop1RamString",
+      "text": "%1B",
+      "numOfDecimals": 1,
+      "autoScaleUnits": true,
+      "hidden": {"expr": "(#NumberOfTopRamProc# < 1)"},
+      "group": "Top1Ram",
+      "updateDivider": -1,
+      "notes": ["RIGHT column here is autoscaled RAM bytes ('%1B' -> e.g. '2.2GB'), swapped vs TopCPU where right is CPU%."]
+    },
+    {
+      "name": "MeterTop2RamString .. MeterTop10RamString / MeterTopNCpu (center) / MeterTopNRam (right)",
+      "rowPatternFor": "rows 2-10 (row 1 fully spelled out above)",
+      "template": {
+        "MeterTopNRamString": {
+          "type": "String",
+          "measureNames": ["MeasureTopNRam"],
+          "styles": ["styleFirstLineText", "StyleLeftAlign"],
+          "x": {"mode": "abs", "value": 7},
+          "y": {"mode": "R", "expr": "((#NumberOfTopRamProc# >= N) ? #RowSpacing# : 0)", "note": "Stacks below the previous meter's bottom edge (row N-1's rightmost/RAM meter)."},
+          "w": 70,
+          "align": "Left",
+          "bold": true,
+          "fontSize": 8,
+          "fontColor": "[MeasureTopNRamCalcThreshold]",
+          "text": "%1",
+          "clipString": true,
+          "hidden": {"expr": "(#NumberOfTopRamProc# < N)"},
+          "group": "TopNRam",
+          "updateDivider": -1
+        },
+        "MeterTopNCpu_center": {
+          "type": "String",
+          "styles": ["styleFirstLineText", "StyleCenterAlign_r"],
+          "x": {"mode": "abs", "value": 103},
+          "y": {"mode": "r"},
+          "align": "Center",
+          "bold": true,
+          "fontSize": 8,
+          "fontColor": "colorText2,colorText2Alpha",
+          "text": "[MeasureTopNCpu:1]%",
+          "numOfDecimals": 1,
+          "dynamicVariables": true,
+          "hidden": {"expr": "(#CPUUsageByRamProcess#=0) || (#NumberOfTopRamProc# < N)"},
+          "group": "TopNRamCpu",
+          "updateDivider": -1
+        },
+        "MeterTopNRam_right": {
+          "type": "String",
+          "measureNames": ["MeasureTopNRamCalcThreshold"],
+          "styles": ["styleFirstLineText", "StyleRightAlign_r"],
+          "x": {"mode": "abs", "value": 197},
+          "y": {"mode": "r"},
+          "align": "Right",
+          "bold": true,
+          "fontSize": 8,
+          "fontColor": "[MeasureTopNRamCalcThreshold]",
+          "text": "%1B",
+          "numOfDecimals": 1,
+          "autoScaleUnits": true,
+          "hidden": {"expr": "(#NumberOfTopRamProc# < N)"},
+          "group": "TopNRam",
+          "updateDivider": -1
+        }
+      },
+      "rows": [2, 3, 4, 5, 6, 7, 8, 9, 10],
+      "confirmedVerbatimFromFile": true,
+      "effectiveNote": "With NumberOfTopRamProc=5: rows 1-5 render; rows 6-10 are Hidden+Disabled given current config (same caveat as TopCPU applies re: hidden-meter stacking height)."
+    },
+    {
+      "name": "MeterBackgroundHeight",
+      "type": "Image",
+      "solidColor": "255,255,255,0 (fully transparent)",
+      "x": {"mode": "abs", "value": 0},
+      "y": {"mode": "R", "expr": "(#BottomMargin# + #BgOffset#) = 8", "note": "8 past the bottom of MeterTop10Ram (the last meter drawn before this section)."},
+      "w": {"expr": "#BgWidth# * #Scale#", "value": 350.2},
+      "h": 1,
+      "group": "Background",
+      "updateDivider": -1,
+      "notes": ["Identical role to TopCPU's MeterBackgroundHeight -- drives StyleBackground's dynamic H."]
+    }
+  ],
+  "skipped": [
+    {
+      "name": "ControlSettings_",
+      "reason": "Group=Controls",
+      "detail": "String meter, Hidden=1, FontFace=ElegantIcons, Text='[\\x0xe035]' (gear glyph), X=(#RightAlign#-5) [note: -5 here vs -30 in TopCPU], Y=1r, FontColor=135,206,250, TransformationMatrix=Scale."
+    },
+    {
+      "name": "ControlSettings",
+      "reason": "Group=Controls",
+      "detail": "Image meter, Hidden=1, MeterStyle=StyleMouseRegion|StyleMouseRegionStringButtonHover, LeftMouseUpAction opens Settings/SettingsSkins2.ini."
+    }
+  ],
+  "verticalFlowSummary": "Background capsule -> Title row 'TOP RAM' centered at y=9 (abs) -- NOTE: unlike TopCPU there is no process-count element on this row at all -> Row1 (name/cpu%/ram) at y=32 (abs) -> Rows 2-5 stack via Y=1R chaining below the previous row's bottom -> Rows 6-10 present but Hidden+Disabled given NumberOfTopRamProc=5 -> MeterBackgroundHeight (invisible) 8px below the last meter, driving the background shape's total height.",
+  "notes": [
+    "This file has NO equivalent of TopCPU's MeterProcessCount/MeasureProcessCount/MeterProcessCountMouseRegion -- confirmed absent from the source (meters go straight from ControlSettings_ to the Top1Ram row group). The 'TOP RAM' title row therefore has nothing right-aligned next to it.",
+    "Column semantics (verbatim from ini): Left=process name (ClipString+W=70, same truncation behavior as TopCPU), Center=CPU% of that process (static gray colorText2, never threshold-colored), Right=RAM usage autoscaled to '<n>.<d><K|M|G>B' with the threshold-driven color (colorText or colorRed@205 alpha) based on TopRAMThreshold=500MB.",
+    "Threshold math uses bytes, not percent: condition is raw_bytes >= 1024*1024*500 = 524288000. Make sure the reimplementation compares in bytes (or converts consistently) rather than reusing the CPU panel's plain '>= 20' percent-threshold logic.",
+    "All other mechanics (background shapes, Stroke_Width=0 invisible frame, font, row stacking Y formulas, hidden-meter stacking caveat, Substitute rule, ClipString truncation) are identical to TopCPU -- see topcpu.json for full detail rather than duplicating verbatim here."
+  ]
+}

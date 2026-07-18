@@ -1,0 +1,389 @@
+{
+  "panel": "topcpu",
+  "sourceFile": "RainformerHWiv2/TopProcesses/TopCPU/TopCPU.ini",
+  "includes": ["@Resources/Variables.inc", "@Resources/Styles.inc"],
+  "rainmeterUpdateMs": 1000,
+  "rainmeterSectionFlags": {
+    "AccurateText": 1,
+    "DynamicWindowSize": 1,
+    "MiddleMouseDownAction": "[!Refresh]",
+    "MouseOverAction": "[!ToggleMeterGroup Controls][!UpdateMeterGroup Controls][!Redraw]",
+    "MouseLeaveAction": "[!ToggleMeterGroup Controls][!UpdateMeterGroup Controls][!Redraw]",
+    "note": "DynamicWindowSize=1 means the window/canvas auto-fits the union of all meter bounding boxes (including hidden ones per Rainmeter's normal relative-positioning rules) -- the background shape height formula depends on this."
+  },
+  "localVariables": {
+    "Scale": 1.7,
+    "BgOffset": 5,
+    "BgShapeW": 196,
+    "BgShapeX": 5,
+    "BgShapeY": 5,
+    "BgWidth": 206,
+    "AbsMargin": 3,
+    "TopMargin": 28,
+    "BottomMargin": 3,
+    "RowSpacing": 1,
+    "CornerRadius": 4,
+    "Stroke_Width": 0,
+    "TopMarginFormula": 32,
+    "ContentMarginFormula": 7,
+    "RightAlign": 197,
+    "ContentWidth": 190,
+    "CenterAlign": 103,
+    "FontFamily": "Trebuchet MS",
+    "textSize": 8,
+    "colorTitle": "0,0,0/255",
+    "colorText": "0,0,0/205",
+    "colorText2": "60,65,62/205",
+    "colorActiveTitle": "255,128,0/255",
+    "colorBar": "93,141,172/255",
+    "colorHistogram": "176,196,222/250",
+    "colorRed": "204,0,0/255",
+    "EmptyBarColor": "255,255,255/25",
+    "BgTopColor": "163,178,230/180",
+    "BgBodyColor": "230,230,230/180",
+    "StrokeColor": "96,138,203/100",
+    "SolidColorLabel": "248,248,248/255",
+    "NumberOfTopCpuProc": 5,
+    "RamUsageByCpuProcess": 1,
+    "TopCPUThreshold": 20,
+    "TopCpuUpdateRate": 1,
+    "TopCpuBlacklist": "_Total|Idle"
+  },
+  "importantColorNuance": "The threshold-triggered 'over limit' font color is set via [!SetOptionGroup ... FontColor \"#colorRed#,#colorTextAlpha#\"] -- it reuses colorTextAlpha (205), NOT colorRedAlpha (255). So the red warning text renders at alpha 205, same as normal text, not fully opaque.",
+  "background": "standard-two-zone-rounded",
+  "backgroundSpec": {
+    "meterSection": "MeterBackground",
+    "meterStyle": "StyleBackground",
+    "coordSystem": "All numbers below are UNSCALED skin-space px; multiply by #Scale# (1.7) at the very end per the formulas (this mirrors Rainmeter's TransformationMatrix=Scale;0;0;Scale;Scale;Scale which scales around origin (Scale,Scale)).",
+    "overallW_expr": "((BgShapeW + 0.06) + (BgOffset*2)) * Scale",
+    "overallW_value_px": 350.302,
+    "overallH_expr": "[MeterBackgroundHeight:Y] * Scale",
+    "overallH_note": "Dynamic: MeterBackgroundHeight is an invisible 1px-tall helper Image meter placed after the last process row at Y=(BottomMargin+BgOffset)R = 8R past the prior meter's bottom. Its resolved absolute Y (unscaled) IS the total unscaled content height; multiplying by Scale gives the final background pixel height. In a from-scratch renderer, replace this indirection with: contentHeight = (title row height) + sum(visible row heights + RowSpacing gaps) + BottomMargin + BgOffset, all unscaled, then * Scale.",
+    "shapes": [
+      {
+        "id": "Shape (top rounded rect, fill only)",
+        "formula": "Rectangle ((BgShapeX+0.0)*Scale), ((BgShapeY-0.0)*Scale), (BgShapeW*Scale), (21*Scale), (CornerRadius*Scale) | StrokeWidth 0 | Fill Color BgTopColor,BgTopOpacity",
+        "resolved_unscaled": "Rectangle x=5, y=5, w=196, h=21, cornerRadius=4",
+        "fill": "163,178,230/180",
+        "purpose": "Rounded-corner header/title band (top strip behind 'TOP CPU' title + process count row)."
+      },
+      {
+        "id": "Shape2 (square-bottom patch, unioned with Shape)",
+        "formula": "Rectangle ((BgShapeX+0.0)*Scale), ((BgShapeY+8)*Scale), (BgShapeW*Scale), (14*Scale)",
+        "resolved_unscaled": "Rectangle x=5, y=13, w=196, h=14",
+        "purpose": "Squares off the bottom edge of the rounded top rect so only the TOP two corners stay rounded (Shape3 = Combine Shape | Union Shape2)."
+      },
+      {
+        "id": "Shape4 (bottom body rect, fill only)",
+        "formula": "Rectangle ((BgShapeX+0.0)*Scale), ((BgShapeY+24.5)*Scale), (BgShapeW*Scale), ([MeterBackground:H] - (((BgShapeX+12.3)*2)*Scale)), (CornerRadius*Scale) | StrokeWidth 0 | Fill Color BgBodyColor,BgBodyOpacity",
+        "resolved_unscaled_xy": "x=5, y=29.5 (unscaled, before *Scale)",
+        "height_expr": "totalMeterH_scaledpx - (((5+12.3)*2)*1.7) = totalMeterH_scaledpx - 58.82",
+        "fill": "230,230,230/180",
+        "purpose": "The larger rounded-corner body panel behind the process rows; height auto-extends to fill the rest of the dynamic window height."
+      },
+      {
+        "id": "Shape5 (square-top patch, unioned with Shape4)",
+        "formula": "Rectangle ((BgShapeX+0.0)*Scale), ((BgShapeY+24)*Scale), (BgShapeW*Scale), (15*Scale)",
+        "resolved_unscaled": "Rectangle x=5, y=29, w=196, h=15",
+        "purpose": "Squares off the top edge of the body rect so only the BOTTOM two corners stay rounded (Shape6 = Combine Shape4 | Union Shape5). Net effect of Shape3+Shape6 stacked = one pill-ish rounded rectangle broken into a header capsule and a body capsule that visually overlap/abut around y=21-29 (unscaled) to look like a single continuous rounded panel."
+      },
+      {
+        "id": "Shape7 (outer frame outline)",
+        "formula": "Rectangle ((BgShapeX-0.5)*Scale), ((BgShapeY-0.5)*Scale), ((BgShapeW+1)*Scale), (([MeterBackground:H]+Scale) - ((BgShapeX*2)*Scale)), ((CornerRadius+0.5)*Scale) | StrokeWidth (Stroke_Width*Scale) | Stroke Color StrokeColor,StrokeColorAlpha | Fill Color 0,0,0,0",
+        "resolved_unscaled_xy": "x=4.5, y=4.5, w=197",
+        "strokeColor": "96,138,203/100",
+        "strokeWidth_expr": "Stroke_Width * Scale",
+        "CRITICAL_NOTE": "Stroke_Width is the GLOBAL default from Variables.inc = 0 (only the 'r' recovery/alt theme variant redefines rStroke_Width=1). Neither TopCPU.ini nor TopRAM.ini override Stroke_Width in their [Variables] section (both only do @IncludeVariables/@IncludeStyles with no overrides). Therefore StrokeWidth evaluates to 0*1.7=0, meaning Shape7's outline is INVISIBLE in the currently-configured skin (fill is transparent 0,0,0,0 and stroke width is 0). Net visible effect: there is NO drawn border/frame around the panel -- only the two fill capsules (Shape3 top, Shape6 bottom) are visible. Flag this to the user/implementer since it's easy to assume a visible outline exists."
+      }
+    ],
+    "combineOps": "Shape3 = Combine Shape | Union Shape2 (top capsule). Shape6 = Combine Shape4 | Union Shape5 (bottom capsule). Shape7 stands alone as the (currently invisible) frame. Group=Background."
+  },
+  "measures": [
+    {
+      "name": "MeasureProcessCount",
+      "type": "Plugin",
+      "plugin": "UsageMonitor",
+      "category": "System",
+      "counter": "Processes",
+      "index": 0,
+      "updateDivider": "#TopCpuUpdateRate#",
+      "onChangeAction": "[!UpdateMeter \"MeterProcessCount\"]",
+      "notes": ["Total count of running processes on the system, unrelated to the top-N list. Rendered top-right of the title bar as a bare number (see MeterProcessCount)."]
+    },
+    {
+      "rowPatternFor": "rows 1-10, CPU-primary measures",
+      "template": {
+        "MeasureTopNCpu": {
+          "type": "Plugin",
+          "plugin": "UsageMonitor",
+          "alias": "CPU",
+          "index": "N (1..10)",
+          "substitute": {"\"\"": "\"---\""},
+          "blacklist": "#TopCpuBlacklist# (= _Total|Idle)",
+          "onChangeAction": "[!UpdateMeasure \"MeasureTopNCpuThreshold\"][!UpdateMeterGroup \"TopNCpu\"]",
+          "updateDivider": {"expr": "(#NumberOfTopCpuProc# < N) ? (-1) : (#TopCpuUpdateRate#)"},
+          "disabled": {"expr": "(#NumberOfTopCpuProc# < N)"}
+        },
+        "MeasureTopNCpuThreshold": {
+          "type": "Calc",
+          "formula": "MeasureTopNCpu",
+          "ifConditions": [
+            {"condition": "(#CURRENTSECTION# < #TopCPUThreshold#)", "effect": "!SetOptionGroup TopNCpu FontColor \"#colorText#,#colorTextAlpha#\" (0,0,0/205)"},
+            {"condition": "(#CURRENTSECTION# >= #TopCPUThreshold#)", "effect": "!SetOptionGroup TopNCpu FontColor \"#colorRed#,#colorTextAlpha#\" (204,0,0/205)"}
+          ],
+          "updateDivider": -1,
+          "disabled": {"expr": "(#NumberOfTopCpuProc# < N)"},
+          "notes": ["Threshold measure's own numeric value is never displayed directly; it exists purely to drive the group-wide FontColor of the row's Left(name) and Right(%) meters (Group=TopNCpu) based on whether the CPU% >= 20."]
+        },
+        "MeasureTopNCpuRam": {
+          "type": "Plugin",
+          "plugin": "UsageMonitor",
+          "alias": "RAM",
+          "name": "[MeasureTopNCpu]",
+          "note": "Chains to the SAME process identified by MeasureTopNCpu (Name=[MeasureTopNCpu]) to fetch that process's RAM usage in bytes.",
+          "onChangeAction": "[!UpdateMeasure \"MeasureTopNCpuRamCalc\"]",
+          "dynamicVariables": 1,
+          "updateDivider": {"expr": "((#RamUsageByCpuProcess#=0) || (#NumberOfTopCpuProc# < N)) ? (-1) : (#TopCpuUpdateRate#)"},
+          "disabled": {"expr": "(#RamUsageByCpuProcess#=0) || (#NumberOfTopCpuProc# < N)"}
+        },
+        "MeasureTopNCpuRamCalc": {
+          "type": "Calc",
+          "formula": "MeasureTopNCpuRam",
+          "onChangeAction": "[!UpdateMeterGroup \"TopNCpuRam\"]",
+          "updateDivider": -1,
+          "disabled": {"expr": "(#RamUsageByCpuProcess#=0) || (#NumberOfTopCpuProc# < N)"},
+          "notes": ["Pure passthrough Calc (no IfConditions); exists only to decouple the OnChangeAction chain from the plugin measure. This is the measure actually read by MeterTopNCpuRam."]
+        }
+      },
+      "rows": [
+        {"n": 1, "index": 1}, {"n": 2, "index": 2}, {"n": 3, "index": 3}, {"n": 4, "index": 4}, {"n": 5, "index": 5},
+        {"n": 6, "index": 6}, {"n": 7, "index": 7}, {"n": 8, "index": 8}, {"n": 9, "index": 9}, {"n": 10, "index": 10}
+      ],
+      "effectiveNote": "Given the resolved NumberOfTopCpuProc=5, rows 1-5 have UpdateDivider=1 (Disabled=0/false) and rows 6-10 have UpdateDivider=-1 & Disabled=1/true (i.e. rows 6-10 never run/update given current config). Only rows 1-5 are functionally live."
+    },
+    {
+      "name": "MeasureSettingsScript",
+      "type": "Script",
+      "scriptFile": "#scriptPath#Settings.lua",
+      "updateDivider": -1,
+      "notes": ["Lua helper script used by hover-button style FontColor get/gsub actions (StyleStringButtonHover etc. in Controls group). Not relevant to static visual rendering."]
+    }
+  ],
+  "meters": [
+    {
+      "name": "MeterBackground",
+      "type": "Shape",
+      "styles": ["StyleBackground"],
+      "notes": ["See backgroundSpec above for full resolved shape math. Group=Background (via style)."]
+    },
+    {
+      "name": "meterTitle",
+      "type": "STRING",
+      "styles": ["styleTitle"],
+      "x": {"mode": "abs", "value": 103, "note": "from styleTitle X=#CenterAlign#"},
+      "y": {"mode": "abs", "value": 9, "note": "styleTitle Y=(4+BgOffset)=9"},
+      "w": 190,
+      "h": 20,
+      "align": "Center",
+      "case": "UPPER",
+      "bold": true,
+      "fontFace": "Trebuchet MS",
+      "fontSize": 9,
+      "fontColor": "colorTitle,colorTitleAlpha (0,0,0/255)",
+      "text": "TOP CPU",
+      "updateDivider": -1
+    },
+    {
+      "name": "MeterProcessCount",
+      "type": "String",
+      "styles": ["styleTitle", "StyleRightAlign"],
+      "x": {"mode": "abs", "value": 197, "note": "StyleRightAlign overrides styleTitle's X to #RightAlign#"},
+      "y": {"mode": "abs", "value": 9, "note": "inherited from styleTitle (no override) = same row as title"},
+      "w": 190,
+      "h": 20,
+      "align": "Right",
+      "case": "UPPER (inherited from styleTitle, irrelevant for digits)",
+      "bold": true,
+      "fontFace": "Trebuchet MS",
+      "fontSize": 8,
+      "fontColor": "colorText2,colorText2Alpha (60,65,62/205)",
+      "text": "[MeasureProcessCount:0]",
+      "measureNames": ["MeasureProcessCount"],
+      "dynamicVariables": true,
+      "updateDivider": -1,
+      "notes": [
+        "IMPORTANT DISCREPANCY vs the provided screenshot context: the ini's Text is literally just '[MeasureProcessCount:0]' -- i.e. it renders ONLY the bare integer (e.g. '371'), with NO 'Processes:' label text anywhere in this section. If the target UI needs a 'Processes: 371' label, that prefix must be added by the reimplementation and is not present in the Rainmeter source.",
+        "Positioned top-right, same row as the title, via StyleRightAlign's X=#RightAlign#=197, Y unchanged from styleTitle (9)."
+      ]
+    },
+    {
+      "name": "MeterTop1CpuString",
+      "type": "String",
+      "measureNames": ["MeasureTop1Cpu"],
+      "styles": ["styleFirstLineText", "StyleLeftAlign"],
+      "x": {"mode": "abs", "value": 7, "note": "StyleLeftAlign X=#ContentMarginFormula#"},
+      "y": {"mode": "abs", "value": 32, "note": "Y override line is commented out (`; Y=...`) in the ini for row 1 only -- uses styleFirstLineText's default Y=#TopMarginFormula#=32 (absolute, first content row, right under the header capsule)."},
+      "w": 70,
+      "align": "Left",
+      "case": "NONE",
+      "bold": true,
+      "fontFace": "Trebuchet MS",
+      "fontSize": 8,
+      "fontColor": "[MeasureTop1CpuThreshold] -- dynamically overwritten at runtime via !SetOptionGroup to colorText,205 (normal) or colorRed,205 (>=20% CPU)",
+      "text": "%1",
+      "clipString": true,
+      "hidden": {"expr": "(#NumberOfTopCpuProc# < 1)"},
+      "group": "Top1Cpu",
+      "updateDivider": -1,
+      "notes": [
+        "%1 = the MeasureTop1Cpu string value (process name), with Substitute \"\":\"---\" applied by the measure (empty name -> '---'). No other name 'prettifying' substitution exists in the ini -- the ellipsis/truncation seen in the reference screenshot comes purely from ClipString=1 combined with W=70 (unscaled px, ~119px on screen at Scale=1.7), which lets Rainmeter's text renderer truncate+ellipsize overflowing text; it is NOT a text-substitution rule."
+      ]
+    },
+    {
+      "name": "MeterTop1CpuRam",
+      "type": "String",
+      "measureNames": ["MeasureTop1CpuRamCalc"],
+      "styles": ["styleFirstLineText", "StyleCenterAlign_r"],
+      "x": {"mode": "abs", "value": 103, "note": "StyleCenterAlign_r X=#CenterAlign#"},
+      "y": {"mode": "r", "note": "Y=r -> identical Y to the immediately preceding meter (MeterTop1CpuString) = 32"},
+      "align": "Center",
+      "case": "NONE",
+      "bold": true,
+      "fontFace": "Trebuchet MS",
+      "fontSize": 8,
+      "fontColor": "colorText2,colorText2Alpha (60,65,62/205) -- static, not threshold-colored",
+      "text": "%1B",
+      "numOfDecimals": 1,
+      "autoScaleUnits": true,
+      "hidden": {"expr": "(#RamUsageByCpuProcess#=0) || (#NumberOfTopCpuProc# < 1)"},
+      "group": "Top1CpuRam",
+      "updateDivider": -1,
+      "notes": ["Autoscale=1 + NumOfDecimals=1 turns the raw byte count into e.g. '80.9M'; the literal 'B' in Text=\"%1B\" is appended to complete the unit suffix, producing '80.9MB' (no unit-space in the raw string, matches screenshot's 'MB')."]
+    },
+    {
+      "name": "MeterTop1Cpu",
+      "type": "String",
+      "styles": ["styleFirstLineText", "StyleRightAlign_r"],
+      "x": {"mode": "abs", "value": 197, "note": "StyleRightAlign_r X=#RightAlign#"},
+      "y": {"mode": "r", "note": "same Y as previous meter (MeterTop1CpuRam) = 32"},
+      "align": "Right",
+      "bold": true,
+      "fontFace": "Trebuchet MS",
+      "fontSize": 8,
+      "fontColor": "[MeasureTop1CpuThreshold] -- same threshold-driven color as MeterTop1CpuString",
+      "text": "[MeasureTop1Cpu:1]%",
+      "numOfDecimals": 1,
+      "dynamicVariables": true,
+      "hidden": {"expr": "(#NumberOfTopCpuProc# < 1)"},
+      "group": "Top1Cpu",
+      "updateDivider": -1,
+      "notes": ["Inline [MeasureTop1Cpu:1]% formats the raw CPU percent to 1 decimal and appends a literal '%'."]
+    },
+    {
+      "name": "MeterTop2CpuString .. MeterTop10CpuString / MeterTopNCpuRam / MeterTopNCpu (right)",
+      "rowPatternFor": "rows 2-10 (row 1 fully spelled out above)",
+      "template": {
+        "MeterTopNCpuString": {
+          "type": "String",
+          "measureNames": ["MeasureTopNCpu"],
+          "styles": ["styleFirstLineText", "StyleLeftAlign"],
+          "x": {"mode": "abs", "value": 7},
+          "y": {"mode": "R", "expr": "((#NumberOfTopCpuProc# >= N) ? #RowSpacing# : 0)", "note": "R = stacks below the previous meter's bottom edge (the row-N-1 right/% meter, since that's the last meter defined before this one in the file) by (prevBottom + n). n=RowSpacing(1) if this row is populated, else n=0 (zero extra gap, but the row still occupies its own natural text-line height in the stack -- see verticalFlowSummary caveat)."},
+          "w": 70,
+          "align": "Left",
+          "bold": true,
+          "fontSize": 8,
+          "fontColor": "[MeasureTopNCpuThreshold]",
+          "text": "%1",
+          "clipString": true,
+          "hidden": {"expr": "(#NumberOfTopCpuProc# < N)"},
+          "group": "TopNCpu",
+          "updateDivider": -1
+        },
+        "MeterTopNCpuRam": {
+          "type": "String",
+          "measureNames": ["MeasureTopNCpuRamCalc"],
+          "styles": ["styleFirstLineText", "StyleCenterAlign_r"],
+          "x": {"mode": "abs", "value": 103},
+          "y": {"mode": "r"},
+          "align": "Center",
+          "bold": true,
+          "fontSize": 8,
+          "fontColor": "colorText2,colorText2Alpha",
+          "text": "%1B",
+          "numOfDecimals": 1,
+          "autoScaleUnits": true,
+          "hidden": {"expr": "(#RamUsageByCpuProcess#=0) || (#NumberOfTopCpuProc# < N)"},
+          "group": "TopNCpuRam",
+          "updateDivider": -1
+        },
+        "MeterTopNCpu_right": {
+          "type": "String",
+          "styles": ["styleFirstLineText", "StyleRightAlign_r"],
+          "x": {"mode": "abs", "value": 197},
+          "y": {"mode": "r"},
+          "align": "Right",
+          "bold": true,
+          "fontSize": 8,
+          "fontColor": "[MeasureTopNCpuThreshold]",
+          "text": "[MeasureTopNCpu:1]%",
+          "numOfDecimals": 1,
+          "dynamicVariables": true,
+          "hidden": {"expr": "(#NumberOfTopCpuProc# < N)"},
+          "group": "TopNCpu",
+          "updateDivider": -1
+        }
+      },
+      "rows": [2, 3, 4, 5, 6, 7, 8, 9, 10],
+      "confirmedVerbatimFromFile": true,
+      "effectiveNote": "With NumberOfTopCpuProc=5: rows 1-5 Hidden=false and render; rows 6-10 Hidden=true (and their backing measures are Disabled=true), so they never display given the current config. A from-scratch renderer targeting this exact configuration only needs to implement 5 rows, but the row-count is a variable (NumberOfTopCpuProc, 1-10 supported) in the original skin design."
+    },
+    {
+      "name": "MeterBackgroundHeight",
+      "type": "Image",
+      "solidColor": "255,255,255,0 (fully transparent)",
+      "x": {"mode": "abs", "value": 0},
+      "y": {"mode": "R", "expr": "(#BottomMargin# + #BgOffset#) = 8", "note": "8 past the bottom of the last row meter drawn before it (MeterTop10Cpu, the right/% meter of row 10, since Group=Background section comes right after all 10 CPU rows in file order)."},
+      "w": {"expr": "#BgWidth# * #Scale#", "value": 350.2},
+      "h": 1,
+      "group": "Background",
+      "updateDivider": -1,
+      "notes": ["Invisible layout helper solely used so [MeterBackgroundHeight:Y] can be read by StyleBackground's H formula to size the background shape to fit all content dynamically."]
+    },
+    {
+      "name": "MeterProcessCountMouseRegion",
+      "type": "Image",
+      "solidColor": "0,0,0,0 (fully transparent)",
+      "x": {"expr": "[MeterProcessCount:X] * #Scale#"},
+      "y": {"expr": "[MeterProcessCount:Y] * #Scale#"},
+      "w": {"expr": "[MeterProcessCount:W] * #Scale#"},
+      "h": {"expr": "[MeterProcessCount:H] * #Scale#"},
+      "tooltipText": "Number of active processes\\nLegend:\\n PROCESS | RAM | CPU",
+      "updateDivider": -1,
+      "notes": ["Transparent hover-tooltip hit-region exactly overlapping MeterProcessCount. Manually re-multiplies by #Scale# because Rainmeter's TransformationMatrix scales the visual render of a meter but NOT the :X/:Y/:W/:H values reported back when referenced from another meter -- those remain in unscaled skin-space, hence this manual correction to get real screen-space coordinates."]
+    }
+  ],
+  "skipped": [
+    {
+      "name": "ControlSettings_",
+      "reason": "Group=Controls",
+      "detail": "String meter, Hidden=1, FontFace=ElegantIcons (icon font), Text='[\\x0xe035]' (gear glyph), X=(#RightAlign#-30), Y=1r, FontColor=135,206,250, TransformationMatrix=Scale. Only shown/toggled via MouseOverAction/MouseLeaveAction on the Controls meter group -- a hover-reveal settings gear icon. Not part of the static data display."
+    },
+    {
+      "name": "ControlSettings",
+      "reason": "Group=Controls",
+      "detail": "Image meter, Hidden=1, MeterStyle=StyleMouseRegion|StyleMouseRegionStringButtonHover, LeftMouseUpAction opens Settings/SettingsSkins2.ini. Invisible click-region tied to the gear icon above."
+    }
+  ],
+  "verticalFlowSummary": "Background capsule (unscaled y=5..~) -> Title row 'TOP CPU' centered at y=9 (abs) with process-count integer right-aligned same row -> Row1 (name/ram/cpu%) at y=32 (abs, TopMarginFormula) -> Rows 2-5 each stack below the previous row's bottom edge + RowSpacing(1) via Y=1R chaining (R = prevMeter.Y + prevMeter.H + n) -> Rows 6-10 exist in the file but are Hidden+Disabled given NumberOfTopCpuProc=5, stacking with 0 extra gap (Y=0R) directly atop row 5's bottom -> MeterBackgroundHeight (invisible) sits 8px (BottomMargin+BgOffset) below the last meter drawn (row 10's rightmost meter) and its resolved Y drives the background shape's total height.",
+  "notes": [
+    "CAVEAT (hidden-meter stacking): Rainmeter's R/r relative-position resolution uses the immediately-preceding meter's resolved X/Y/W/H regardless of that meter's Hidden state -- hidden meters still occupy layout space equal to their natural (auto or explicit) height. Since rows 6-10 are always Hidden+Disabled under the given fixed variables (NumberOfTopCpuProc=5), and their own Y=0R (no added gap) references the prior row, they should stack with zero visual gap directly under row 5, adding no extra visible height beyond their own single text-line height repeated 5 times. HOWEVER, because a String meter's own H auto-sizes to its text bounding box (~ single line at 8pt Trebuchet MS Bold, no explicit H set on these meters), this could still add non-zero invisible height to the dynamic window/background if the renderer computes bounding boxes the same way Rainmeter does. Recommend either (a) verifying this empirically against a live Rainmeter render at NumberOfTopCpuProc=5, or (b) simply hard-coding a 5-row layout for this configuration and treating rows 6-10 as unused/dead code, since the resolved variable value never varies within this extraction.",
+    "Row line height is font-metric-dependent: Rainmeter (GDI+/DirectWrite text engine) auto-sizes each String meter's H to the natural line height of Trebuchet MS Bold at 8pt (times TransformationMatrix Scale=1.7). No fixed pixel value is given in the ini. A pixel-perfect Direct2D/DirectWrite reimplementation should measure this using the same font/size/weight rather than assume a constant, then apply RowSpacing(1 unscaled)=1.7px gaps between rows as per the Y=1R formula.",
+    "Column X positions (unscaled, multiply by Scale=1.7 for final px): Left/name = 7 (ContentMarginFormula), Center/RAM = 103 (CenterAlign), Right/CPU% = 197 (RightAlign). Row1's Left meter has an explicit W=70 (clip width) -- other columns are unconstrained width (auto-fit to formatted text) but positioned by their StringAlign anchor.",
+    "Text formats: process name = raw string from UsageMonitor (Substitute empty->'---' only); RAM column = '<value autoscaled to 1 decimal><K|M|G>B' e.g. '80.9MB'; CPU% column = '<value to 1 decimal>%' e.g. '4.8%'.",
+    "UsageMonitor plugin usage: primary CPU measures use Category/Counter implicitly via Alias=CPU + Index=N (Index selects the Nth-ranked process by that Alias's metric) plus Blacklist=#TopCpuBlacklist# (_Total|Idle) to exclude aggregate/idle pseudo-processes; the paired RAM measure for the same row instead uses Name=[MeasureTopNCpu] (chaining to the already-resolved process identity of the CPU measure) with Alias=RAM and NO Index/Blacklist of its own, ensuring it reports RAM for the exact same process the CPU column identified (not independently re-ranked by RAM).",
+    "Threshold-based coloring: TopCPUThreshold=20 (percent). A row's Left+Right text (Group=TopNCpu) switches from colorText(0,0,0/205) to colorRed(204,0,0) at alpha 205 (not 255) when that row's CPU% >= 20. The center RAM column is never threshold-colored -- always colorText2 (60,65,62/205).",
+    "Group=Controls meters (ControlSettings_, ControlSettings) are hover-reveal UI chrome (settings gear icon + its click region) unrelated to the data display; excluded from the meters list per instructions, see 'skipped'.",
+    "Only TopCPU (not TopRAM) has a MeasureProcessCount / MeterProcessCount / MeterProcessCountMouseRegion -- the total running-process count and its tooltip are unique to this panel."
+  ]
+}

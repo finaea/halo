@@ -1,0 +1,390 @@
+{
+  "panel": "drives",
+  "sourceFiles": [
+    "RainformerHWiv2/Drives/Drives.ini (UTF-16LE, 4384+ lines; 26 repeated per-drive-slot blocks A..Z + shared header/footer)",
+    "RainformerHWiv2/Drives/DriveMeasures.inc (plain ASCII despite folder convention, ~4700+ lines; 26 repeated per-drive-slot measure blocks + shared header)",
+    "RainformerHWiv2/@Resources/DriveVars.inc (UTF-16LE, 236 lines, read in full)",
+    "RainformerHWiv2/@Resources/HWiNFO.inc (UTF-16LE; drive temp sensor table at lines ~153-256)",
+    "RainformerHWiv2/@Resources/Variables.inc (used to resolve alpha/opacity variables not given in the prompt's global summary)",
+    "RainformerHWiv2/@Resources/Styles.inc (UTF-16LE, 313 lines, read in full, resolves all MeterStyle chains used by this panel)"
+  ],
+  "rainmeterUpdateMs": 1000,
+  "encodingNote": "Drives.ini, DriveVars.inc, HWiNFO.inc, Styles.inc are UTF-16LE. DriveMeasures.inc is plain single-byte text (ASCII/UTF-8), inconsistent with its siblings but confirmed by byte inspection (first bytes 0x3B,0x5B = ';[' with no null interleave). Both decode correctly through the Read tool; ripgrep/Grep only works directly on DriveMeasures.inc, the UTF-16LE files needed PowerShell Get-Content -Encoding Unicode to locate section boundaries.",
+
+  "localVariables": {
+    "scope": "These are Drives.ini's own [Variables] block (layered on top of the shared @Resources/Variables.inc + DriveVars.inc + HWiNFO.inc includes).",
+    "ShowGraph": 1,
+    "spaceInUseDrive_1_to_26": "Per-drive toggle controlling whether the usage bar/text shows 'Used' (1) or 'Free' (0). Values in file: [1]=1 [2]=1 [3]=1 [4]=1 [5]=0 [6]=1 [7]=1 [8]=1 [9]=1 [10]=0 [11]=1 [12]=1 [13]=0 [14]=1 [15]=0 [16]=0 [17]=0 [18]=0 [19]=0 [20]=0 [21]=0 [22]=0 [23]=0 [24]=0 [25]=0 [26]=1. Toggled at runtime by clicking the invisible meterUsedFreeDriveN overlay (bang: SetVariable + WriteKeyValue back into DriveVars.inc, persisting the choice).",
+    "note": "These override/extend, they do not conflict with, the @Resources includes documented below."
+  },
+
+  "resolvedColorsAndAlphas": {
+    "note": "Prompt's GLOBAL VARIABLES block already gave the RGB triples; the alpha/opacity components (needed for exact ARGB) were only in @Resources/Variables.inc and are filled in here.",
+    "colorTitle": "0,0,0", "colorTitleAlpha": 255,
+    "colorText": "0,0,0", "colorTextAlpha": 205,
+    "colorText2": "60,65,62", "colorText2Alpha": 205,
+    "colorActiveTitle": "255,128,0", "colorActiveTitleAlpha": 255,
+    "colorBar": "93,141,172", "colorBarAlpha": 255,
+    "ColorBarWarn": "220,20,60", "note_ColorBarWarn": "not previously listed; this is the bar 'low space / near full' warning color, alpha shared with colorBarAlpha=255",
+    "colorHistogram": "176,196,222", "colorHistogramAlpha": 250,
+    "colorRed": "204,0,0", "colorRedAlpha": 255,
+    "colorInactiveButton": "120,120,120", "colorInactiveButtonAlpha": 255,
+    "EmptyBarColor": "255,255,255", "EmptyBarColorAlpha": 25,
+    "BgTopColor": "163,178,230", "BgTopOpacity": 180,
+    "BgBodyColor": "230,230,230", "BgBodyOpacity": 180,
+    "StrokeColor": "96,138,203", "StrokeColorAlpha": 100,
+    "Stroke_Width": 0,
+    "note_stroke": "The background card's outline (Shape7 in StyleBackground) is stroked with StrokeColor/StrokeColorAlpha but at Stroke_Width=0, so it is effectively INVISIBLE in this (non-'recovery') theme. Do not render a visible border.",
+    "SolidColorLabel": "248,248,248", "SolidColorLabelAlpha": 255,
+    "DevTempWarnColorTh1": "47,186,255", "comment1": "cool blue, temp < 35C",
+    "DevTempWarnColorTh2": "255,255,36", "comment2": "yellow, 35 <= temp < 45C",
+    "DevTempWarnColorTh3": "255,143,30", "comment3": "orange, 45 <= temp < 55C",
+    "DevTempWarnColorTh4": "255,0,0", "comment4": "red, 55 <= temp < 65C",
+    "DevTempWarnColorTh5": "204,0,0", "comment5": "dark red, temp >= 65C",
+    "DriveTempWarnTh1": 35, "DriveTempWarnTh2": 45, "DriveTempWarnTh3": 55, "DriveTempWarnTh4": 65,
+    "hoverAlpha": 180,
+    "colorDrive_table_1_to_26": {
+      "1": "101,255,35", "2": "255,225,60", "3": "255,97,0", "4": "217,0,252", "5": "127,147,146",
+      "6": "145,108,232", "7": "0,159,255", "8": "203,204,116", "9": "121,182,62", "10": "204,255,0",
+      "11": "250,255,246", "12": "191,100,55", "13": "113,41,0", "14": "179,0,91", "15": "102,109,0",
+      "16": "99,125,217", "17": "132,255,244", "18": "17,37,255", "19": "250,158,0", "20": "255,0,0",
+      "21": "199,139,189", "22": "193,175,63", "23": "0,112,250", "24": "251,3,146", "25": "6,124,0", "26": "119,0,178",
+      "note": "colorDriveN is the per-drive accent color, used (a) tinting the '(X:)' prefix of the drive label via InlineSetting/InlinePattern, and (b) as the LineColor of that drive's series in the shared write/read histogram graph."
+    }
+  },
+
+  "geometry": {
+    "Scale": 1.7,
+    "note": "All X/Y/W/H below (and throughout this document unless stated otherwise) are UNSCALED logical/design units taken directly from the .ini/.inc math, exactly as instructed. Every meter carries TransformationMatrix=#Scale#;0;0;#Scale#;#Scale#;#Scale#, i.e. the whole panel (including font rendering) is drawn at 1x logical layout then uniformly scaled 1.7x about the origin at render time. A D2D re-implementation should do the same: lay out in logical units, then apply a single 1.7x scale transform (do not scale coordinates by hand).",
+    "BgOffset": 5, "AbsMargin": 3, "TopMargin": 28, "BottomMargin": 3, "RowSpacing": 1, "CornerRadius": 4,
+    "BgShapeW": 196,
+    "BgShapeX": "#BgOffset# = 5", "BgShapeY": "#BgOffset# = 5",
+    "BgWidth": "(#BgShapeW# + #BgOffset#*2) = 196 + 10 = 206",
+    "TopMarginFormula": "(#TopMargin# + #BgOffset# - 1) = 28+5-1 = 32",
+    "ContentMarginFormula": "((#AbsMargin# + #BgOffset#) - 1) = (3+5)-1 = 7",
+    "RightAlign": "(#BgWidth# - (#AbsMargin#+#BgOffset#) - 1) = 206-8-1 = 197",
+    "ContentWidth": "(#BgWidth# - (#AbsMargin#+#BgOffset#)*2) = 206-16 = 190",
+    "CenterAlign": "(#BgWidth#/2) = 103",
+    "FontFamily": "Trebuchet MS", "textSize": 8,
+    "GraphStyle": "Line", "GraphStartSide": "Left", "GraphAutoscale": 0,
+    "deg": "literal file value is the string \"[\\x0x00B0]\" (note the doubled 0x prefix -- appears to be a copy/paste artifact repeated skin-wide, also seen on the ElegantIcons glyph escapes like meterHideGraphs_'s Text=[\\x0xe035]). Author's unambiguous intent is the degree sign U+00B0 (°). RECOMMENDATION: hardcode ° rather than trying to replicate Rainmeter's literal escape parsing.",
+    "TempUnitLetter": "C"
+  },
+
+  "backgroundShape": {
+    "meterStyle": "StyleBackground (@Resources/Styles.inc), applied by [MeterBackground] (Group=Background) at the very top of the panel, X=0 Y=0",
+    "overallSize": {
+      "W_logical": "(#BgShapeW#+0.06) + (#BgOffset#*2) = 196.06 + 10 = 206.06 (~= BgWidth, +0.06 fudge factor to avoid an antialiasing seam)",
+      "H_logical": "[MeterBackgroundHeight:Y] -- dynamic, equals the Y position of the invisible 1px anchor meter placed right after the two histogram graphs (see footerMeters); i.e. total content height = last-visible-drive-row-bottom + graph height (if shown) + BottomMargin + BgOffset + 2"
+    },
+    "twoZoneConstruction": [
+      {
+        "zone": "title/top tab",
+        "shapes": "Shape = RoundRect at (BgShapeX,BgShapeY)=(5,5), size (196,21), radius=CornerRadius(4), Fill=BgTopColor/BgTopOpacity, StrokeWidth=0. Shape2 = plain Rect at (5,13), size (196,14), no radius. Shape3 = Combine Shape | Union Shape2.",
+        "renders_as": "Shape3 only (Shape and Shape2 are consumed by the Combine and are not drawn standalone, per Rainmeter Shape-meter semantics) -- net visual is a rounded-TOP-corners / square-bottom tab, ~22 logical units tall, filled BgTopColor(163,178,230) @ alpha 180."
+      },
+      {
+        "zone": "body/lower panel",
+        "shapes": "Shape4 = RoundRect at (5, 24.5), size (196, [[CURRENTSECTION]:H] - ((BgShapeX+12.3)*2)), radius=CornerRadius(4), Fill=BgBodyColor/BgBodyOpacity. Shape5 = plain Rect at (5,24), size (196,15), no radius. Shape6 = Combine Shape4 | Union Shape5.",
+        "renders_as": "Shape6 only -- net visual is a square-TOP / rounded-BOTTOM-corners body panel, height tracks total content height, filled BgBodyColor(230,230,230) @ alpha 180. Its square top overlaps/seams with the tab's square bottom so the two zones read as one continuous rounded card."
+      },
+      {
+        "zone": "outline/frame",
+        "shapes": "Shape7 = RoundRect at (4.5,4.5), size (197, totalH+Scale-2*BgShapeX), radius=(CornerRadius+0.5), StrokeWidth=(Stroke_Width*Scale)=0, StrokeColor/StrokeColorAlpha, Fill=0,0,0,0.",
+        "renders_as": "Not visible in this theme (Stroke_Width=0 -> 0px stroke). Present in the file only; omit or render at 0 width."
+      }
+    ]
+  },
+
+  "hwinfoDriveTempSensors": {
+    "note": "Resolved from @Resources/HWiNFO.inc lines ~153-256. Rainmeter variable names are case-insensitive, so #HWiNFO-Drive3-Temp-SensorId# used in DriveMeasures.inc resolves to the value of HWiNFO-DRIVE3-Temp-SensorId defined here. All 26 drive slots share the SAME SensorId (0xf0000100); they are distinguished by SensorInstance (which physical drive controller port) and EntryId (which temperature entry within that instance). HWiNFOType=CurrentValue, HWiNFOLogHandler=0 for all.",
+    "table": {
+      "1": {"SensorId": "0xf0000100", "SensorInstance": "0x0", "EntryId": "0x0"},
+      "2": {"SensorId": "0xf0000100", "SensorInstance": "0x0", "EntryId": "0x0"},
+      "3": {"SensorId": "0xf0000100", "SensorInstance": "0x5", "EntryId": "0x1000000"},
+      "4": {"SensorId": "0xf0000100", "SensorInstance": "0x6", "EntryId": "0x1000000"},
+      "5": {"SensorId": "0xf0000100", "SensorInstance": "0x0", "EntryId": "MISSING -- HWiNFO.inc defines HWiNFO-DRIVE5-Temp-SensorId and -SensorInstance but has NO -EntryId line at all (verified: line 171-173 jumps straight from SensorInstance=0x0 to the comment for Drive 6). #HWiNFO-Drive5-Temp-EntryId# will resolve to an empty/undefined variable. This is a genuine inconsistency in the source skin, not a transcription error -- flagged as a caveat."},
+      "6": {"SensorId": "0xf0000100", "SensorInstance": "0x1", "EntryId": "0x1000000"},
+      "7": {"SensorId": "0xf0000100", "SensorInstance": "0x3", "EntryId": "0x1000000"},
+      "8": {"SensorId": "0xf0000100", "SensorInstance": "0x4", "EntryId": "0x1000000"},
+      "9": {"SensorId": "0xf0000100", "SensorInstance": "0x2", "EntryId": "0x1000000"},
+      "10_to_26": "SensorId=0xf0000100, SensorInstance=0x0, EntryId=0x0 for all (unused/placeholder slots)"
+    }
+  },
+
+  "activeDrives": {
+    "letters": ["C", "D", "E", "F", "G", "H", "I"],
+    "driveSlotIndex": {"C": 3, "D": 4, "E": 5, "F": 6, "G": 7, "H": 8, "I": 9},
+    "howEnablementWorks": [
+      "1. Drives.ini/@Resources includes define up to 26 drive 'slots' (index 1..26, letter d1=A: .. d26=Z:), each with its own full set of measures+meters, almost all Hidden/Disabled by conditions.",
+      "2. @Resources/DriveVars.inc ShowDrives=ABCDEFGHIJKLMN is a string scanned letter-by-letter by [measureShowDrives] (Measure=String, IfMatch/IfMatch2..26). For each letter present, showDriveN is forced to 1 (persisted via WriteKeyValue back into DriveVars.inc); for letters absent (O-Z, plus any of A-N not in the string) showDriveN=0. This is the user-facing 'which drive letters do you want to show' master toggle -- separate strings ShowDrivesRWData / ShowDrivesOnGraph / ShowDrivesTemps (all also 'ABCDEFGHIJKLMN' in this file) independently gate the RW-rate row, the histogram-graph line, and the temperature display per drive.",
+      "3. [calcDriveNExists] (Measure=Calc) = (measureTotalDriveN > 0 && showDriveN==1) ? 1 : 0 -- i.e. a slot is 'real' only if Windows actually reports a total capacity > 0 for that drive letter (the drive is physically present/mounted) AND the user has not disabled it. The boolean result is written to the persistent variable existsDriveN (via WriteKeyValue into DriveVars.inc) and drives virtually every Hidden=/Disabled=/UpdateDivider= expression in the panel.",
+      "4. On THIS machine's snapshot (DriveVars.inc as shipped/cached): existsDrive1..2=0 (A:,B: absent), existsDrive3..9=1 (C:-I: present), existsDrive10..26=0. showDriveN=1 for slots 1-14, spaceInUseDriveN (used-vs-free display mode) = 1 for slots 1-4,6-9,11,12,14,26 and 0 for slots 5,10,13,15-25.",
+      "5. Net result: exactly 7 visible rows, for C,D,E,F,G,H,I, in that letter order (slot index order == alphabetical order since d{N} is a fixed A-Z map, not a sorted-by-presence remap)."
+    ],
+    "perDriveResolvedState": {
+      "C": {"slot": 3, "colorDrive": "255,97,0", "spaceInUseMode": "Used", "showTemp": 1, "showRW": 1, "showGraph": 1, "sensorInstance": "0x5", "sensorEntryId": "0x1000000", "histogramSeriesIndex": 24},
+      "D": {"slot": 4, "colorDrive": "217,0,252", "spaceInUseMode": "Used", "showTemp": 1, "showRW": 1, "showGraph": 1, "sensorInstance": "0x6", "sensorEntryId": "0x1000000", "histogramSeriesIndex": 23},
+      "E": {"slot": 5, "colorDrive": "127,147,146", "spaceInUseMode": "Free", "showTemp": 1, "showRW": 1, "showGraph": 1, "sensorInstance": "0x0", "sensorEntryId": "MISSING (see hwinfoDriveTempSensors)", "histogramSeriesIndex": 22},
+      "F": {"slot": 6, "colorDrive": "145,108,232", "spaceInUseMode": "Used", "showTemp": 1, "showRW": 1, "showGraph": 1, "sensorInstance": "0x1", "sensorEntryId": "0x1000000", "histogramSeriesIndex": 21},
+      "G": {"slot": 7, "colorDrive": "0,159,255", "spaceInUseMode": "Used", "showTemp": 1, "showRW": 1, "showGraph": 1, "sensorInstance": "0x3", "sensorEntryId": "0x1000000", "histogramSeriesIndex": 20},
+      "H": {"slot": 8, "colorDrive": "203,204,116", "spaceInUseMode": "Used", "showTemp": 1, "showRW": 1, "showGraph": 1, "sensorInstance": "0x4", "sensorEntryId": "0x1000000", "histogramSeriesIndex": 19},
+      "I": {"slot": 9, "colorDrive": "121,182,62", "spaceInUseMode": "Used", "showTemp": 1, "showRW": 1, "showGraph": 1, "sensorInstance": "0x2", "sensorEntryId": "0x1000000", "histogramSeriesIndex": 18}
+    }
+  },
+
+  "criticalLayoutMechanism": "This entire panel is one flat chain of 26 slots x 11 meters (286 meters) plus 26 slots x 15 measures (390 measures), almost all wrapped in Hidden=(...)/Disabled=(...) conditions keyed off existsDriveN. Rainmeter's documented behavior is that a Hidden meter contributes ZERO width/height to the R/r relative-position resolution of meters that come after it in file order -- this is the load-bearing trick that lets the flat 26-slot chain visually collapse to exactly the 7 populated rows (C..I) with no phantom gaps for A:,B:,J:..Z:. A D2D re-implementation should NOT attempt to replicate 286 always-present meters; it should simply iterate only the drives that exist (per activeDrives) and stack the 5 sub-rows below, using the row pitch rules below.",
+
+  "perDriveTemplate": {
+    "placeholders": "{N} = drive slot index 1..26 (only 3..9 populated on this machine). {d} = the drive-letter token #d{N}# (e.g. #d3# = 'C:'). All Y values below assume the drive at {N} is the CURRENT drive being laid out and that existsDrive{N}=1 (visible case); the collapsed/hidden-slot case is covered by criticalLayoutMechanism above.",
+    "measures": [
+      {
+        "name": "measureLabelDrive{N}",
+        "kind": "FreeDiskSpace",
+        "details": "Drive=#d{N}#, Label=1, IgnoreRemovable=0 (removable drives are NOT ignored/excluded). Returns the Windows volume label string (e.g. 'Local SSD') via %1.",
+        "updateDivider": "((#existsDrive{N}#=0)?(-1):(1)) -- normal cadence when the drive is present, update-once-then-freeze when absent",
+        "ifConditions": [],
+        "onChangeAction": "[!UpdateMeter meterLabelDrive{N}_]",
+        "disabled": "(#existsDrive{N}#=0)"
+      },
+      {
+        "name": "TempDrive{N}",
+        "kind": "Plugin (HWiNFO.dll)",
+        "details": "HWiNFOSensorId=#HWiNFO-Drive{N}-Temp-SensorId#, HWiNFOSensorInstance=#HWiNFO-Drive{N}-Temp-SensorInstance#, HWiNFOEntryId=#HWiNFO-Drive{N}-Temp-EntryId#, HWiNFOType=CurrentValue, HWiNFOLogHandler=0. Resolved sensor ids in hwinfoDriveTempSensors above.",
+        "updateDivider": "(((#existsDrive{N}#=0)||(#showDrive{N}Temp#=0))?(-1):(1))",
+        "ifConditions": [],
+        "onChangeAction": "[!UpdateMeasure TempWarnDrive{N}][!UpdateMeter meterTempDrive{N}]",
+        "disabled": "(#existsDrive{N}#=0) || (#showDrive{N}Temp#=0)"
+      },
+      {
+        "name": "TempWarnDrive{N}",
+        "kind": "Calc",
+        "details": "Formula=TempDrive{N} < #DriveTempWarnTh1# ? -1 : (TempDrive{N} < #DriveTempWarnTh2# ? -2 : (TempDrive{N} < #DriveTempWarnTh3# ? -3 : (TempDrive{N} < #DriveTempWarnTh4# ? -4 : -5)))",
+        "substitute": {"-1": "#DevTempWarnColorTh1# (47,186,255)", "-2": "#DevTempWarnColorTh2# (255,255,36)", "-3": "#DevTempWarnColorTh3# (255,143,30)", "-4": "#DevTempWarnColorTh4# (255,0,0)", "-5": "#DevTempWarnColorTh5# (204,0,0)"},
+        "updateDivider": -1,
+        "onChangeAction": "[!UpdateMeter meterTempDrive{N}]",
+        "disabled": "(#existsDrive{N}#=0) || (#showDrive{N}Temp#=0)",
+        "note": "The Calc measure's numeric output (-1..-5) is turned into an RGB-triple STRING by Substitute, then consumed directly as meterTempDrive{N}'s FontColor via the inline measure reference [TempWarnDrive{N}] (not a #Variable#) -- requires DynamicVariables=1 on the meter."
+      },
+      { "name": "measureUsedDrive{N}", "kind": "FreeDiskSpace", "details": "Drive=#d{N}#, InvertMeasure=1, IgnoreRemovable=0 -> returns USED bytes (FreeDiskSpace's native value is free space; InvertMeasure flips it to total-free=used).", "updateDivider": "(((#existsDrive{N}#=0)||(#spaceInUseDrive{N}#=0))?(-1):(1)) -- only actively polled while the panel is in 'Used' display mode for this drive", "disabled": "(#existsDrive{N}#=0) || (#spaceInUseDrive{N}#=0)", "onChangeAction": "[!UpdateMeasure measureUsedPercentDrive{N}][!UpdateMeter meterUsedFreeDrive{N}_]" },
+      { "name": "measureUsedPercentDrive{N}", "kind": "Calc", "details": "Formula=(measureUsedDrive{N}*100/(measureTotalDrive{N}+0.000001)), MinValue=0, MaxValue=100", "ifConditions": [{"condition": "(#CURRENTSECTION# < 75)", "ifTrueEffect": "SetOption meterUsedBarDrive{N} BarColor #colorBar#,#colorBarAlpha# (93,141,172/255 -- normal)", "ifFalseEffect": "SetOption meterUsedBarDrive{N} BarColor #ColorBarWarn#,#colorBarAlpha# (220,20,60/255 -- near-full warning, >=75% used)"}], "updateDivider": -1, "disabled": "(#existsDrive{N}#=0) || (#spaceInUseDrive{N}#=0)" },
+      { "name": "measureFreeDrive{N}", "kind": "FreeDiskSpace", "details": "Drive=#d{N}#, IgnoreRemovable=0 -> native free-bytes value.", "updateDivider": "(((#existsDrive{N}#=0)||(#spaceInUseDrive{N}#=1))?(-1):(1)) -- only actively polled while in 'Free' display mode", "disabled": "(#existsDrive{N}#=0) || (#spaceInUseDrive{N}#=1)", "onChangeAction": "[!UpdateMeasure measureFreePercentDrive{N}][!UpdateMeter meterUsedFreeDrive{N}_]" },
+      { "name": "measureFreePercentDrive{N}", "kind": "Calc", "details": "Formula=(measureFreeDrive{N}*100/(measureTotalDrive{N}+0.000001)), MinValue=0, MaxValue=100", "ifConditions": [{"condition": "(#CURRENTSECTION# > 25)", "ifTrueEffect": "SetOption meterFreeBarDrive{N} BarColor #colorBar#,#colorBarAlpha# -- normal", "ifFalseEffect": "SetOption meterFreeBarDrive{N} BarColor #ColorBarWarn#,#colorBarAlpha# -- <=25% free, warning"}], "updateDivider": -1, "disabled": "(#existsDrive{N}#=0) || (#spaceInUseDrive{N}#=1)" },
+      { "name": "measureTotalDrive{N}", "kind": "FreeDiskSpace", "details": "Drive=#d{N}#, Total=1, IgnoreRemovable=0 -> total capacity bytes.", "updateDivider": "n/a", "disabled": 1, "note": "Permanently Disabled=1 as a baseline; only refreshed via its OnChangeAction cascade: [!EnableMeasure calcDrive{N}Exists][!UpdateMeasure calcDrive{N}Exists][Delay 1000][!DisableMeasure calcDrive{N}Exists], and re-armed itself by measureShowDrives' IfMatchAction/IfNotMatchAction. This is a one-shot polling idiom for hot-plug/removable-drive detection; a D2D renderer can simply poll GetDiskFreeSpaceEx on its own schedule instead of replicating this exact enable/disable pulse chain.", "onChangeAction": "[!EnableMeasure calcDrive{N}Exists][!UpdateMeasure calcDrive{N}Exists][Delay 1000][!DisableMeasure calcDrive{N}Exists]" },
+      { "name": "calcDrive{N}Exists", "kind": "Calc", "details": "Formula=(measureTotalDrive{N} > 0 && (#showDrive{N}#=1)) ? 1 : 0", "ifConditions": [{"condition": "(#CURRENTSECTION#=1)", "ifTrueEffect": "SetVariable existsDrive{N} 1, persist to DriveVars.inc, refresh Drive{N} measure/meter groups + Background", "ifFalseEffect": "SetVariable existsDrive{N} 0, persist, refresh same groups"}], "onChangeAction": "[!EnableMeasure calcDrive{N}Graph][!UpdateMeasure calcDrive{N}Graph][!DisableMeasure calcDrive{N}Graph][!UpdateMeterGroup DriveMr]" },
+      { "name": "calcDrive{N}Graph", "kind": "Calc", "details": "No Formula key (defaults to 0); purely a vehicle for its IfCondition.", "ifConditions": [{"condition": "(#existsDrive{N}#=1) && (#showDrive{N}Graph#=1)", "ifTrueEffect": "Rebinds the shared histogram's series slot (index = 27-{N}, see graphMeters) to this drive's measures/color: SetOption meterWritingHistogram MeasureName{27-N} measureWritingDrive{N}; SetOption meterReadingHistogram MeasureName{27-N} measureReadingDrive{N}; both LineColor{27-N} set to #colorDrive{N}#,#colorHistogramAlpha#", "ifFalseEffect": "Rebinds that series slot to the neutral off-measure and 0-alpha color: MeasureName{27-N}=measureRWDriveOff, LineColor{27-N}=0,0,0,0 (flat, invisible line)"}] },
+      { "name": "measureSpaceInUseDrive{N}", "kind": "Calc", "details": "Formula=#spaceInUseDrive{N}#", "ifConditions": [{"condition": "(#CURRENTSECTION#=0)", "ifTrueEffect": "SetOption meterUsedFreeDrive{N}_ MeasureName measureFreeDrive{N}; Text 'Free: %1B' (Free display mode)", "ifFalseEffect": "SetOption meterUsedFreeDrive{N}_ MeasureName measureUsedDrive{N}; Text 'Used: %1B' (Used display mode, spaceInUseDrive{N}=1)"}], "updateDivider": -1, "disabled": "(#existsDrive{N}#=0)", "note": "This is how meterUsedFreeDrive{N}_ gets its MeasureName/Text at all -- the meter itself ships with MeasureName= blank in the .ini and is populated purely by this bang cascade at load/toggle time." },
+      { "name": "measureWritingDrive{N}", "kind": "Plugin (UsageMonitor)", "details": "Category=LogicalDisk, Counter=\"Disk Write Bytes/sec\", Name=#d{N}# (e.g. 'C:'). Raw bytes/sec.", "updateDivider": "(((#existsDrive{N}#=0)||((#showDrive{N}RW#=0)&&(#showDrive{N}Graph#=0)))?(-1):(1)) -- polled if EITHER the RW-rate row OR the histogram graph needs it", "disabled": "(#existsDrive{N}#=0) || ((#showDrive{N}RW#=0) && (#showDrive{N}Graph#=0))", "onChangeAction": "[!UpdateMeasure measureWritingDrive{N}Calc][!UpdateMeterGroup Drive{N}W]" },
+      { "name": "measureWritingDrive{N}Calc", "kind": "Calc", "details": "Formula=measureWritingDrive{N} (passthrough)", "ifConditions": [{"condition": "IfEqualValue=0", "ifTrueEffect": "SetOption meterWritingIndicatorDrive{N} FontColor #colorInactiveButton#,#colorInactiveButtonAlpha# (120,120,120/255 -- idle)"}, {"condition": "IfAboveValue=0", "ifTrueEffect": "SetOption meterWritingIndicatorDrive{N} FontColor #colorRed#,#colorRedAlpha# (204,0,0/255 -- actively writing)"}], "updateDivider": -1, "disabled": "(#existsDrive{N}#=0) || (#showDrive{N}RW#=0)" },
+      { "name": "measureReadingDrive{N}", "kind": "Plugin (UsageMonitor)", "details": "Category=LogicalDisk, Counter=\"Disk Read Bytes/sec\", Name=#d{N}#. Raw bytes/sec.", "updateDivider": "same pattern as measureWritingDrive{N}", "disabled": "(#existsDrive{N}#=0) || ((#showDrive{N}RW#=0) && (#showDrive{N}Graph#=0))", "onChangeAction": "[!UpdateMeasure measureReadingDrive{N}Calc][!UpdateMeterGroup Drive{N}R]" },
+      { "name": "measureReadingDrive{N}Calc", "kind": "Calc", "details": "Formula=measureReadingDrive{N} (passthrough)", "ifConditions": [{"condition": "IfEqualValue=0", "ifTrueEffect": "SetOption meterReadingIndicatorDrive{N} FontColor #colorInactiveButton#,#colorInactiveButtonAlpha# -- idle"}, {"condition": "IfAboveValue=0", "ifTrueEffect": "SetOption meterReadingIndicatorDrive{N} FontColor #colorRed#,#colorRedAlpha# -- actively reading"}], "updateDivider": -1, "disabled": "(#existsDrive{N}#=0) || (#showDrive{N}RW#=0)" }
+    ],
+
+    "meters": [
+      {
+        "name": "meterLabelDrive{N}_",
+        "row": 1, "type": "STRING",
+        "styles": "styleFirstLineText | StyleCenterAlign  [ONLY for slot N=1; ALL other slots (2..26, including every currently-visible C..I) use StyleCenterAlign | stylePrimaryText instead -- same resolved font/color, only the nominal Y-anchor documented in the unused style key differs; irrelevant because the meter's own explicit Y= always wins]",
+        "x": {"expr": "#CenterAlign#", "value": 103, "mode": "absolute"},
+        "y": {"expr": "N==1 ? #TopMarginFormula# (absolute) : ((#existsDrive{N}#=1) ? #RowSpacing#+1 : 0) R", "value": "32 for slot1 (absolute); otherwise prevMeterBottom+2 when this drive exists, prevMeterBottom+0 when it doesn't (prevMeter = the ReadingRateDrive of whatever slot immediately precedes this one in file order, which per criticalLayoutMechanism collapses through any intervening non-existent slots)", "mode": "absolute|R"},
+        "w": {"expr": "#ContentWidth#-65", "value": 125},
+        "h": "auto (no explicit H; sized to one line of 8pt Trebuchet MS Bold text -- font-metric dependent, must be measured by the D2D text layout, not hardcoded)",
+        "align": "Center", "case": "NONE", "bold": true, "fontSize": 8,
+        "fontColor": "#colorText#,#colorTextAlpha# = 0,0,0/205 for the body of the string",
+        "text": "(#d{N}#) %1  where %1 = measureLabelDrive{N} (the volume label, e.g. 'Local SSD')",
+        "measureNames": ["measureLabelDrive{N}"],
+        "inlineOverride": "InlineSetting=Color|#colorDrive{N}#,#colorHistogramAlpha# with InlinePattern=^(.*\\)).*  -- recolors just the '(X:)' prefix (through the first ')') using this drive's accent color at alpha 250; the rest of the label text stays default colorText/205.",
+        "clipString": 1,
+        "hidden": "(#existsDrive{N}#=0)",
+        "updateDivider": -1
+      },
+      {
+        "name": "meterTempDrive{N}", "row": 1, "type": "STRING",
+        "styles": "styleSecondaryText | StyleRightAlign_r",
+        "x": {"expr": "#RightAlign#", "value": 197, "mode": "absolute"},
+        "y": {"expr": "((#existsDrive{N}#=1) ? ((#showDrive{N}Temp#=1)?0:13) : 0) r", "value": "same row as the label (0r) when the temp is shown; +13 if the drive exists but temp display is toggled off (still Hidden, so purely a bookkeeping offset); +0 if the drive doesn't exist", "mode": "r"},
+        "h": "auto (8pt Trebuchet MS, normal weight)",
+        "align": "Right", "case": "NONE", "bold": false, "fontSize": 8,
+        "fontColor": "[TempWarnDrive{N}] -- live inline measure reference, resolves to one of the 5 DevTempWarnColorTh strings",
+        "text": "\"%1#deg##TempUnitLetter#\" -> e.g. '52°C'",
+        "measureNames": ["TempDrive{N}"],
+        "hidden": "(#existsDrive{N}#=0) || (#showDrive{N}Temp#=0)",
+        "updateDivider": -1
+      },
+      {
+        "name": "meterUsedFreeDrive{N}_", "row": 2, "type": "STRING",
+        "styles": "StylePrimaryText | StyleLeftAlign",
+        "x": {"expr": "#ContentMarginFormula#", "value": 7, "mode": "absolute"},
+        "y": {"expr": "((#existsDrive{N}#=1) ? #RowSpacing#-1 : 0) R", "value": "prevBottom(label/temp row)+0 when exists (RowSpacing-1=0), i.e. flush new row directly under the label/temp row; +0 (no-op) when absent", "mode": "R"},
+        "h": "auto (8pt Trebuchet MS Bold)",
+        "align": "Left", "case": "NONE", "bold": true, "fontSize": 8,
+        "fontColor": "#colorText#,#colorTextAlpha# (0,0,0/205); briefly turns #colorActiveTitle#,#colorActiveTitleAlpha# (255,128,0/255) on mouse-hover via the invisible overlay meter, see skipped[]",
+        "text": "Set at runtime by measureSpaceInUseDrive{N}'s IfCondition, NOT present as a static Text= key: either 'Used: %1B' (measureUsedDrive{N}) or 'Free: %1B' (measureFreeDrive{N}), matching this drive's spaceInUseDrive{N} toggle.",
+        "measureNames": ["measureUsedDrive{N} OR measureFreeDrive{N} (mutually exclusive, runtime-bound)"],
+        "autoscale": 1, "numOfDecimals": 1, "autoScaleUnits": "Rainmeter AutoScale on a byte count: scales by 1024 through k/M/G/T, %1 substitutes as '<value> <prefix-letter>' (e.g. '1.1 T'), the literal 'B' in the Text template completes it to 'TB'.",
+        "hidden": "(#existsDrive{N}#=0)",
+        "updateDivider": -1
+      },
+      {
+        "name": "meterTotalDrive{N}", "row": 2, "type": "STRING",
+        "styles": "StylePrimaryText | StyleRightAlign_r",
+        "x": {"expr": "#RightAlign#", "value": 197, "mode": "absolute"},
+        "y": {"expr": "r", "value": "same row as meterUsedFreeDrive{N}_ (Used/Free left, Total right, one visual row -- this is the literal source of the panel's 'Used: 1.1TB ... Total: 1.9TB' line; there is no combined X/Y string, it is two separately-aligned meters)", "mode": "r"},
+        "align": "Right", "case": "NONE", "bold": true, "fontSize": 8,
+        "fontColor": "#colorText#,#colorTextAlpha#",
+        "text": "\"Total: %1B\"", "measureNames": ["measureTotalDrive{N}"],
+        "autoscale": 1, "numOfDecimals": 1,
+        "hidden": "(#existsDrive{N}#=0)", "updateDivider": -1
+      },
+      {
+        "name": "meterUsedBarDrive{N}", "row": 3, "type": "BAR",
+        "styles": "StyleBar",
+        "x": {"expr": "#ContentMarginFormula#+1", "value": 8, "mode": "absolute"},
+        "y": {"expr": "((#existsDrive{N}#=1 && #spaceInUseDrive{N}#=1) ? #RowSpacing#-1 : 0) R", "value": "prevBottom(used/total row)+0", "mode": "R"},
+        "w": {"expr": "#ContentWidth#-2", "value": 188}, "h": 1,
+        "orientation": "HORIZONTAL", "flip": 0,
+        "solidColor": "#EmptyBarColor#,#EmptyBarColorAlpha# = 255,255,255/25 (empty track)",
+        "barColor": "set dynamically by measureUsedPercentDrive{N}'s IfCondition: #colorBar#,#colorBarAlpha# (93,141,172/255) if used% < 75, else #ColorBarWarn#,#colorBarAlpha# (220,20,60/255)",
+        "measureNames": ["measureUsedPercentDrive{N}"],
+        "percentual": "0-100 (MinValue/MaxValue on the driving Calc measure)",
+        "hidden": "(#existsDrive{N}#=0) || (#spaceInUseDrive{N}#=0)  -- shown only in 'Used' display mode",
+        "updateDivider": -1
+      },
+      {
+        "name": "meterFreeBarDrive{N}", "row": 3, "type": "BAR",
+        "styles": "StyleBar | StyleLeftAlign_r",
+        "y": {"expr": "r (no explicit Y; inherits same-Y-as-previous-meter from StyleLeftAlign_r, i.e. identical slot to meterUsedBarDrive{N})", "mode": "r"},
+        "flip": 1,
+        "solidColor": "#EmptyBarColor#,#EmptyBarColorAlpha#",
+        "barColor": "set dynamically by measureFreePercentDrive{N}'s IfCondition: colorBar if free% > 25, else ColorBarWarn",
+        "measureNames": ["measureFreePercentDrive{N}"],
+        "notes": "Flip=1 fills the bar right-to-left using the FREE percentage, which visually reconstructs the same 'used portion filled from the left' look as the Used-mode bar even though a different measure/direction drives it -- exactly one of UsedBar/FreeBar renders at a time, occupying the identical rectangle.",
+        "hidden": "(#existsDrive{N}#=0) || (#spaceInUseDrive{N}#=1)",
+        "updateDivider": -1
+      },
+      {
+        "name": "meterFixEmptyBarDrive{N}", "row": 3, "type": "Image",
+        "styles": "StyleBar | StyleLeftAlign_r",
+        "hidden": "1 (unconditionally, always hidden)",
+        "notes": "Dead/vestigial meter -- never renders under any condition observed in the file. Safe to omit entirely in a re-implementation.",
+        "updateDivider": -1
+      },
+      {
+        "name": "meterWritingIndicatorDrive{N}", "row": 4, "type": "STRING",
+        "styles": "StylePrimaryText | StyleLeftAlign_r | StyleArrowDown",
+        "x": {"expr": "#ContentMarginFormula#", "value": 7, "mode": "absolute"},
+        "y": {"expr": "((#existsDrive{N}#=1 && #showDrive{N}RW#=1) ? #RowSpacing#-1 : 0) R", "value": "prevBottom(bar row)+0", "mode": "R"},
+        "h": 14, "fontSize": 12, "fontFace": "ElegantIcons",
+        "text": "down-arrow glyph, file literal '[\\x0x37]' (see notes on the doubled-0x escape quirk; intended glyph is ElegantIcons codepoint 0x37, a downward arrow used here to denote 'writing')",
+        "fontColor": "starts #colorInactiveButton#,#colorInactiveButtonAlpha# (120,120,120/255); set to #colorRed#,#colorRedAlpha# (204,0,0/255) by measureWritingDrive{N}Calc whenever write throughput > 0",
+        "hidden": "(#existsDrive{N}#=0) || (#showDrive{N}RW#=0)",
+        "updateDivider": -1
+      },
+      {
+        "name": "meterReadingIndicatorDrive{N}", "row": 4, "type": "STRING",
+        "styles": "StylePrimaryText | StyleRightAlign_r | StyleArrowUp",
+        "x": {"expr": "#RightAlign#", "value": 197, "mode": "absolute"},
+        "y": {"expr": "r", "value": "same row as the write-arrow", "mode": "r"},
+        "h": 14, "fontSize": 12, "fontFace": "ElegantIcons",
+        "text": "up-arrow glyph, file literal '[\\x0x36]' (ElegantIcons codepoint 0x36, upward arrow, denotes 'reading')",
+        "fontColor": "same idle/active red logic as the write arrow, driven by measureReadingDrive{N}Calc",
+        "hidden": "(#existsDrive{N}#=0) || (#showDrive{N}RW#=0)",
+        "updateDivider": -1
+      },
+      {
+        "name": "meterWritingRateDrive{N}", "row": 5, "type": "STRING",
+        "styles": "styleSecondaryText | StyleLeftAlign",
+        "x": {"expr": "#ContentMarginFormula#+25", "value": 32, "mode": "absolute"},
+        "y": {"expr": "((#existsDrive{N}#=1) ? 2 : 0) r  (both ternary branches literally evaluate to 2 in the source -- the showDrive{N}RW check inside the ternary is a no-op, always yields 2)", "value": "prevMeterY(reading-arrow row)+2 -- NOT bottom-relative, so this sits inside/near the bottom edge of the 14px-tall arrow row rather than fully below it (compact/overlapping-by-design layout)", "mode": "r"},
+        "h": "auto (no explicit H)", "fontSize": 8, "case": "NONE", "bold": false,
+        "fontColor": "#colorText2#,#colorText2Alpha# = 60,65,62/205 (does NOT change color with activity -- only the arrow glyph above does)",
+        "text": "%1", "measureNames": ["measureWritingDrive{N}Calc"],
+        "autoscale": 1, "numOfDecimals": "NOT explicitly set on this meter (no NumOfDecimals key) -- relies on Rainmeter's built-in default, which differs from the explicit NumOfDecimals=1 used on the Used/Free/Total text meters. See notes[] caveat re: the example '20.6 M' given in the task prompt.",
+        "note_units": "Text is bare '%1' with no trailing literal unit letter, so AutoScale's own SI-prefix output (e.g. '20.6 M') is the ENTIRE displayed string -- unlike Total/Used which append a literal 'B'.",
+        "hidden": "(#existsDrive{N}#=0) || (#showDrive{N}RW#=0)",
+        "updateDivider": -1
+      },
+      {
+        "name": "meterReadingRateDrive{N}", "row": 5, "type": "STRING",
+        "styles": "styleSecondaryText | StyleRightAlign_r",
+        "x": {"expr": "#RightAlign#-25", "value": 172, "mode": "absolute"},
+        "y": {"expr": "r (from StyleRightAlign_r, overriding styleSecondaryText's own RowSpacing-R default) -> same row as meterWritingRateDrive{N}", "mode": "r"},
+        "h": 10, "fontSize": 8, "case": "NONE", "bold": false,
+        "fontColor": "#colorText2#,#colorText2Alpha#",
+        "text": "%1", "measureNames": ["measureReadingDrive{N}Calc"],
+        "autoscale": 1, "numOfDecimals": "not explicit, same caveat as meterWritingRateDrive{N}",
+        "hidden": "(#existsDrive{N}#=0) || (#showDrive{N}RW#=0)",
+        "updateDivider": -1,
+        "note": "This is the LAST meter in each drive's 11-meter file-order block; the next drive slot's meterLabelDrive{N+k}_ chains its Y off of THIS meter's bottom (Y + H=10), which per criticalLayoutMechanism lands exactly 2 logical units below wherever the arrow row visually ends, giving the observed clean stacking between consecutive visible drives."
+      }
+    ],
+
+    "rowPitch": "Within one visible drive block, 5 sub-rows stack with ZERO gap between each other's bottom edges (all inter-row offsets resolve to RowSpacing-1=0): [row1: label(center)+temp(right)] -> [row2: used/free(left)+total(right)] -> [row3: usage bar, full width] -> [row4: write-arrow(left)+read-arrow(right), H=14] -> [row5: write-rate(left)+read-rate(right), offset +2 from row4's TOP (not bottom), effectively nested near the bottom of the 14px arrow row]. Between consecutive VISIBLE drive blocks, the gap is a flat +2 logical units (RowSpacing+1) applied on top of the previous visible block's row5 bottom (row5.Y + row5.H = row4.Y+2+10 = row4.Y+12, then +2 = row4.Y+14, i.e. exactly where the 14px arrow row would have ended -- a deliberately tuned coincidence). Two of the five sub-row heights (row1, row2) have no explicit H in the .ini and are auto-sized to one line of 8pt Trebuchet MS text; a pixel-exact D2D re-implementation must measure that text height (at 1x logical scale, Bold for row1/label, Bold for row2, then multiply the whole assembly by Scale=1.7) rather than assume a fixed constant."
+  },
+
+  "perDriveDifferences": {
+    "C": "slot 3, first VISIBLE row (immediately after the title zone at Y=TopMarginFormula=32, since slots 1 and 2 (A:,B:) are non-existent and contribute zero height). Used-mode bar/text. Accent color 255,97,0 (orange). Histogram series 24.",
+    "D": "slot 4, Used-mode. Accent 217,0,252 (magenta). Histogram series 23. Immediately follows C with the standard +2 gap.",
+    "E": "slot 5, FREE-mode (spaceInUseDrive5=0) -- this is the only one of the 7 active drives whose row2/row3 show 'Free: xxx' and a right-filling free-percentage bar instead of 'Used: xxx'. Accent 127,147,146 (grey-teal). Histogram series 22. Its HWiNFO EntryId is missing from HWiNFO.inc (see hwinfoDriveTempSensors) -- a genuine source-file gap, flag for QA on the real machine's temperature reading.",
+    "F": "slot 6, Used-mode. Accent 145,108,232 (violet). Histogram series 21.",
+    "G": "slot 7, Used-mode. Accent 0,159,255 (sky blue). Histogram series 20.",
+    "H": "slot 8, Used-mode. Accent 203,204,116 (khaki). Histogram series 19.",
+    "I": "slot 9, Used-mode, LAST visible row (slots 10-26 all non-existent, contribute zero height before the shared histogram graphs begin). Accent 121,182,62 (olive green). Histogram series 18.",
+    "generalNote": "Beyond the above (display mode, accent color, sensor instance id, histogram series slot, and the one missing EntryId), the 7 active drives are laid out and behave 100% identically -- same fonts, sizes, alignment rules, thresholds, and row pitch."
+  },
+
+  "graphMeters": {
+    "note": "IMPORTANT correction to the initial framing: there is NOT a separate small graph/bar per drive row. There are exactly two shared, panel-wide multi-series Line meters below the whole 26-slot drive list -- one for write throughput, one for read throughput -- each containing 26 fixed series (one dedicated series slot per possible drive letter, NOT compacted/reflowed for only-7-active-drives). Per-drive activity is expressed ONLY as: (a) the write/read arrow glyph color flip in row4, (b) the rate text in row5, and (c) that drive's own fixed-position line inside these two shared graphs.",
+    "meterWritingHistogram": {
+      "type": "Line", "lineCount": 26,
+      "style": "StyleHalfLengthGraphLeft (X=ContentMarginFormula+0=7, W=(ContentWidth-2)/2=94, H=25, GraphStart=Left, Autoscale=#GraphAutoscale#=0, SolidColor=EmptyBarColor/EmptyBarColorAlpha as the background track)",
+      "y": {"expr": "((#ShowGraph#=0)?0:#BottomMargin#+1) R", "value": "prevBottom(the last, possibly-collapsed, drive meter i.e. the final slot 26 ReadingRateDrive26)+4 when ShowGraph=1, else +0 (whole graph collapses to zero height when the user has toggled graphs off via meterHideGraphs_)"},
+      "seriesMapping": "MeasureName{k} / LineColor{k} for k=1..26 (k=1 has no numeric suffix) are wired to drive slot (27-k): series1=Drive26 ... series24=Drive3(C) ... series23=Drive4(D) ... series22=Drive5(E) ... series21=Drive6(F) ... series20=Drive7(G) ... series19=Drive8(H) ... series18=Drive9(I) ... series26=Drive1. This 27-k mapping is FIXED at file-load and then each calcDrive{N}Graph measure re-points its OWN dedicated series (not a shared/reflowing pool) between the real measure+color (drive exists & graphed) or the neutral measureRWDriveOff + fully-transparent 0,0,0,0 color (drive absent or graphing disabled for it).",
+      "hidden": "(#ShowGraph#=0)", "updateDivider": "((#ShowGraph#=0)?(-1):(1))"
+    },
+    "meterReadingHistogram": {
+      "type": "Line", "lineCount": 26,
+      "style": "StyleHalfLengthGraphRight (Y=r i.e. same row as the writing histogram, W=94, H=25, GraphStart=Right)",
+      "x": {"expr": "2R", "value": "immediately to the right of meterWritingHistogram (its X+W) plus a 2-unit gap -- together the two halves form one continuous full-width (188-ish) graph area split write-left/read-right"},
+      "seriesMapping": "identical 27-k mapping, mirrored for read measures/colors",
+      "hidden": "(#ShowGraph#=0)", "updateDivider": "((#ShowGraph#=0)?(-1):(1))"
+    },
+    "measureRWDriveOff": "Measure=Calc, Formula=0, Disabled=1 -- the shared 'off' placeholder measure bound to any series slot whose drive is absent or not graphed; always reads 0 and is paired with a fully transparent LineColor so it draws nothing."
+  },
+
+  "headerMeters": [
+    { "name": "MeterBackground", "note": "Group=Background, MeterStyle=StyleBackground, see backgroundShape above. First meter in the file, anchors the whole panel at (0,0)." },
+    { "name": "meterTitle", "type": "STRING", "meterStyle": "styleTitle", "text": "DRIVES", "stringCase": "None (overrides styleTitle's UPPER, but 'DRIVES' is already upper-case so no visible difference)", "x": 103, "y": 9, "w": 190, "h": 20, "font": "Trebuchet MS Bold 9pt", "fontColor": "colorTitle/colorTitleAlpha = 0,0,0/255", "updateDivider": -1, "hoverBehavior": "MouseOverAction on the invisible meterTitleClickableRegion overlay changes this text to 'This PC' in colorActiveTitle (255,128,0) and opens the This-PC shell folder on click; MouseLeaveAction reverts to 'DRIVES' in default color." },
+    { "name": "ControlSettings_ / meterHideGraphs_ / meterShowGraphs_", "type": "STRING", "note": "Top-right icon row (gear/settings glyph + collapse/expand-graph toggle glyphs), font ElegantIcons, colorInactiveButton. Purely chrome/interaction, no drive data. See 'skipped'." }
+  ],
+
+  "footerMeters": [
+    { "name": "meterWritingHistogram", "see": "graphMeters.meterWritingHistogram" },
+    { "name": "meterReadingHistogram", "see": "graphMeters.meterReadingHistogram" },
+    {
+      "name": "MeterBackgroundHeight", "type": "Image",
+      "details": "1x1, fully transparent (SolidColor=255,255,255,0), X=0, Y=(#BottomMargin#+#BgOffset#+2) R off of the reading histogram (i.e. total content bottom + 3 + 5 + 2 = +10 past the graphs), W=(BgWidth*Scale), H=1.",
+      "purpose": "Pure measurement anchor: StyleBackground's Shape/Shape4/Shape7 all reference [MeterBackgroundHeight:Y] to know the total logical height of the card so the rounded-rect background can stretch to fit however many drives + whether the graph is shown. A D2D re-implementation replaces this with a simple 'compute total content height, then draw the background rect at that height' step -- no need for a literal anchor meter."
+    }
+  ],
+
+  "skipped": [
+    "ControlSettings_, meterHideGraphs_, meterShowGraphs_ (top-right chrome icons: settings gear, collapse/expand-graph toggle) -- Group=Controls/hideGraph/showGraph, purely interactive, no per-drive data.",
+    "ControlSettings, meterHideGraphs, meterShowGraphs (no trailing underscore) -- invisible Meter=Image StyleMouseRegion|StyleMouseRegionStringButtonHover overlays sized/positioned FROM the visible '_'-suffixed meters via [meter_:X]/[meter_:Y]/[meter_:W]/[meter_:H] measure-references, purely to catch mouse clicks/hover and drive the *_ meters' hover color-swap and the show/hide-graph bang commands. Zero visual footprint of their own (SolidColor=255,255,255,0 or 0,0,0,0).",
+    "meterTitleClickableRegion -- invisible overlay over part of the title, opens 'This PC' (CLSID {20D04FE0-3AEA-1069-A2D8-08002B30309D}) on click and swaps the title text/color on hover.",
+    "meterLabelDrive{N} and meterUsedFreeDrive{N} (no trailing underscore, appear ONCE at the very end of Drives.ini for N=1..26, Group=DriveMr) -- invisible Meter=Image, SolidColor=0,0,0,0 hit-test overlays sized from their '_'-suffixed visible counterparts. meterLabelDrive{N}'s LeftMouseUpAction=[#d{N}#] opens that drive letter in Explorer and its hover actions swap the visible label's text to 'OPEN'/back. meterUsedFreeDrive{N}'s LeftMouseUpAction toggles spaceInUseDrive{N} (flips Used<->Free display mode) and its hover actions swap the visible Used/Free text's color to colorActiveTitle/back. Neither renders any pixels itself.",
+    "MeasureSettingsScript (Measure=Script running Settings.lua) and measureShowDrives / measureShowDrivesRWData / measureShowDrivesOnGraph / measureShowDrivesTemps (the 4 big letter-scanning String measures in DriveMeasures.inc that translate the ShowDrives*/ShowDrivesRWData*/etc strings into the 26 per-slot showDriveN/showDriveNRW/showDriveNGraph/showDriveNTemp booleans) -- these are configuration/settings-UI plumbing (also referenced by a Settings*.ini not requested here), not part of the rendered data panel itself. Their RESULT (the resolved per-drive booleans) is already captured in activeDrives/perDriveDifferences."
+  ],
+
+  "verticalFlowSummary": "Panel origin (0,0), unscaled/logical units, whole assembly later uniformly scaled by 1.7: [1] StyleBackground rounded-card shape drawn first (its final height is computed retroactively from everything below, via the MeterBackgroundHeight anchor). [2] Title 'DRIVES' centered at Y=9, plus top-right settings/collapse-graph icon chrome (non-data). [3] Drive list begins at Y=TopMarginFormula(32): for each of the up-to-26 drive-letter slots in fixed alphabetical order, IF that slot's existsDriveN=1 it renders a 5-sub-row block (label+temp / used-or-free+total / usage-bar / write-arrow+read-arrow / write-rate+read-rate text) stacked with 0px internal gaps and a +2 logical-unit gap before the next EXISTING slot's block; non-existent slots are fully present in the file/measure graph but Hidden and, per Rainmeter's documented Hidden-meter-has-zero-size-for-relative-positioning behavior, contribute no vertical space, so the visible list reads as a tight, gapless stack of only the present drives. On this machine that is exactly 7 rows: C, D, E, F, G, H, I (in that fixed letter order, not sorted by any other criterion). [4] Immediately below the (possibly fully-collapsed) 26th slot, IF ShowGraph=1, two half-width Line-graph meters render side by side (write-history left, read-history right), each a FIXED 26-series multi-line chart where each of the 26 possible drives owns one permanently-assigned series slot (index 27-N) that is either colored+fed real data (drive exists & graphed) or fully transparent+fed a constant 0 (drive absent/not graphed) -- this is the panel's only graph, shared across all drives, not per-row. [5] A final 1px invisible anchor meter records the total content height for the background shape to size itself against, then (out of scope for static rendering) the interactive click/hover overlay meters are layered on top.",
+
+  "notes": [
+    "The prompt's illustrative numbers ('52°C', '1.1 TB / 1.9 TB', '20.6 M') are visually consistent with, but not literal reproductions of, the actual Text templates: temperature really is '%1#deg##TempUnitLetter#'; Used/Total really are two SEPARATE left- and right-aligned meters on one row reading 'Used: <auto>B' ... 'Total: <auto>B' (no literal '/'); and the R/W rate meters really do use bare '%1' AutoScale output with NO trailing 'B' (so 'M' alone, not 'MB'), matching the given '20.6 M' example.",
+    "CAVEAT -- NumOfDecimals: measureTotalDrive{N}/meterUsedFreeDrive{N}_ explicitly set NumOfDecimals=1 (so 'Total: 1.9TB' truly has one decimal). meterWritingRateDrive{N}/meterReadingRateDrive{N} do NOT set NumOfDecimals at all and rely on Rainmeter's own default for AutoScale (commonly documented as 0 decimals) -- if the real skin visually shows a decimal on rate text (as the prompt's '20.6 M' example implies), verify Rainmeter's actual runtime default/behavior before hardcoding 0 vs 1 decimal place for the write/read rate numbers; this could not be settled from the static file alone.",
+    "CAVEAT -- HWiNFO-Drive5-Temp-EntryId is entirely absent from @Resources/HWiNFO.inc (verified by direct read of lines 170-173); drive E's temperature plugin measure will receive an empty/undefined HWiNFOEntryId. Flag for the real machine / do not silently default this to 0x0 or 0x1000000 without checking actual behavior.",
+    "CAVEAT -- Several Text/glyph values use a literal doubled escape prefix '\\x0xHHHH' (e.g. #deg#, the write/read arrow glyphs, the settings-gear glyph) instead of the more usual single '\\xHHHH'. This is consistent skin-wide (not a one-off typo isolated to Drives), so it is very likely intentional/tolerated by Rainmeter's parser, but its exact resolved character could not be verified without running the live engine. Recommended treatment for re-implementation: use the obviously-intended Unicode/PUA codepoint directly (° for #deg#, ElegantIcons 0x37/0x36 for the arrows) rather than reproducing the literal escape text.",
+    "DriveMeasures.inc is plain ASCII/UTF-8 while every other file read for this task (Drives.ini, DriveVars.inc, HWiNFO.inc, Styles.inc, Variables.inc) is UTF-16LE -- purely a file-encoding curiosity, does not affect resolved values, but affected which tool (Grep vs PowerShell Get-Content) could locate section boundaries during extraction.",
+    "The background outline (Shape7 in StyleBackground) is defined with a real StrokeColor/StrokeColorAlpha but Stroke_Width=0, so it is invisible in the (default/non-'recovery') theme actually in use here -- do not render a visible card border.",
+    "This document intentionally generalizes the per-drive MEASURES/METERS as an {N}-templated pattern (verified identical, section-by-section, for slot 1, 2, 3, 4 explicitly and spot-checked structurally consistent through slot 17 via the section-header scan) rather than transcribing all 26 x (15 measures + 11 meters) = 676 sections verbatim; perDriveDifferences + activeDrives.perDriveResolvedState give every value that actually differs across the 7 currently-active drives (C-I)."
+  ]
+}

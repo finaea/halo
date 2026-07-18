@@ -1,0 +1,667 @@
+{
+  "panel": "gpu1",
+  "sourceFiles": {
+    "main": "RainformerHWiv2/GPU/GPU1/GPU1.ini",
+    "includes": [
+      "@Resources/HWiNFO.inc",
+      "@Resources/Variables.inc",
+      "@Resources/Styles.inc"
+    ]
+  },
+  "rainmeterUpdateMs": 1000,
+  "rainmeterSectionOptions": {
+    "MiddleMouseDownAction": "[!Refresh]",
+    "MouseOverAction": "[!ToggleMeterGroup Controls][!UpdateMeterGroup Controls][!Redraw]",
+    "MouseLeaveAction": "[!ToggleMeterGroup Controls][!UpdateMeterGroup Controls][!Redraw]",
+    "AccurateText": 1,
+    "DynamicWindowSize": 1,
+    "notes": "MouseOver/Leave toggle visibility of the settings-gear meter group 'Controls' (fades in gear icon on hover). Not otherwise relevant to static pixel layout."
+  },
+  "metadata": {
+    "name": "Rainformer GPU #1 (HWiNFO Edition)",
+    "author": "Pul53dr1v3r",
+    "version": "3.0"
+  },
+  "localVariables": {
+    "@Include": "#@#HWiNFO.inc",
+    "@IncludeVariables": "#@#Variables.inc",
+    "@IncludeStyles": "#@#Styles.inc",
+    "Gpu1Name": "RTX 5070 TI",
+    "ShowGraph": 1,
+    "notes": "Gpu1Name is the only content-identity override in this panel; ShowGraph=1 is the runtime-mutable toggle persisted back to this file's [Variables] via !WriteKeyValue when the user clicks the collapse/expand graph button."
+  },
+  "resolvedGlobals": {
+    "scale": 1.7,
+    "bgOffset": 5,
+    "bgShapeW": 196,
+    "bgWidth": 206,
+    "absMargin": 3,
+    "topMargin": 28,
+    "bottomMargin": 3,
+    "rowSpacing": 1,
+    "cornerRadius": 4,
+    "topMarginFormula": 32,
+    "contentMarginFormula": 7,
+    "rightAlign": 197,
+    "contentWidth": 190,
+    "centerAlign": 103,
+    "fontFamily": "Trebuchet MS",
+    "textSize": 8,
+    "graphStyle": "Line",
+    "graphStartSide": "Left",
+    "graphAutoscale": 0,
+    "deg": "\\x00B0 (degree sign, U+00B0 =°)",
+    "tempUnitLetter": "C",
+    "colors": {
+      "colorTitle": [0, 0, 0, 255],
+      "colorText": [0, 0, 0, 205],
+      "colorText2": [60, 65, 62, 205],
+      "colorActiveTitle": [255, 128, 0, 255],
+      "colorBar": [93, 141, 172, 255],
+      "colorHistogram": [176, 196, 222, 250],
+      "colorRed": [204, 0, 0, 255],
+      "emptyBarColor": [255, 255, 255, 25],
+      "bgTopColor": [163, 178, 230, 180],
+      "bgBodyColor": [230, 230, 230, 180],
+      "strokeColor": [96, 138, 203, 100],
+      "solidColorLabel": [248, 248, 248, 255],
+      "colorGraphButtonOn": [255, 128, 0],
+      "colorGraphButtonOff": [120, 120, 120],
+      "colorInactiveButton": [120, 120, 120, 255],
+      "colorBarWarn": [220, 20, 60]
+    },
+    "gpu": {
+      "GpuTemp": 1,
+      "GpuUsage": 1,
+      "GpuMem": 1,
+      "GpuFan": 1,
+      "GpuCoreMemClock": 1,
+      "GpuTempGraph": 1,
+      "GpuUsageGraph": 1,
+      "GpuMemUsageGraph": 1,
+      "GpuFanGraph": 1,
+      "GpuTempWarnTh1": 45,
+      "GpuTempWarnTh2": 55,
+      "GpuTempWarnTh3": 65,
+      "GpuTempWarnTh4": 75,
+      "GpuTempColor": [204, 0, 0],
+      "GpuUsageColor": [176, 196, 222],
+      "GpuMemUsageColor": [102, 204, 0],
+      "GpuFanColor": [0, 191, 255],
+      "GpuTypeString": "V",
+      "GpuTypeInteger": 0,
+      "Gpu1MemoryInMegaBytes": 2048,
+      "notes": "GpuTypeInteger=0 selects the NVIDIA branch (percent-of-VRAM sensor based total-memory calc). GpuTypeString=V makes the '[#GpuTypeString]' substitutions in measure/meter names resolve to the 'V' (video-memory) branch: GpuVMemoryPercent / GpuTotalVMem. The AMD 'dedicated memory' branch (GpuTotalDedMem/GpuDedMemoryPercent, and thus Gpu1MemoryInMegaBytes=2048) is present in the ini but Disabled=1 for this NVIDIA config and produces no visible output — 2048 is an inert leftover default, NOT the RTX 5070 Ti's real VRAM size."
+    },
+    "devTempWarnColors": {
+      "Th1": [47, 186, 255],
+      "Th2": [255, 255, 36],
+      "Th3": [255, 143, 30],
+      "Th4": [255, 0, 0],
+      "Th5": [204, 0, 0],
+      "notes": "Used by GpuTempWarn Calc measure (not GpuTempColor) to color the numeric temperature text: <45=Th1(sky blue), <55=Th2(yellow), <65=Th3(orange), <75=Th4(red), >=75=Th5(dark red)."
+    }
+  },
+  "hwinfoSensorResolution": {
+    "notes": "All GPU1 HWiNFO sensors share SensorId=0xe0002000 / SensorInstance=0x14 (20) — i.e. one HWiNFO enumerated sensor object (the RTX 5070 Ti GPU) — differentiated only by EntryId (the specific reading within that sensor). Resolved from @Resources/HWiNFO.inc [HWiNFO-Config-GPU1] block.",
+    "GpuTemp": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x1000000", "label": "GPU Temperature (degrees)"},
+    "GpuCoreUsage": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x7000000", "label": "GPU Core load (%)"},
+    "GpuFanPercent": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x8000000", "label": "GPU Fan (%)"},
+    "GpuFanRPM": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x3000000", "label": "GPU Fan (RPM)"},
+    "GpuUsedMem_MemAlloc": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x80000fc", "label": "GPU Memory Allocated (MB)"},
+    "GpuVMemoryPercent_MemUsg": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x7000008", "label": "GPU Memory Usage (%)"},
+    "GpuCoreClock_Clock": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x6000000", "label": "GPU Clock (MHz)"},
+    "GpuMemoryClock_MemClock": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x6000004", "label": "GPU Memory Clock (MHz)"}
+  },
+  "measures": [
+    {
+      "name": "GpuTemp", "iniLines": "37-46", "type": "Plugin", "plugin": "HWiNFO.dll",
+      "hwinfo": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x1000000", "type": "CurrentValue"},
+      "minValue": 0, "maxValue": 100,
+      "disabled": {"expr": "(#GpuTemp#=0)", "resolved": false}
+    },
+    {
+      "name": "GpuTempWarn", "iniLines": "48-52", "type": "Calc",
+      "formula": "GpuTemp < #GpuTempWarnTh1# ? -1 : (GpuTemp < #GpuTempWarnTh2# ? -2 : (GpuTemp < #GpuTempWarnTh3# ? -3 : (GpuTemp < #GpuTempWarnTh4# ? -4 : -5)))",
+      "formulaResolved": "GpuTemp<45 ? -1 : (GpuTemp<55 ? -2 : (GpuTemp<65 ? -3 : (GpuTemp<75 ? -4 : -5)))",
+      "substitute": {"-1": "47,186,255 (DevTempWarnColorTh1)", "-2": "255,255,36 (DevTempWarnColorTh2)", "-3": "255,143,30 (DevTempWarnColorTh3)", "-4": "255,0,0 (DevTempWarnColorTh4)", "-5": "204,0,0 (DevTempWarnColorTh5)"},
+      "disabled": {"expr": "(#GpuTemp#=0)", "resolved": false},
+      "notes": "Drives GpuTempText's dynamic FontColor. Result is a color-string, consumed via [GpuTempWarn] meter reference."
+    },
+    {
+      "name": "GpuCoreUsage", "iniLines": "56-65", "type": "Plugin", "plugin": "HWiNFO.dll",
+      "hwinfo": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x7000000", "type": "CurrentValue"},
+      "minValue": 0, "maxValue": 100,
+      "disabled": {"expr": "(#GpuUsage#=0)", "resolved": false}
+    },
+    {
+      "name": "GpuCoreUsageBarWarn", "iniLines": "67-71", "type": "Calc",
+      "formula": "GpuCoreUsage > 75 ? -1 : -2",
+      "substitute": {"-1": "220,20,60 (crimson, danger)", "-2": "176,196,222 (#GpuUsageColor#, normal)"},
+      "disabled": {"expr": "(#GpuUsage#=0)", "resolved": false},
+      "notes": "Drives GpuCoreUsageBar's BarColor. Threshold literal 75 (not a named variable)."
+    },
+    {
+      "name": "GpuUsedMem", "iniLines": "74-81", "type": "Plugin", "plugin": "HWiNFO.dll",
+      "hwinfo": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x80000fc", "type": "CurrentValue"},
+      "disabled": {"expr": "(#GpuMem#=0)", "resolved": false},
+      "notes": "Raw allocated VRAM in MB, no explicit Min/Max set."
+    },
+    {
+      "name": "GpuUsedMemRound", "iniLines": "83-86", "type": "Calc",
+      "formula": "(Round(GpuUsedMem))",
+      "disabled": {"expr": "(#GpuMem#=0)", "resolved": false},
+      "notes": "Integer-rounded MB value used in GpuMemoryValue text."
+    },
+    {
+      "name": "GpuVMemoryPercent", "iniLines": "89-98", "type": "Plugin", "plugin": "HWiNFO.dll",
+      "comment": "NVIDIA - Video Memory (% used)",
+      "hwinfo": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x7000008", "type": "CurrentValue"},
+      "minValue": 0, "maxValue": 100,
+      "disabled": {"expr": "(#GpuMem#=0) || (#GpuTypeInteger#=1)", "resolved": false},
+      "notes": "ACTIVE branch for this NVIDIA GPU (GpuTypeInteger=0). Referenced dynamically elsewhere as 'Gpu[#GpuTypeString]MemoryPercent' -> GpuVMemoryPercent."
+    },
+    {
+      "name": "GpuTotalVMem", "iniLines": "100-103", "type": "Calc",
+      "formula": "(GpuUsedMem) / (GpuVMemoryPercent / 100)",
+      "disabled": {"expr": "(#GpuMem#=0) || (#GpuTypeInteger#=1)", "resolved": false},
+      "notes": "ACTIVE. Derives total VRAM (MB) by back-solving used-MB from the used-% sensor. Referenced in GpuMemoryValue text as '[&GpuTotal[#GpuTypeString]Mem]' -> [&GpuTotalVMem]."
+    },
+    {
+      "name": "GpuTotalDedMem", "iniLines": "106-109", "type": "Calc",
+      "comment": "AMD - Dedicated Memory",
+      "formula": "#Gpu1MemoryInMegaBytes#", "formulaResolved": "2048",
+      "disabled": {"expr": "(#GpuMem#=0) || (#GpuTypeInteger#=0)", "resolved": true},
+      "notes": "INACTIVE for this GPU (GpuTypeInteger=0 makes the OR-clause true -> Disabled). AMD-only fallback path, unused for the RTX 5070 Ti."
+    },
+    {
+      "name": "GpuDedMemoryPercent", "iniLines": "111-116", "type": "Calc",
+      "formula": "(GpuUsedMem * 100 / (#Gpu1MemoryInMegaBytes# + 0.000001))",
+      "minValue": 0, "maxValue": 100,
+      "disabled": {"expr": "(#GpuMem#=0) || (#GpuTypeInteger#=0)", "resolved": true},
+      "notes": "INACTIVE for this GPU, same reasoning as GpuTotalDedMem."
+    },
+    {
+      "name": "GpuMemoryBarWarn", "iniLines": "118-124", "type": "Calc",
+      "formula": "[&Gpu[#GpuTypeString]MemoryPercent] > 75 ? -1 : -2",
+      "formulaResolved": "[&GpuVMemoryPercent] > 75 ? -1 : -2",
+      "substitute": {"-1": "220,20,60 (crimson, danger)", "-2": "102,204,0 (#GpuMemUsageColor#, normal)"},
+      "disabled": {"expr": "(#GpuMem#=0)", "resolved": false},
+      "dynamicVariables": true,
+      "notes": "Drives GpuMemUsageBar's BarColor."
+    },
+    {
+      "name": "GpuFanRPM", "iniLines": "127-134", "type": "Plugin", "plugin": "HWiNFO.dll",
+      "hwinfo": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x3000000", "type": "CurrentValue"},
+      "disabled": {"expr": "(#GpuFan#=0)", "resolved": false}
+    },
+    {
+      "name": "GpuFanPercent", "iniLines": "136-145", "type": "Plugin", "plugin": "HWiNFO.dll",
+      "hwinfo": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x8000000", "type": "CurrentValue"},
+      "minValue": 0, "maxValue": 100,
+      "disabled": {"expr": "(#GpuFan#=0)", "resolved": false}
+    },
+    {
+      "name": "GpuFanBarWarn", "iniLines": "147-151", "type": "Calc",
+      "formula": "GpuFanPercent > 75 ? -1 : -2",
+      "substitute": {"-1": "220,20,60 (crimson, danger)", "-2": "0,191,255 (#GpuFanColor#, normal)"},
+      "disabled": {"expr": "(#GpuFan#=0)", "resolved": false},
+      "notes": "Drives GpuFanBar's BarColor."
+    },
+    {
+      "name": "GpuCoreClock", "iniLines": "155-162", "type": "Plugin", "plugin": "HWiNFO.dll",
+      "hwinfo": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x6000000", "type": "CurrentValue"},
+      "disabled": {"expr": "(#GpuCoreMemClock#=0)", "resolved": false}
+    },
+    {
+      "name": "GpuMemoryClock", "iniLines": "166-173", "type": "Plugin", "plugin": "HWiNFO.dll",
+      "hwinfo": {"sensorId": "0xe0002000", "sensorInstance": "0x14", "entryId": "0x6000004", "type": "CurrentValue"},
+      "disabled": {"expr": "(#GpuCoreMemClock#=0)", "resolved": false}
+    },
+    {
+      "name": "MeasureSettingsScript", "iniLines": "175-178", "type": "Script",
+      "scriptFile": "#scriptPath#Settings.lua",
+      "updateDivider": -1,
+      "notes": "Utility Lua measure exposing GetKey/Gsub used only by StyleStringButtonHover / StyleMouseRegionStringButtonHover (hover recolor of the settings-gear and collapse/expand icons). Not part of the static/steady-state visual — irrelevant to a non-interactive Direct2D re-render, but needed if hover states are reproduced."
+    }
+  ],
+  "background": "standard",
+  "backgroundGeometry": {
+    "style": "StyleBackground",
+    "meter": "MeterBackground (Meter=Shape, MeterStyle=StyleBackground)",
+    "note": "All coordinates below are UNSCALED (pre multiply-by-#Scale#=1.7). Every rectangle in this style is defined in unscaled units then multiplied by Scale at draw time; Scale is applied uniformly (no separate per-shape scale).",
+    "outerX": 0, "outerY": 0,
+    "outerWidthUnscaled": "((BgShapeW + 0.06) + (BgOffset*2)) = (196.06 + 10) = 206.06",
+    "outerWidthScaled": 350.302,
+    "outerHeightUnscaled": "= [MeterBackgroundHeight:Y]  (see verticalFlowSummary; = 78 + 5*T, T = auto text-line-height, see notes)",
+    "outerHeightScaledFormula": "outerHeightUnscaled * 1.7",
+    "bgShapeX": 5, "bgShapeY": 5,
+    "shapes": [
+      {
+        "id": "Shape (top rounded rect)",
+        "rect": {"x": "(BgShapeX+0.0)=5", "y": "(BgShapeY-0.0)=5", "w": "BgShapeW=196", "h": 21, "cornerRadius": 4},
+        "fill": {"color": [163, 178, 230], "alpha": 180, "var": "BgTopColor,BgTopOpacity"},
+        "strokeWidth": 0
+      },
+      {
+        "id": "Shape2 (flattening rect, unioned)",
+        "rect": {"x": "5", "y": "(BgShapeY+8)=13", "w": "196", "h": 14, "cornerRadius": 0},
+        "notes": "No fill/stroke of its own — exists purely to be Unioned with Shape (Shape3=Combine Shape|Union Shape2), squaring off the rounded rect's bottom edge so the top piece reads as 'rounded-top, flat-bottom'."
+      },
+      {"id": "Shape3", "op": "Combine Shape | Union Shape2"},
+      {
+        "id": "Shape4 (bottom rounded rect)",
+        "rect": {"x": "5", "y": "(BgShapeY+24.5)=29.5", "w": "196",
+                 "h": "[[MeterBackground]:H] - ((BgShapeX+12.3)*2)  [self-referential; uses this same Shape meter's own scaled H, i.e. (outerHeightUnscaled*Scale) - (17.3*2)*Scale ≈ (outerHeightUnscaled-34.6)*Scale, evaluated in SCALED units since :H already includes *Scale]",
+                 "cornerRadius": 4},
+        "fill": {"color": [230, 230, 230], "alpha": 180, "var": "BgBodyColor,BgBodyOpacity"},
+        "strokeWidth": 0
+      },
+      {
+        "id": "Shape5 (flattening rect, unioned)",
+        "rect": {"x": "5", "y": "(BgShapeY+24)=29", "w": "196", "h": 15, "cornerRadius": 0},
+        "notes": "Unioned with Shape4 (Shape6=Combine Shape4|Union Shape5) to square off Shape4's TOP edge, so the bottom piece reads as 'flat-top, rounded-bottom' and the two pieces (top+bottom) visually overlap/meet around y=24-29.5 to form one continuous card with a 2-tone fill (lighter blue-grey header strip 5..~24, body grey 24..bottom)."
+      },
+      {"id": "Shape6", "op": "Combine Shape4 | Union Shape5"},
+      {
+        "id": "Shape7 (outer frame / stroke outline)",
+        "rect": {"x": "(BgShapeX-0.5)=4.5", "y": "(BgShapeY-0.5)=4.5", "w": "(BgShapeW+1)=197",
+                 "h": "([[MeterBackground]:H] + Scale) - (BgShapeX*2)  [scaled units: ≈ outerHeightScaled + 1.7 - 10*1.7]",
+                 "cornerRadius": 4.5},
+        "stroke": {"width": "Stroke_Width*Scale = 0*1.7 = 0 (effectively invisible stroke — width resolves to 0)", "color": [96, 138, 203], "alpha": 100, "var": "StrokeColor,StrokeColorAlpha"},
+        "fill": {"color": [0, 0, 0], "alpha": 0, "notes": "transparent fill; this shape exists only for its (currently zero-width) stroke outline"}
+      }
+    ],
+    "dynamicVariables": true,
+    "updateDivider": -1,
+    "group": "Background",
+    "companionMeter": {
+      "name": "MeterBackgroundHeight",
+      "purpose": "Invisible (alpha 0) 1px-tall sizing meter placed at the bottom of the real content flow; its resolved Y value is read back by StyleBackground's H formula ([MeterBackgroundHeight:Y]*Scale) to auto-fit the background to however many rows/graphs are currently visible."
+    }
+  },
+  "meters": [
+    {
+      "name": "MeterBackground", "iniLines": "30-32", "type": "Shape",
+      "styles": ["StyleBackground"],
+      "x": {"expr": "0", "value": 0, "mode": "abs"},
+      "y": {"expr": "0", "value": 0, "mode": "abs"},
+      "w": {"expr": "((#BgShapeW#+0.06)+(#BgOffset#*2))*#Scale#", "value": 350.302},
+      "h": {"expr": "[MeterBackgroundHeight:Y]*#Scale#", "value": "dynamic, see backgroundGeometry"},
+      "notes": "Draws the full two-zone rounded background card; see 'backgroundGeometry' for the resolved unscaled shape geometry."
+    },
+    {
+      "name": "meterTitle", "iniLines": "183-187", "type": "STRING",
+      "styles": ["styleTitle"],
+      "x": {"expr": "#CenterAlign#", "value": 103, "mode": "abs"},
+      "y": {"expr": "(4+#BgOffset#)", "value": 9, "mode": "abs"},
+      "w": 190, "h": 20,
+      "align": "Center", "case": "UPPER", "bold": true,
+      "fontFace": "Trebuchet MS", "fontSize": 9,
+      "fontColor": [0, 0, 0, 255],
+      "text": "#Gpu1Name#", "textResolved": "RTX 5070 TI (displayed upper-cased by StringCase=UPPER -> \"RTX 5070 TI\")",
+      "updateDivider": -1,
+      "notes": "Panel title. Text is static per-session (UpdateDivider=-1)."
+    },
+    {
+      "name": "meterHideGraphs_", "iniLines": "205-213", "type": "STRING",
+      "styles": ["styleButton", "StyleRightAlign"],
+      "x": {"expr": "#RightAlign#", "value": 197, "mode": "abs"},
+      "y": {"expr": "(-1+#BgOffset#)", "value": 4, "mode": "abs", "source": "styleButton"},
+      "align": "Right",
+      "bold": true,
+      "fontFace": "Trebuchet MS (inherited default; styleButton does not override FontFace)",
+      "fontSize": 12,
+      "fontColor": [120, 120, 120, 255], "fontColorVar": "colorInactiveButton,colorInactiveButtonAlpha",
+      "text": "[\\x23F6]", "textNotes": "Unicode escape U+23F6 (collapse/'hide graph' glyph, up-pointing).",
+      "group": "hideGraph",
+      "hidden": {"expr": "(#ShowGraph#=0)", "resolved": false},
+      "updateDivider": -1, "dynamicVariables": true,
+      "notes": "Visible collapse-graph button icon (ShowGraph=1 by default so this is the one shown, not meterShowGraphs_). Click target is the separate invisible meter 'meterHideGraphs' (skipped, see 'skipped')."
+    },
+    {
+      "name": "meterShowGraphs_", "iniLines": "215-224", "type": "STRING",
+      "styles": ["styleButton", "StyleRightAlign"],
+      "x": {"expr": "#RightAlign#", "value": 197, "mode": "abs"},
+      "y": {"expr": "[meterHideGraphs_:Y]", "value": 4, "mode": "explicit-meter-ref", "relativeTo": "meterHideGraphs_"},
+      "align": "Right", "bold": true, "fontSize": 12,
+      "fontColor": [120, 120, 120, 255], "fontColorVar": "colorInactiveButton,colorInactiveButtonAlpha",
+      "text": "[\\x0x23F7]", "textNotes": "Literal ini text includes a stray '0x' ('\\x0x23F7'); intended glyph is almost certainly U+23F7 (expand/'show graph' glyph, down-pointing), mirroring meterHideGraphs_'s U+23F6.",
+      "group": "ShowGraph",
+      "hidden": {"expr": "(#ShowGraph#=1)", "resolved": true},
+      "updateDivider": -1, "dynamicVariables": true,
+      "notes": "Same on-screen position as meterHideGraphs_ (Y explicitly copied from it); only one of the two button glyphs is ever visible at a time. Currently HIDDEN because ShowGraph=1."
+    },
+    {
+      "name": "GpuTempText", "iniLines": "228-237", "type": "STRING",
+      "styles": ["styleFirstLineText", "StyleCenterAlign"],
+      "x": {"expr": "#CenterAlign#", "value": 103, "mode": "abs"},
+      "y": {"expr": "(#TopMarginFormula#-2)", "value": 30, "mode": "abs", "note": "overrides styleFirstLineText's own Y=#TopMarginFormula#=32"},
+      "h": {"expr": "auto", "value": "T (see verticalFlowSummary)", "mode": "auto-text"},
+      "align": "Center", "case": "NONE", "bold": true,
+      "fontFace": "Trebuchet MS", "fontSize": 8,
+      "fontColor": {"dynamic": "[GpuTempWarn]", "possibleValues": [[47,186,255],[255,255,36],[255,143,30],[255,0,0],[204,0,0]]},
+      "measureNames": ["GpuTemp"],
+      "text": "\"%1#deg##TempUnitLetter#\"", "textResolved": "e.g. \"62°C\"",
+      "dynamicVariables": true,
+      "hidden": {"expr": "(#GpuTemp#=0)", "resolved": false},
+      "updateDivider": {"expr": "((#GpuTemp#=0)?(-1):(1))", "resolved": 1},
+      "notes": "Top-center temperature readout, centered above the GPU:/percent row. Font color ramps through DevTempWarnColorTh1..5 based on GpuTempWarnTh1..4 (45/55/65/75)."
+    },
+    {
+      "name": "GpuUsageText", "iniLines": "241-247", "type": "STRING",
+      "styles": ["styleFirstLineText", "StyleLeftAlign_r"],
+      "x": {"expr": "#ContentMarginFormula#", "value": 7, "mode": "abs"},
+      "y": {"expr": "((#GpuUsage#=1)?#TopMarginFormula#:(#TopMarginFormula#-1))", "value": 32, "mode": "abs", "note": "explicit Y overrides StyleLeftAlign_r's Y=r"},
+      "h": {"expr": "auto", "value": "T", "mode": "auto-text"},
+      "align": "Left", "case": "NONE", "bold": true,
+      "fontFace": "Trebuchet MS", "fontSize": 8,
+      "fontColor": [0, 0, 0, 205],
+      "text": "\"GPU:\"",
+      "hidden": {"expr": "(#GpuUsage#=0)", "resolved": false},
+      "updateDivider": -1,
+      "notes": "Static label, left-aligned, same row as GpuTempText's row+2 (i.e. one row below the temperature)."
+    },
+    {
+      "name": "GpuUsagePercentText", "iniLines": "249-255", "type": "STRING",
+      "styles": ["styleFirstLineText", "StyleRightAlign_r"],
+      "x": {"expr": "#RightAlign#", "value": 197, "mode": "abs"},
+      "y": {"expr": "r", "value": 32, "mode": "r", "relativeTo": "GpuUsageText", "note": "StyleRightAlign_r's Y=r overrides styleFirstLineText's absolute Y=32 (same numeric result here)"},
+      "h": {"expr": "auto", "value": "T", "mode": "auto-text"},
+      "align": "Right", "case": "NONE", "bold": true,
+      "fontFace": "Trebuchet MS", "fontSize": 8,
+      "fontColor": [0, 0, 0, 205],
+      "measureNames": ["GpuCoreUsage"],
+      "text": "\"%1%\"", "textResolved": "e.g. \"37%\"",
+      "hidden": {"expr": "(#GpuUsage#=0)", "resolved": false},
+      "updateDivider": {"expr": "((#GpuUsage#=0)?(-1):(1))", "resolved": 1},
+      "notes": "Same row as GpuUsageText: 'GPU:' left, usage% right."
+    },
+    {
+      "name": "GpuCoreUsageBar", "iniLines": "257-264", "type": "BAR",
+      "styles": ["StyleBar"],
+      "x": {"expr": "(#ContentMarginFormula#+1)", "value": 8, "mode": "abs"},
+      "y": {"expr": "(#RowSpacing#-1)R", "value": "32+T", "mode": "R", "relativeTo": "GpuUsagePercentText", "n": 0},
+      "w": 188, "h": 1,
+      "barOrientation": "HORIZONTAL",
+      "measureNames": ["GpuCoreUsage"],
+      "barColor": {"dynamic": "[GpuCoreUsageBarWarn]", "values": {"normal": [176,196,222], "warn(>75%)": [220,20,60]}},
+      "hidden": {"expr": "(#GpuUsage#=0)", "resolved": false},
+      "updateDivider": {"expr": "((#GpuUsage#=0)?(-1):(1))", "resolved": 1},
+      "dynamicVariables": true,
+      "notes": "Thin 1px progress bar directly under the GPU:/usage% row, track color EmptyBarColor(255,255,255,25)."
+    },
+    {
+      "name": "GpuMemoryUsageString", "iniLines": "268-274", "type": "STRING",
+      "styles": ["stylePrimaryText", "StyleLeftAlign"],
+      "x": {"expr": "#ContentMarginFormula#", "value": 7, "mode": "abs"},
+      "y": {"expr": "((#GpuMem#=1)?(#RowSpacing#-0):0)R", "value": "34+T", "mode": "R", "relativeTo": "GpuCoreUsageBar", "n": 1},
+      "h": {"expr": "auto", "value": "T", "mode": "auto-text"},
+      "align": "Left", "case": "NONE", "bold": true,
+      "fontFace": "Trebuchet MS", "fontSize": 8,
+      "fontColor": [0, 0, 0, 205],
+      "text": "MEM:",
+      "hidden": {"expr": "(#GpuMem#=0)", "resolved": false},
+      "updateDivider": -1,
+      "notes": "Static label starting the VRAM row."
+    },
+    {
+      "name": "GpuMemoryValue", "iniLines": "276-282", "type": "STRING",
+      "styles": ["styleSecondaryText", "StyleCenterAlign_r"],
+      "x": {"expr": "#CenterAlign#", "value": 103, "mode": "abs"},
+      "y": {"expr": "r", "value": "35+2T", "mode": "r", "relativeTo": "GpuMemoryUsageString", "note": "StyleCenterAlign_r's Y=r overrides styleSecondaryText's Y=1R"},
+      "h": {"expr": "auto", "value": "T", "mode": "auto-text"},
+      "align": "Center", "case": "NONE", "bold": false,
+      "fontFace": "Trebuchet MS", "fontSize": 8,
+      "fontColor": [60, 65, 62, 205],
+      "measureNames": ["GpuUsedMemRound", "GpuTotalVMem (via [&GpuTotal[#GpuTypeString]Mem])"],
+      "text": "[GpuUsedMemRound]MB/[&GpuTotal[#GpuTypeString]Mem]MB",
+      "textResolvedTemplate": "[GpuUsedMemRound]MB/[&GpuTotalVMem]MB", "textExample": "e.g. \"8192MB/12288MB\"",
+      "dynamicVariables": true,
+      "hidden": {"expr": "(#GpuMem#=0)", "resolved": false},
+      "updateDivider": {"expr": "((#GpuMem#=0)?(-1):(1))", "resolved": 1},
+      "notes": "Centered secondary-style text; wait — actually GpuUsageValue's y is computed via r relative to GpuMemoryUsageString's Y (not bottom), giving the same Y (35+2T algebraically resolves consistent with chain, see verticalFlowSummary)."
+    },
+    {
+      "name": "GpuMemoryPercent", "iniLines": "284-290", "type": "STRING",
+      "styles": ["stylePrimaryText", "StyleRightAlign_r"],
+      "x": {"expr": "#RightAlign#", "value": 197, "mode": "abs"},
+      "y": {"expr": "r", "value": "35+2T", "mode": "r", "relativeTo": "GpuMemoryValue"},
+      "h": {"expr": "auto", "value": "T", "mode": "auto-text"},
+      "align": "Right", "case": "NONE", "bold": true,
+      "fontFace": "Trebuchet MS", "fontSize": 8,
+      "fontColor": [0, 0, 0, 205],
+      "measureNames": ["GpuVMemoryPercent (via Gpu[#GpuTypeString]MemoryPercent)"],
+      "text": "\"%1%\"", "textResolved": "e.g. \"67%\"",
+      "hidden": {"expr": "(#GpuMem#=0)", "resolved": false},
+      "updateDivider": {"expr": "((#GpuMem#=0)?(-1):(1))", "resolved": 1},
+      "notes": "Same row as GpuMemoryValue: 'usedMB/totalMB' centered, '%' right-aligned."
+    },
+    {
+      "name": "GpuMemUsageBar", "iniLines": "292-298", "type": "Bar",
+      "styles": ["StyleBar"],
+      "x": {"expr": "(#ContentMarginFormula#+1)", "value": 8, "mode": "abs"},
+      "y": {"expr": "(#RowSpacing#-1)R (from StyleBar; no explicit Y override in this meter)", "value": "35+3T", "mode": "R", "relativeTo": "GpuMemoryPercent", "n": 0},
+      "w": 188, "h": 1, "barOrientation": "HORIZONTAL",
+      "measureNames": ["GpuVMemoryPercent (via Gpu[#GpuTypeString]MemoryPercent)"],
+      "barColor": {"dynamic": "[GpuMemoryBarWarn]", "values": {"normal": [102,204,0], "warn(>75%)": [220,20,60]}},
+      "hidden": {"expr": "(#GpuMem#=0)", "resolved": false},
+      "updateDivider": {"expr": "((#GpuMem#=0)?(-1):(1))", "resolved": 1},
+      "dynamicVariables": true,
+      "notes": "VRAM progress bar under the MEM: row."
+    },
+    {
+      "name": "GpuFanText", "iniLines": "302-308", "type": "STRING",
+      "styles": ["stylePrimaryText", "StyleLeftAlign"],
+      "x": {"expr": "#ContentMarginFormula#", "value": 7, "mode": "abs"},
+      "y": {"expr": "((#GpuFan#=1)?(#RowSpacing#-1):0)R", "value": "36+3T", "mode": "R", "relativeTo": "GpuMemUsageBar", "n": 0},
+      "h": {"expr": "auto", "value": "T", "mode": "auto-text"},
+      "align": "Left", "case": "NONE", "bold": true,
+      "fontFace": "Trebuchet MS", "fontSize": 8,
+      "fontColor": [0, 0, 0, 205],
+      "text": "FAN:",
+      "hidden": {"expr": "(#GpuFan#=0)", "resolved": false},
+      "updateDivider": -1,
+      "notes": "Static label starting the fan row."
+    },
+    {
+      "name": "meterGpuFanRpm", "iniLines": "310-316", "type": "STRING",
+      "styles": ["styleSecondaryText", "StyleCenterAlign_r"],
+      "x": {"expr": "#CenterAlign#", "value": 103, "mode": "abs"},
+      "y": {"expr": "r", "value": "36+3T", "mode": "r", "relativeTo": "GpuFanText"},
+      "h": {"expr": "auto", "value": "T", "mode": "auto-text"},
+      "align": "Center", "case": "NONE", "bold": false,
+      "fontFace": "Trebuchet MS", "fontSize": 8,
+      "fontColor": [60, 65, 62, 205],
+      "measureNames": ["GpuFanRPM"],
+      "text": "\"%1 rpm\"", "textResolved": "e.g. \"1450 rpm\"",
+      "hidden": {"expr": "(#GpuFan#=0)", "resolved": false},
+      "updateDivider": {"expr": "((#GpuFan#=0)?(-1):(1))", "resolved": 1}
+    },
+    {
+      "name": "meterGpuFanPercent", "iniLines": "318-324", "type": "STRING",
+      "styles": ["stylePrimaryText", "StyleRightAlign_r"],
+      "x": {"expr": "#RightAlign#", "value": 197, "mode": "abs"},
+      "y": {"expr": "r", "value": "36+3T", "mode": "r", "relativeTo": "meterGpuFanRpm"},
+      "h": {"expr": "auto", "value": "T", "mode": "auto-text"},
+      "align": "Right", "case": "NONE", "bold": true,
+      "fontFace": "Trebuchet MS", "fontSize": 8,
+      "fontColor": [0, 0, 0, 205],
+      "measureNames": ["GpuFanPercent"],
+      "text": "\"%1%\"", "textResolved": "e.g. \"45%\"",
+      "hidden": {"expr": "(#GpuFan#=0)", "resolved": false},
+      "updateDivider": {"expr": "((#GpuFan#=0)?(-1):(1))", "resolved": 1},
+      "notes": "Same row as meterGpuFanRpm: 'NNNN rpm' centered, '%' right-aligned."
+    },
+    {
+      "name": "GpuFanBar", "iniLines": "326-333", "type": "BAR",
+      "styles": ["StyleBar"],
+      "x": {"expr": "(#ContentMarginFormula#+1)", "value": 8, "mode": "abs"},
+      "y": {"expr": "((#GpuFan#=1)?(#RowSpacing#-1):0)R", "value": "36+4T", "mode": "R", "relativeTo": "meterGpuFanPercent", "n": 0},
+      "w": 188, "h": 1, "barOrientation": "HORIZONTAL",
+      "measureNames": ["GpuFanPercent"],
+      "barColor": {"dynamic": "[GpuFanBarWarn]", "values": {"normal": [0,191,255], "warn(>75%)": [220,20,60]}},
+      "hidden": {"expr": "(#GpuFan#=0)", "resolved": false},
+      "updateDivider": {"expr": "((#GpuFan#=0)?(-1):(1))", "resolved": 1},
+      "dynamicVariables": true,
+      "notes": "Fan-speed progress bar under the FAN: row. Normal color is GpuFanColor=0,191,255 (sky blue), per task context."
+    },
+    {
+      "name": "GpuCoreMHZ", "iniLines": "337-346", "type": "STRING",
+      "styles": ["styleSecondaryText", "StyleLeftAlign"],
+      "x": {"expr": "#ContentMarginFormula#", "value": 7, "mode": "abs"},
+      "y": {"expr": "((#GpuCoreMemClock#=1)?(#RowSpacing#+1):0)R", "value": "39+4T", "mode": "R", "relativeTo": "GpuFanBar", "n": 2},
+      "w": {"expr": "#ContentWidth#", "value": 190, "note": "explicit W overrides default (no-W) so the SolidColor fill spans the FULL content width, from X=7 to X=197 (=RightAlign) — i.e. a full-width footer highlight band behind both CORE: and MEM: text"},
+      "h": {"expr": "auto", "value": "T", "mode": "auto-text"},
+      "align": "Left", "case": "NONE", "bold": false,
+      "fontFace": "Trebuchet MS", "fontSize": 8,
+      "fontColor": [60, 65, 62, 205],
+      "solidColor": {"color": [248, 248, 248], "alpha": 255, "var": "SolidColorLabel,SolidColorLabelAlpha", "notes": "Light near-white background fill band drawn behind this row only (footer/label styling)."},
+      "measureNames": ["GpuCoreClock"],
+      "text": "CORE: %1MHz", "textResolved": "e.g. \"CORE: 2610MHz\"",
+      "hidden": {"expr": "(#GpuCoreMemClock#=0)", "resolved": false},
+      "updateDivider": {"expr": "((#GpuCoreMemClock#=0)?(-1):(1))", "resolved": 1},
+      "notes": "Bottom row, left half: core clock. The SolidColor rectangle set here (full ContentWidth) is the visual background for the ENTIRE clocks row, underlapping GpuMemMHZ too."
+    },
+    {
+      "name": "GpuMemMHZ", "iniLines": "348-354", "type": "STRING",
+      "styles": ["styleSecondaryText", "StyleRightAlign_r"],
+      "x": {"expr": "#RightAlign#", "value": 197, "mode": "abs"},
+      "y": {"expr": "r", "value": "39+4T", "mode": "r", "relativeTo": "GpuCoreMHZ"},
+      "h": {"expr": "auto", "value": "T", "mode": "auto-text"},
+      "align": "Right", "case": "NONE", "bold": false,
+      "fontFace": "Trebuchet MS", "fontSize": 8,
+      "fontColor": [60, 65, 62, 205],
+      "measureNames": ["GpuMemoryClock"],
+      "text": "MEM: %1MHz", "textResolved": "e.g. \"MEM: 1313MHz\"",
+      "hidden": {"expr": "(#GpuCoreMemClock#=0)", "resolved": false},
+      "updateDivider": {"expr": "((#GpuCoreMemClock#=0)?(-1):(1))", "resolved": 1},
+      "notes": "Bottom row, right half: memory clock. Shares the SolidColor band drawn by GpuCoreMHZ (no own SolidColor)."
+    },
+    {
+      "name": "meterHistogram", "iniLines": "358-365", "type": "Image",
+      "styles": ["StyleGraph"],
+      "x": {"expr": "(#ContentMarginFormula#+1)", "value": 8, "mode": "abs"},
+      "y": {"expr": "((#ShowGraph#=0)?0:#BottomMargin#+1)R", "value": "43+5T", "mode": "R", "relativeTo": "GpuMemMHZ", "n": 4},
+      "w": 188, "h": 25,
+      "solidColor": {"color": [255,255,255], "alpha": 25, "var": "EmptyBarColor,EmptyBarColorAlpha"},
+      "hidden": {"expr": "(#ShowGraph#=0)", "resolved": false},
+      "group": "GraphsMeter",
+      "updateDivider": -1,
+      "notes": "Background/empty-track rectangle for the sparkline area; the 4 Line meters below overlay this exact rect. This is the one meter whose Y offset (BottomMargin+1=4R) creates the visual gap between the clocks row and the graph block."
+    },
+    {
+      "name": "GpuTempHistogram", "iniLines": "367-375", "type": "Line",
+      "styles": ["StyleGraph"],
+      "x": {"expr": "(#ContentMarginFormula#+1)", "value": 8, "mode": "abs"},
+      "y": {"expr": "r", "value": "43+5T", "mode": "r", "relativeTo": "meterHistogram"},
+      "w": 188, "h": 25,
+      "measureNames": ["GpuTemp"],
+      "lineColor": [204, 0, 0, 255], "lineColorVar": "GpuTempColor (alpha defaults to 255, overriding StyleGraph's default colorHistogramAlpha=250)",
+      "autoscale": 0, "graphStart": "Left",
+      "hidden": {"expr": "(#ShowGraph#=0) || (#GpuTemp#=0) || (#GpuTempGraph#=0)", "resolved": false},
+      "updateDivider": {"expr": "same condition ? -1 : 1", "resolved": 1},
+      "group": "GraphsMeter",
+      "notes": "Temperature sparkline, red line, overlaid on meterHistogram's track. Range fixed 0-100 (GpuTemp measure Min/Max), Autoscale=0."
+    },
+    {
+      "name": "GpuUsageHistogram", "iniLines": "377-385", "type": "Line",
+      "styles": ["StyleGraph"],
+      "x": {"expr": "(#ContentMarginFormula#+1)", "value": 8, "mode": "abs"},
+      "y": {"expr": "r", "value": "43+5T", "mode": "r", "relativeTo": "GpuTempHistogram"},
+      "w": 188, "h": 25,
+      "measureNames": ["GpuCoreUsage"],
+      "lineColor": [176, 196, 222, 255], "lineColorVar": "GpuUsageColor",
+      "autoscale": 0, "graphStart": "Left",
+      "hidden": {"expr": "(#ShowGraph#=0) || (#GpuUsage#=0) || (#GpuUsageGraph#=0)", "resolved": false},
+      "updateDivider": {"expr": "same condition ? -1 : 1", "resolved": 1},
+      "group": "GraphsMeter",
+      "notes": "Core-usage sparkline, light blue-grey line, same overlaid rect."
+    },
+    {
+      "name": "GpuMemUsageHistogram", "iniLines": "387-395", "type": "Line",
+      "styles": ["StyleGraph"],
+      "x": {"expr": "(#ContentMarginFormula#+1)", "value": 8, "mode": "abs"},
+      "y": {"expr": "r", "value": "43+5T", "mode": "r", "relativeTo": "GpuUsageHistogram"},
+      "w": 188, "h": 25,
+      "measureNames": ["GpuVMemoryPercent (via Gpu[#GpuTypeString]MemoryPercent)"],
+      "lineColor": [102, 204, 0, 255], "lineColorVar": "GpuMemUsageColor",
+      "autoscale": 0, "graphStart": "Left",
+      "hidden": {"expr": "(#ShowGraph#=0) || (#GpuMem#=0) || (#GpuMemUsageGraph#=0)", "resolved": false},
+      "updateDivider": {"expr": "same condition ? -1 : 1", "resolved": 1},
+      "group": "GraphsMeter",
+      "notes": "VRAM% sparkline, green line, same overlaid rect."
+    },
+    {
+      "name": "GpuFanHistogram", "iniLines": "397-405", "type": "Line",
+      "styles": ["StyleGraph"],
+      "x": {"expr": "(#ContentMarginFormula#+1)", "value": 8, "mode": "abs"},
+      "y": {"expr": "r", "value": "43+5T", "mode": "r", "relativeTo": "GpuMemUsageHistogram"},
+      "w": 188, "h": 25,
+      "measureNames": ["GpuFanPercent"],
+      "lineColor": [0, 191, 255, 255], "lineColorVar": "GpuFanColor",
+      "autoscale": 0, "graphStart": "Left",
+      "hidden": {"expr": "(#ShowGraph#=0) || (#GpuFan#=0) || (#GpuFanGraph#=0)", "resolved": false},
+      "updateDivider": {"expr": "same condition ? -1 : 1", "resolved": 1},
+      "group": "GraphsMeter",
+      "notes": "Fan% sparkline, sky-blue line, same overlaid rect. All 4 histogram lines share one rectangle: 4 stacked/overlaid line-graphs, not 4 separate boxes."
+    },
+    {
+      "name": "meterHistogramAlign", "iniLines": "407-414", "type": "Image",
+      "styles": ["StyleGraph"],
+      "x": {"expr": "(#ContentMarginFormula#+1)", "value": 8, "mode": "abs"},
+      "y": {"expr": "r", "value": "43+5T", "mode": "r", "relativeTo": "GpuFanHistogram"},
+      "w": 188, "h": 25,
+      "solidColor": {"color": [255,255,255], "alpha": 0, "notes": "Fully transparent (alpha 0) — invisible; exists purely as a same-size/same-Group flow anchor so the subsequent MeterBackgroundHeight meter's 'R' offset is measured from a reliable, always-present element regardless of which individual histogram lines are hidden."},
+      "hidden": {"expr": "(#ShowGraph#=0)", "resolved": false},
+      "group": "GraphsMeter",
+      "updateDivider": -1
+    },
+    {
+      "name": "MeterBackgroundHeight", "iniLines": "418-427", "type": "Image",
+      "x": {"expr": "0", "value": 0, "mode": "abs"},
+      "y": {"expr": "(#BottomMargin#+#BgOffset#+2)R", "value": "78+5T", "mode": "R", "relativeTo": "meterHistogramAlign", "n": 10},
+      "w": {"expr": "(#BgWidth#*#scale#)", "value": 350.2},
+      "h": 1,
+      "solidColor": {"color": [255,255,255], "alpha": 0, "notes": "Invisible sizing meter."},
+      "transformationMatrix": [1.7, 0, 0, 1.7, 1.7, 1.7],
+      "group": "Background",
+      "updateDivider": -1,
+      "notes": "TERMINAL meter of the vertical flow. Its resolved Y (78+5T unscaled) is read by StyleBackground's H formula to size MeterBackground/the whole card. This is the authoritative 'total content height' value — see verticalFlowSummary."
+    }
+  ],
+  "skipped": [
+    {
+      "name": "ControlSettings_", "iniLines": "189-201", "type": "String",
+      "reason": "Group=Controls settings-gear glyph (ElegantIcons font, text [\\x0xe035]); Hidden=1 always, only shown transiently via the panel-level MouseOverAction toggling group 'Controls' visibility on hover. Not part of the static steady-state visual.",
+      "rawGeometry": {"x": "(#RightAlign#-25)=172", "y": "1r (rel. to meterTitle, =10)", "fontColor": "135,206,250", "fontSize": 8, "fontFace": "ElegantIcons"}
+    },
+    {
+      "name": "ControlSettings", "iniLines": "431-437", "type": "Image",
+      "reason": "Group=Controls invisible StyleMouseRegion hit-region paired with ControlSettings_; LeftMouseUpAction opens the Settings config. Non-visual (SolidColor alpha effectively via StyleMouseRegion=255,255,255,0)."
+    },
+    {
+      "name": "meterHideGraphs", "iniLines": "439-446", "type": "Image",
+      "reason": "Invisible StyleMouseRegion hit-region paired with the VISIBLE meterHideGraphs_ arrow glyph (which IS included in 'meters'). Purely a click target (SolidColor 255,255,255,0) sized/positioned to match meterHideGraphs_ via the StyleMouseRegion formula; clicking sets ShowGraph=0. No independent visual footprint."
+    },
+    {
+      "name": "meterShowGraphs", "iniLines": "448-455", "type": "Image",
+      "reason": "Invisible StyleMouseRegion hit-region paired with meterShowGraphs_ (also hidden by default); clicking sets ShowGraph=1. No independent visual footprint."
+    }
+  ],
+  "verticalFlowSummary": "T := the unscaled single-line auto-measured text height for an 8pt Trebuchet MS string meter (Rainmeter leaves H unset on every text meter here, so H is whatever the text-rendering engine measures for one line at FontSize=8; styleFirstLineText/stylePrimaryText are Bold, styleSecondaryText is Regular — assumed to share the same line-height T, which is normally true for a single font family/size since ascent+descent+line-gap are font-design metrics rather than per-weight metrics, but verify empirically against the actual renderer). Resolved unscaled Y-chain (top to bottom): meterTitle y=9,h=20 (fixed, absolute) | [ControlSettings_/gear icon: Y=10, not part of visible flow] | meterHideGraphs_/meterShowGraphs_ button y=4 (absolute, independent of the row flow, upper-right corner) | GpuTempText y=30 (absolute) | GpuUsageText y=32 (absolute) | GpuUsagePercentText y=32 (same row) | GpuCoreUsageBar y=32+T, h=1 | GpuMemoryUsageString y=34+T, h=T | GpuMemoryValue y=35+2T, h=T | GpuMemoryPercent y=35+2T (same row) | GpuMemUsageBar y=35+3T, h=1 | GpuFanText y=36+3T, h=T | meterGpuFanRpm y=36+3T (same row) | meterGpuFanPercent y=36+3T (same row) | GpuFanBar y=36+4T, h=1 | GpuCoreMHZ y=39+4T, h=T | GpuMemMHZ y=39+4T (same row) | meterHistogram/GpuTempHistogram/GpuUsageHistogram/GpuMemUsageHistogram/GpuFanHistogram/meterHistogramAlign all y=43+5T, h=25 (5 meters stacked at the identical rect: 1 empty-track image + 4 overlaid line graphs + 1 transparent align spacer) | MeterBackgroundHeight y=78+5T (TERMINAL — this value, times Scale=1.7, is the background card's total unscaled-then-scaled height). Approximate illustrative numbers using a placeholder T≈11 (NOT authoritative — replace with real measured text-layout height): rows at y≈43,43,43,68,69,80,81,91,92,102,103,113,114,124,113(clocks)≈124, graph block at y≈128..153, card total height ≈ 133 unscaled ≈ 226px at Scale=1.7. All X positions and all Bar/Graph/Image heights ARE fully static/resolved (no dependency on T): title X=103 W=190 H=20; text rows X=7/103/197 (left/center/right); bars X=8 W=188 H=1; graphs X=8 W=188 H=25; clocks-row solid-fill band X=7 W=190 (spans full content width, i.e. reaches X=197).",
+  "notes": [
+    "Panel shows all optional rows/graphs enabled by default (GpuTemp=GpuUsage=GpuMem=GpuFan=GpuCoreMemClock=1; GpuTempGraph=GpuUsageGraph=GpuMemUsageGraph=GpuFanGraph=1; ShowGraph=1) — this is the 'full' 6-row + sparkline layout described in the task context.",
+    "GPU identity is NVIDIA (GpuTypeInteger=0, GpuTypeString='V'): VRAM total/percent come from GpuVMemoryPercent (HWiNFO 'GPU Memory Usage (%)' sensor) + GpuTotalVMem (back-solved from used-MB/used-%), NOT from a hardcoded capacity. The AMD 'dedicated memory' calc measures (GpuTotalDedMem, GpuDedMemoryPercent) and the Gpu1MemoryInMegaBytes=2048 variable are present but Disabled and unused for this card.",
+    "Temperature text color and both usage/mem/fan bar colors are threshold-driven Calc measures (Substitute-based), not static — GpuTempWarn uses the generic 5-step DevTempWarnColorTh1..5 ramp keyed off GpuTempWarnTh1..4 (45/55/65/75); the three bar-warn Calc measures each use a flat >75% crimson (220,20,60) vs. their respective normal color (GpuUsageColor/GpuMemUsageColor/GpuFanColor).",
+    "The 4 sparkline Line meters (temp/usage/mem/fan) all render into the exact same 188x25 rect starting at unscaled (8, 43+5T) — they are literally stacked/overlaid, not tiled side by side; the empty-track Image meter (meterHistogram, EmptyBarColor 255,255,255,25) sits behind them as the visual 'track' background.",
+    "GpuCoreMHZ draws a full-content-width (190 unscaled) near-white (248,248,248,255) SolidColor rectangle behind the CORE:/MEM: clock row only — this is a distinct footer highlight band not present on any other row in this panel.",
+    "Every meter/style carries TransformationMatrix=#Scale#;0;0;#Scale#;#Scale#;#Scale# (= 1.7;0;0;1.7;1.7;1.7): uniform 1.7x scale on both axes plus a +1.7,+1.7 translate baked into the same matrix, applied per-meter (not a single outer viewport transform) — apply this per meter/shape when reconstructing in Direct2D.",
+    "Two Rainmeter-side typos observed in the raw ini text worth flagging for a faithful re-implementation: meterShowGraphs_'s Text is written '[\\x0x23F7]' (stray '0x'), and ControlSettings_'s Text is written '[\\x0xe035]' (also stray '0x'); both are almost certainly meant to be plain '\\x23F7' / '\\xE035' Unicode escapes matching the pattern used by meterHideGraphs_'s clean '[\\x23F6]'.",
+    "[styleGraphButton] is defined globally in Styles.inc but is NOT referenced anywhere in GPU1.ini — irrelevant to this panel.",
+    "[TextStyle] (referenced by the skipped ControlSettings_ meter as 'MeterStyle=TextStyle | StyleRightAlign') was not found defined in @Resources/Styles.inc or @Resources/Variables.inc in this scan; since ControlSettings_ is skipped (Group=Controls, non-steady-state), this was not chased further — flag if the settings-gear affordance needs to be reproduced.",
+    "MeasureSettingsScript (Settings.lua) plus StyleMouseRegionStringButtonHover/StyleStringButtonHover only implement HOVER recoloring of the gear/collapse-expand icons (fade via hoverAlpha=180) and are irrelevant to a non-interactive static render.",
+    "rainmeterUpdateMs=1000 is the skin-level default poll interval; several meters/measures use UpdateDivider=-1 (render once, e.g. static labels, background, title) while the live numeric readouts use UpdateDivider=1 (every update) or a Hidden-mirroring ((cond)?(-1):(1)) that only pauses updates when the row is fully hidden.",
+    "All color 'alpha' values default to 255 when a variable/literal supplies only 3 RGB components (e.g. GpuTempColor, GpuUsageColor, GpuMemUsageColor, GpuFanColor when used directly as LineColor/BarColor overrides) — this differs slightly from StyleGraph's own default LineColor which carries colorHistogramAlpha=250; each histogram meter's explicit LineColor override supersedes that default alpha."
+  ]
+}

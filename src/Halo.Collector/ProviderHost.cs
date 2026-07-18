@@ -1,0 +1,120 @@
+using System.Diagnostics;
+using Halo.Shared;
+
+namespace Halo.Collector;
+
+/// <summary>
+/// Runs each provider on its own thread at min(requested, provider.MaxRateHz).
+/// Failed providers are retried with backoff (1/5/30/60 s). A provider crash never
+/// touches other providers (plan D2, §11).
+/// </summary>
+public sealed class ProviderHost : IDisposable
+{
+    private readonly MetricSink _sink;
+    private readonly List<Runner> _runners = new();
+    private readonly CancellationTokenSource _cts = new();
+
+    public ProviderHost(MetricSink sink) => _sink = sink;
+
+    public void Add(ISensorProvider provider, double? requestedRateHz = null)
+    {
+        var r = new Runner(provider, _sink, requestedRateHz, _cts.Token);
+        _runners.Add(r);
+        r.Start();
+    }
+
+    public IReadOnlyList<(string Name, bool Available, double RateHz, double LastPollMs)> Status()
+        => _runners.Select(r => (r.Provider.Name, r.Available, r.RateHz, r.LastPollMs)).ToList();
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        foreach (var r in _runners) r.Join(2000);
+        foreach (var r in _runners) { try { r.Provider.Dispose(); } catch { } }
+    }
+
+    private sealed class Runner(ISensorProvider provider, MetricSink sink, double? requestedRateHz, CancellationToken ct)
+    {
+        public ISensorProvider Provider { get; } = provider;
+        public volatile bool Available;
+        public double RateHz => Math.Min(requestedRateHz ?? Provider.DefaultRateHz, Provider.MaxRateHz);
+        public double LastPollMs;
+
+        private Thread? _thread;
+
+        public void Start()
+        {
+            _thread = new Thread(Run) { IsBackground = true, Name = $"halo-{Provider.Name}" };
+            _thread.Start();
+        }
+
+        public void Join(int ms) => _thread?.Join(ms);
+
+        private void Run()
+        {
+            int initFailures = 0;
+            while (!ct.IsCancellationRequested)
+            {
+                // ---- init with backoff ----
+                try
+                {
+                    Available = Provider.Initialize(sink);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"{Provider.Name}: Initialize threw", ex);
+                    Available = false;
+                }
+
+                if (!Available)
+                {
+                    int delay = initFailures switch { 0 => 1000, 1 => 5000, 2 => 30000, _ => 60000 };
+                    initFailures++;
+                    if (initFailures <= 3) Log.Warn($"{Provider.Name}: unavailable, retry in {delay} ms");
+                    if (ct.WaitHandle.WaitOne(delay)) return;
+                    continue;
+                }
+
+                initFailures = 0;
+                Log.Info($"{Provider.Name}: initialised, polling at {RateHz:0.##} Hz (cap {Provider.MaxRateHz} Hz)");
+
+                // ---- poll loop ----
+                long periodTicks = (long)(Stopwatch.Frequency / RateHz);
+                long next = Stopwatch.GetTimestamp();
+                int consecutiveErrors = 0;
+                var sw = new Stopwatch();
+
+                while (!ct.IsCancellationRequested)
+                {
+                    sw.Restart();
+                    try
+                    {
+                        Provider.Poll(sink);
+                        consecutiveErrors = 0;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (++consecutiveErrors <= 3) Log.Error($"{Provider.Name}: poll failed ({consecutiveErrors})", ex);
+                        if (consecutiveErrors >= 10)
+                        {
+                            Log.Warn($"{Provider.Name}: too many poll failures, re-initialising");
+                            Available = false;
+                            break; // back to init loop
+                        }
+                    }
+                    LastPollMs = sw.Elapsed.TotalMilliseconds;
+
+                    next += periodTicks;
+                    long now = Stopwatch.GetTimestamp();
+                    if (next <= now)
+                    {
+                        next = now; // overran the period: don't try to catch up, just go on
+                        continue;
+                    }
+                    int sleepMs = (int)((next - now) * 1000 / Stopwatch.Frequency);
+                    if (sleepMs > 0 && ct.WaitHandle.WaitOne(sleepMs)) return;
+                }
+            }
+        }
+    }
+}
