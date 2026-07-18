@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Halo Collector: elevated sensor-data process. See native-widget-implementation-plan.md §4.
+     Note: 2026-07-19 Defender ML false-positive (Bearfoos.A!ml) quarantined this file once;
+     content is plain MSBuild XML. If it happens again, restore from git and consider an
+     exclusion for this folder (user decision). -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Halo.Collector</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Halo.Shared\Halo.Shared.csproj" />
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+  </ItemGroup>
+</Project>

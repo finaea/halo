@@ -12,7 +12,7 @@ namespace Halo.Collector;
 /// </summary>
 public sealed class CommandServer : IDisposable
 {
-    public const string PipeName = "Halo.Control.v1";
+    public const string PipeName = Halo.Shared.ControlPipe.PipeName;
     private readonly CancellationTokenSource _cts = new();
     private readonly Action<string> _handler;
 
