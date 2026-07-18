@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 <#
 .SYNOPSIS
     Registers Halo's autostart (Collector scheduled task + Widgets HKCU Run value).

@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 <#
 .SYNOPSIS
     Fully removes Halo's global registrations (native-widget-implementation-plan.md §15).

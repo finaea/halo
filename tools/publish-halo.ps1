@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 <#
 .SYNOPSIS
     Publishes Halo's processes as self-contained Release builds into <root>\bin\.
