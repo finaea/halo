@@ -7,16 +7,21 @@ using Halo.Shared.Metrics;
 namespace Halo.Collector.Providers;
 
 /// <summary>
-/// Frame pipeline data from Intel PresentMon (bundled console app, MIT) running as a child
-/// process with CSV streaming to stdout. Captures globally (one ETW session, --stop_existing_session)
-/// and filters rows by the foreground 3D app; per-frame events land in the shared-memory frame
-/// ring, windowed stats (1%/0.1% lows, worst frametime, FG ratio, Click-to-Photon) are published
-/// at poll rate. Requires elevation (ETW).
+/// Frame pipeline data from Intel PresentMon (bundled, MIT). Filters frames by the foreground
+/// 3D app; per-frame events land in the shared-memory frame ring, windowed stats (1%/0.1% lows,
+/// worst frametime, FG ratio, Click-to-Photon) are published at poll rate.
 ///
-/// Note (deviation from plan D7, recorded): we consume the *console* capture app rather than the
-/// PresentMon 2 service+SDK. Same binary family, same data; the SDK client remains a drop-in
-/// swap behind this provider seam. --stop_existing_session mitigates session conflicts, and the
-/// HWiNFO/CapFrameX stack this guarded against is being retired anyway.
+/// Two transports behind one seam (settings.PresentMonTransport: auto | sdk | console):
+///  - **sdk** (plan D7, preferred): PresentMon 2 service + PresentMonAPI2.dll. Frames are pulled
+///    from the service's shared-memory ring each Poll with true PRESENT_START_QPC timestamps;
+///    ETW flush cadence is tuned via pmSetEtwFlushPeriod (settings.PresentMonEtwFlushMs), so
+///    frame data is ~flush+poll fresh instead of ~1 s (console ETW batching + 4 KB stdout pipe).
+///    See PresentMonSdkSource for the service lifecycle (no SCM registration needed).
+///  - **console**: the capture app as a child process with CSV over stdout ("--stop_existing_session";
+///    frame timestamps reconstructed by anchoring the CSV time column to arrival QPC). Fallback
+///    when the SDK path is unavailable.
+/// Both need elevation to own an ETW session; attaching to an already-installed running
+/// PresentMon service works unelevated.
 /// </summary>
 public sealed class PresentMonProvider(string projectRoot, GeneralSettings settings) : ISensorProvider
 {
@@ -27,6 +32,8 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
     private Process? _proc;
     private Thread? _pumpThread;
     private volatile bool _stopping;
+    private PresentMonSdkSource? _sdk;
+    private readonly List<PresentMonSdkSource.FrameSample> _sdkScratch = new(256);
 
     private readonly object _statsLock = new();
     private readonly FrameStats _presented = new(60);
@@ -51,18 +58,17 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
     public bool Initialize(MetricSink sink)
     {
         _sink = sink;
-        if (!IsElevated())
-        {
-            return false; // ETW needs admin; host retries with backoff
-        }
 
-        string? exe = Directory.EnumerateFiles(Path.Combine(projectRoot, "tools", "presentmon"), "PresentMon-*-x64.exe").FirstOrDefault();
-        if (exe == null)
-        {
-            Log.Warn("presentmon: binary not found under tools\\presentmon");
-            return false;
-        }
+        // re-init safety (host calls Initialize again after repeated poll failures):
+        // tear down any previous transport before starting a fresh one
+        _stopping = true;
+        try { if (_proc is { HasExited: false }) _proc.Kill(entireProcessTree: true); } catch { }
+        _proc = null;
+        _sdk?.Dispose();
+        _sdk = null;
 
+        // registration is idempotent and must precede the elevation gate: the sdk transport
+        // can attach to an already-installed running service without admin
         sink.Register(MetricNames.FpsPresented, MetricType.Double, MetricUnit.Fps, Name, MaxRateHz);
         sink.Register(MetricNames.FpsDisplayed, MetricType.Double, MetricUnit.Fps, Name, MaxRateHz);
         sink.Register(MetricNames.FpsFrametimeMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
@@ -88,6 +94,34 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
 
         Stats.SetWindow(settings.FrameLowsWindowS);
 
+        bool elevated = IsElevated();
+        string transport = settings.PresentMonTransport.Trim().ToLowerInvariant();
+
+        if (transport is "auto" or "sdk")
+        {
+            var sdk = new PresentMonSdkSource();
+            if (sdk.Start(projectRoot, elevated, settings.PresentMonEtwFlushMs))
+            {
+                _sdk = sdk;
+                Log.Info($"presentmon transport: sdk ({sdk.Detail})");
+                return true;
+            }
+            sdk.Dispose();
+            if (transport == "sdk") return false;
+        }
+
+        if (!elevated)
+        {
+            return false; // console transport needs admin (ETW); host retries with backoff
+        }
+
+        string? exe = Directory.EnumerateFiles(Path.Combine(projectRoot, "tools", "presentmon"), "PresentMon-*-x64.exe").FirstOrDefault();
+        if (exe == null)
+        {
+            Log.Warn("presentmon: binary not found under tools\\presentmon");
+            return false;
+        }
+
         // instrumentation ladder: prefer app-timing (marker-based PCL + sim pacing) + frame types
         string[] argLadder =
         [
@@ -99,6 +133,7 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         bool started = false;
         foreach (string extra in argLadder)
             if (StartCapture(exe, extra)) { started = true; break; }
+        if (started) Log.Info("presentmon transport: console app");
         return started;
     }
 
@@ -235,10 +270,13 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
 
     public void Poll(MetricSink sink)
     {
-        if (_proc == null || _proc.HasExited)
+        if (_sdk != null)
+            _sdk.EnsureHealthy(); // throws when transport died; host re-inits with backoff
+        else if (_proc == null || _proc.HasExited)
             throw new InvalidOperationException("presentmon process not running"); // host re-inits with backoff
 
         UpdateForegroundTarget(sink);
+        DrainSdkFrames();
 
         FrameEntry[] ring;
         FrameStats.Result r;
@@ -296,6 +334,30 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         }
     }
 
+    /// <summary>sdk transport: pull queued frames into stats/ring (console pump pushes instead).</summary>
+    private void DrainSdkFrames()
+    {
+        int pid = _targetPid;
+        if (_sdk == null || pid == 0 || !_sdk.Tracking) return;
+        _sdkScratch.Clear();
+        _sdk.Drain(pid, _sdkScratch);
+        if (_sdkScratch.Count == 0) return;
+
+        lock (_statsLock)
+        {
+            foreach (var s in _sdkScratch)
+            {
+                Stats.Add(s.Entry);
+                _pendingRing.Add(s.Entry);
+                if (s.Entry.Qpc > _lastTargetFrameQpc) _lastTargetFrameQpc = s.Entry.Qpc;
+                if (!double.IsNaN(s.ClickMs) && s.ClickMs > 0) { _clickSum += s.ClickMs; _clickCount++; }
+                if (!double.IsNaN(s.AllInputMs) && s.AllInputMs > 0) { _allInputSum += s.AllInputMs; _allInputCount++; }
+                if (!double.IsNaN(s.SimMs) && s.SimMs > 0) { _simMsSum += s.SimMs; _simCount++; }
+                if (!double.IsNaN(s.DispLatMs) && s.DispLatMs is > 0 and < 200) { _dispLatSum += s.DispLatMs; _dispLatCount++; }
+            }
+        }
+    }
+
     private void UpdateForegroundTarget(MetricSink sink)
     {
         nint hwnd = GetForegroundWindow();
@@ -319,6 +381,7 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
                 _clickCount = _allInputCount = _simCount = _dispLatCount = 0;
                 _lastTargetFrameQpc = 0;
             }
+            _sdk?.OnTargetChanged(_targetPid, pid);
             _targetPid = pid;
             _targetName = name;
             _nextNgxScan = DateTime.MinValue; // rescan DLSS on app switch
@@ -423,6 +486,8 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         _stopping = true;
         try { if (_proc is { HasExited: false }) _proc.Kill(entireProcessTree: true); } catch { }
         _proc = null;
+        _sdk?.Dispose();
+        _sdk = null;
     }
 
     // ---- CSV header mapping (tolerates console-v2 "TimeInMs/MsBetweenâ€¦", SDK "CPUStartTime/

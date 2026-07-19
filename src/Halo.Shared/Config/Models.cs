@@ -12,6 +12,10 @@ public sealed class GeneralSettings
     public string FontFamily { get; set; } = "Trebuchet MS";
     /// <summary>Rolling window (seconds) for 1%/0.1% lows.</summary>
     public double FrameLowsWindowS { get; set; } = 60;
+    /// <summary>Frame-data transport: "auto" (SDK service, console-app fallback), "sdk", "console".</summary>
+    public string PresentMonTransport { get; set; } = "auto";
+    /// <summary>SDK transport: ETW buffer flush period requested from the service, ms (1–1000; 0 = service default).</summary>
+    public int PresentMonEtwFlushMs { get; set; } = 20;
     /// <summary>Graph history depth in seconds (widget-local rings).</summary>
     public double GraphHistoryS { get; set; } = 600;
     public string ExternalIpUrl { get; set; } = "https://api.ipify.org";

@@ -34,6 +34,41 @@ if (args.Contains("--dump"))
     return 0;
 }
 
+// --pm-smoketest [pid]: verify the PresentMon SDK transport end-to-end (needs admin unless a
+// PresentMon service is already running). Tracks the given pid (default: dwm, which presents
+// every vblank) and prints consumed frame counts + data freshness for 5 s. Safe to run while
+// a collector instance is up — it attaches to the same service.
+if (args.Contains("--pm-smoketest"))
+{
+    string pmRoot = FindProjectRoot(AppContext.BaseDirectory);
+    Log.Init(Path.Combine(pmRoot, "logs"), "pm-smoketest", alsoConsole: true);
+    int pid = args.Where(a => int.TryParse(a, out _)).Select(int.Parse).FirstOrDefault();
+    if (pid == 0) pid = System.Diagnostics.Process.GetProcessesByName("dwm").FirstOrDefault()?.Id ?? 0;
+    if (pid == 0) { Console.WriteLine("no target pid"); return 3; }
+    using var sdk = new PresentMonSdkSource();
+    if (!sdk.Start(pmRoot, IsElevated(), 20)) { Console.WriteLine("sdk transport unavailable (see log above)"); return 3; }
+    Console.WriteLine($"sdk up ({sdk.Detail}), tracking pid {pid}");
+    sdk.OnTargetChanged(0, pid);
+    if (!sdk.Tracking) { Console.WriteLine("tracking failed"); return 3; }
+    var frames = new List<PresentMonSdkSource.FrameSample>();
+    for (int s = 1; s <= 5; s++)
+    {
+        Thread.Sleep(1000);
+        frames.Clear();
+        sdk.Drain(pid, frames);
+        string detail = "";
+        if (frames.Count > 0)
+        {
+            var last = frames[^1].Entry;
+            double ageMs = (System.Diagnostics.Stopwatch.GetTimestamp() - last.Qpc) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            detail = $" | newest: ft={last.FrametimeMs:0.00}ms dispFt={last.DisplayedFtMs:0.00}ms age={ageMs:0}ms flags=0x{last.Flags:x}";
+        }
+        Console.WriteLine($"t+{s}s: {frames.Count} frames{detail}");
+    }
+    sdk.OnTargetChanged(pid, 0);
+    return 0;
+}
+
 // Halo.Collector — elevated data process (plan §4). Single instance.
 using var singleInstance = new Mutex(true, "Local\\Halo.Collector.SingleInstance", out bool isNew);
 if (!isNew)

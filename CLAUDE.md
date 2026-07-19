@@ -46,8 +46,12 @@ HKCU Run `HaloWidgets` — both created only by `tools\install-halo.ps1`, remove
 - Metric names: `Halo.Shared\Metrics\MetricNames.cs`; `.max` suffix = session maximum.
 - Panel visual specs live in `tools\extracted\*.json` (faithful transcriptions of the
   original Rainmeter skins) — treat them as the source of truth for 1:1 parity.
-- PresentMon is consumed as a bundled console app child process (`tools\presentmon\`),
-  not the service (documented deviation from plan D7; seam allows the SDK swap).
+- PresentMon frame data uses the SDK transport by default (plan D7): bundled PresentMon 2
+  service (`tools\presentmon\sdk\`) spawned as a console-mode child — no SCM registration —
+  and P/Invoked `PresentMonAPI2.dll`; ETW flush tuned via `settings.PresentMonEtwFlushMs`
+  (default 20 ms). The console capture app (`tools\presentmon\`) is the fallback
+  (`settings.PresentMonTransport`: auto | sdk | console). `Halo.Collector.exe --pm-smoketest [pid]`
+  verifies the SDK path end-to-end.
 
 ## Gotchas
 
