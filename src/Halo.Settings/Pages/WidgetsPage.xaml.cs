@@ -9,12 +9,30 @@ namespace Halo.Settings.Pages;
 
 public partial class WidgetsPage : UserControl, ISettingsPage
 {
+    private static readonly (ZMode Mode, string Label)[] ZModes =
+    {
+        (ZMode.Desktop, "On desktop — under all windows, survives Win+D"),
+        (ZMode.Normal, "Normal window"),
+        (ZMode.Topmost, "Always on top"),
+    };
+
+    /// <summary>List row: friendly name + enable checkbox writing straight to the instance.</summary>
+    public sealed class WidgetRow(WidgetInstance w)
+    {
+        public WidgetInstance W { get; } = w;
+        public string Name => FriendlyName(W);
+        public string Sub => $"{W.Type} · {W.Id}";
+        public bool Enabled { get => W.Enabled; set => W.Enabled = value; }
+    }
+
     private readonly ConfigStore _store;
-    private readonly ObservableCollection<WidgetInstance> _widgets = new();
+    private readonly ObservableCollection<WidgetRow> _rows = new();
     // Disk state as of page load, per widget id. Save applies only fields that differ from
     // this, so it can't undo drag positions / context-menu toggles the widgets process
     // wrote to disk while the page was open.
     private readonly Dictionary<string, WidgetInstance> _pristine = new();
+    private List<MonitorList.Entry> _monitors = new();
+    private readonly List<string> _monitorDevices = new();
     private WidgetInstance? _current;
     private bool _loading;
 
@@ -22,28 +40,31 @@ public partial class WidgetsPage : UserControl, ISettingsPage
     {
         _store = store;
         InitializeComponent();
-        WidgetList.ItemsSource = _widgets;
-        ZModeCombo.ItemsSource = Enum.GetValues(typeof(ZMode));
+        WidgetList.ItemsSource = _rows;
+        foreach (var z in ZModes) ZModeCombo.Items.Add(z.Label);
     }
 
     public void OnEnter()
     {
+        _monitors = MonitorList.Get();
         LoadFromStore(0);
         Status.Text = "";
     }
+
+    public void OnLeave() { }
 
     private void LoadFromStore(int selectIndex)
     {
         _current = null;
         _store.Reload();
-        _widgets.Clear();
+        _rows.Clear();
         _pristine.Clear();
         foreach (var w in _store.Widgets.Widgets)
         {
-            _widgets.Add(w);
+            _rows.Add(new WidgetRow(w));
             _pristine[w.Id] = Clone(w);
         }
-        if (_widgets.Count > 0) WidgetList.SelectedIndex = Math.Clamp(selectIndex, 0, _widgets.Count - 1);
+        if (_rows.Count > 0) WidgetList.SelectedIndex = Math.Clamp(selectIndex, 0, _rows.Count - 1);
         else ClearDetail();
     }
 
@@ -55,12 +76,39 @@ public partial class WidgetsPage : UserControl, ISettingsPage
         RateHz = w.RateHz, Options = new Dictionary<string, string>(w.Options),
     };
 
-    public void OnLeave() { }
+    private static string FriendlyName(WidgetInstance w) => w.Type switch
+    {
+        "clock" => "Clock",
+        "power" => "Power draw",
+        "drives" => "Drives",
+        "cpu-ram" => "CPU & RAM",
+        "fans" => "Fans",
+        "network" => "Network",
+        "topcpu" => "Top processes — CPU",
+        "topram" => "Top processes — RAM",
+        "gpu" => "GPU",
+        "latency" => "Latency & DLSS",
+        "fps" => w.Options.GetValueOrDefault("stream", "").ToLowerInvariant() switch
+        {
+            "displayed" => "FPS counter — displayed",
+            "presented" => "FPS counter — presented",
+            _ => "FPS counter",
+        },
+        _ => w.Type,
+    };
+
+    private static string OptionsHelp(string type) => type switch
+    {
+        "fps" => "stream=presented — live counter fed by the present tap (RTSS-like latency).\n" +
+                 "stream=displayed — what actually reached the screen, fate-resolved (frame-gen aware).",
+        "topcpu" or "topram" => "aggregate=true — sum same-name processes into one row.",
+        _ => "This panel has no options. (Format: key=value, one per line.)",
+    };
 
     private void WidgetList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         FlushCurrent();
-        _current = WidgetList.SelectedItem as WidgetInstance;
+        _current = (WidgetList.SelectedItem as WidgetRow)?.W;
         LoadDetail(_current);
     }
 
@@ -70,33 +118,53 @@ public partial class WidgetsPage : UserControl, ISettingsPage
         Detail.IsEnabled = w != null;
         if (w == null) { ClearDetail(); _loading = false; return; }
 
-        IdText.Text = w.Id;
-        TypeText.Text = w.Type;
-        EnabledCheck.IsChecked = w.Enabled;
-        MonitorBox.Text = w.Monitor;
+        NameText.Text = FriendlyName(w);
+        SubText.Text = $"{w.Type} · {w.Id}";
+
+        MonitorCombo.Items.Clear();
+        _monitorDevices.Clear();
+        MonitorCombo.Items.Add("Automatic — first monitor");
+        _monitorDevices.Add("");
+        foreach (var m in _monitors)
+        {
+            MonitorCombo.Items.Add(m.Label);
+            _monitorDevices.Add(m.Device);
+        }
+        int mi = _monitorDevices.FindIndex(d => d.Equals(w.Monitor, StringComparison.OrdinalIgnoreCase));
+        if (mi < 0)
+        {
+            MonitorCombo.Items.Add($"{w.Monitor} (not connected)");
+            _monitorDevices.Add(w.Monitor);
+            mi = _monitorDevices.Count - 1;
+        }
+        MonitorCombo.SelectedIndex = mi;
+
         XBox.Text = w.X.ToString(CultureInfo.InvariantCulture);
         YBox.Text = w.Y.ToString(CultureInfo.InvariantCulture);
-        ZModeCombo.SelectedItem = w.ZMode;
+        ZModeCombo.SelectedIndex = Math.Max(0, Array.FindIndex(ZModes, z => z.Mode == w.ZMode));
         ClickThroughCheck.IsChecked = w.ClickThrough;
         KeepOnScreenCheck.IsChecked = w.KeepOnScreen;
         LockedCheck.IsChecked = w.Locked;
-        OpacityBox.Text = w.Opacity.ToString(CultureInfo.InvariantCulture);
+        OpacitySlider.Value = Math.Clamp(w.Opacity, 0.1, 1.0);
         RateBox.Text = w.RateHz?.ToString(CultureInfo.InvariantCulture) ?? "";
 
         var sb = new StringBuilder();
         foreach (var kv in w.Options) sb.AppendLine($"{kv.Key}={kv.Value}");
         OptionsBox.Text = sb.ToString().TrimEnd('\r', '\n');
+        OptionsHint.Text = OptionsHelp(w.Type);
 
         _loading = false;
     }
 
     private void ClearDetail()
     {
-        IdText.Text = TypeText.Text = "";
-        MonitorBox.Text = XBox.Text = YBox.Text = OpacityBox.Text = RateBox.Text = "";
-        OptionsBox.Text = "";
-        EnabledCheck.IsChecked = ClickThroughCheck.IsChecked =
-            KeepOnScreenCheck.IsChecked = LockedCheck.IsChecked = false;
+        NameText.Text = "";
+        SubText.Text = "";
+        MonitorCombo.Items.Clear();
+        _monitorDevices.Clear();
+        XBox.Text = YBox.Text = RateBox.Text = "";
+        OptionsBox.Text = OptionsHint.Text = "";
+        ClickThroughCheck.IsChecked = KeepOnScreenCheck.IsChecked = LockedCheck.IsChecked = false;
         ZModeCombo.SelectedItem = null;
         Detail.IsEnabled = false;
     }
@@ -104,16 +172,15 @@ public partial class WidgetsPage : UserControl, ISettingsPage
     private void FlushCurrent()
     {
         if (_current == null || _loading) return;
-        _current.Enabled = EnabledCheck.IsChecked == true;
-        _current.Monitor = MonitorBox.Text.Trim();
+        if (MonitorCombo.SelectedIndex >= 0 && MonitorCombo.SelectedIndex < _monitorDevices.Count)
+            _current.Monitor = _monitorDevices[MonitorCombo.SelectedIndex];
         if (int.TryParse(XBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out int x)) _current.X = x;
         if (int.TryParse(YBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out int y)) _current.Y = y;
-        if (ZModeCombo.SelectedItem is ZMode z) _current.ZMode = z;
+        if (ZModeCombo.SelectedIndex >= 0) _current.ZMode = ZModes[ZModeCombo.SelectedIndex].Mode;
         _current.ClickThrough = ClickThroughCheck.IsChecked == true;
         _current.KeepOnScreen = KeepOnScreenCheck.IsChecked == true;
         _current.Locked = LockedCheck.IsChecked == true;
-        if (double.TryParse(OpacityBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double op))
-            _current.Opacity = Math.Clamp(op, 0.1, 1.0);
+        _current.Opacity = Math.Round(Math.Clamp(OpacitySlider.Value, 0.1, 1.0), 2);
         _current.RateHz = double.TryParse(RateBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double r)
             ? r : (double?)null;
         _current.Options = ParseOptions(OptionsBox.Text);
@@ -140,8 +207,9 @@ public partial class WidgetsPage : UserControl, ISettingsPage
 
         _store.Reload();
         var disk = _store.Widgets.Widgets;
-        foreach (var edited in _widgets)
+        foreach (var row in _rows)
         {
+            var edited = row.W;
             var target = disk.Find(w => w.Id == edited.Id);
             if (target == null) { disk.Add(edited); continue; }
             ApplyEdits(target, _pristine.GetValueOrDefault(edited.Id) ?? target, edited);
@@ -150,7 +218,7 @@ public partial class WidgetsPage : UserControl, ISettingsPage
         try
         {
             _store.SaveWidgets();
-            Status.Text = $"Saved widgets.json at {DateTime.Now:HH:mm:ss}.";
+            Status.Text = $"Saved widgets.json at {DateTime.Now:HH:mm:ss} — widgets update live.";
         }
         catch (Exception ex) { Status.Text = "Save failed: " + ex.Message; return; }
         LoadFromStore(sel);

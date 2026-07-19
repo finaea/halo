@@ -8,7 +8,8 @@ public sealed class GeneralSettings
 {
     public double DefaultRateHz { get; set; } = 5;
     public bool LockAll { get; set; } = false;
-    public double Scale { get; set; } = 1.7;
+    // NOTE: widget scale intentionally lives in theme.json ("scale"), not here — the
+    // renderer reads Theme.Scale only. A Scale property here was dead config (removed).
     public string FontFamily { get; set; } = "Trebuchet MS";
     /// <summary>Rolling window (seconds) for 1%/0.1% lows.</summary>
     public double FrameLowsWindowS { get; set; } = 60;

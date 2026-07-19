@@ -14,12 +14,14 @@ public sealed class StringPair
 public sealed class ColorRow : INotifyPropertyChanged
 {
     public string Token { get; }
+    public string Desc { get; }
 
     private int _r, _g, _b, _a;
 
-    public ColorRow(string token, int r, int g, int b, int a)
+    public ColorRow(string token, int r, int g, int b, int a, string desc = "")
     {
         Token = token;
+        Desc = desc;
         _r = Clamp(r); _g = Clamp(g); _b = Clamp(b); _a = Clamp(a);
     }
 

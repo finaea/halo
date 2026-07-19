@@ -19,7 +19,7 @@
       <ListBoxItem Content="General"/>
       <ListBoxItem Content="Widgets"/>
       <ListBoxItem Content="Theme"/>
-      <ListBoxItem Content="Metrics"/>
+      <ListBoxItem Content="Live metrics"/>
       <ListBoxItem Content="Autostart"/>
     </ListBox>
 

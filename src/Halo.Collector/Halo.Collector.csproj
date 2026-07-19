@@ -10,6 +10,7 @@
     <OutputType>WinExe</OutputType>
     <RootNamespace>Halo.Collector</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\assets\halo.ico</ApplicationIcon>
     <InvariantGlobalization>true</InvariantGlobalization>
     <ServerGarbageCollection>false</ServerGarbageCollection>
   </PropertyGroup>

@@ -51,6 +51,43 @@ public partial class ThemePage : UserControl, ISettingsPage
 
     private const double DefaultScale = 1.7;
 
+    private static readonly Dictionary<string, string> TokenDesc = new()
+    {
+        ["title"] = "Panel title text",
+        ["activeTitle"] = "Highlighted / active title text",
+        ["text"] = "Primary text",
+        ["text2"] = "Secondary text",
+        ["bar"] = "Bar fill",
+        ["histogram"] = "Graph line & fill",
+        ["netDown"] = "Network download",
+        ["netUp"] = "Network upload",
+        ["red"] = "Alert accent",
+        ["redText"] = "Alert text",
+        ["emptyBar"] = "Bar background (empty part)",
+        ["bgTop"] = "Panel header background",
+        ["bgBody"] = "Panel body background",
+        ["stroke"] = "Panel border",
+        ["solidLabel"] = "Solid label text",
+        ["inactiveButton"] = "Inactive button glyphs",
+        ["barWarn"] = "Bar color when warning",
+        ["cpuTemp"] = "CPU temperature graph",
+        ["cpuUsage"] = "CPU usage graph",
+        ["ramUsage"] = "RAM usage graph",
+        ["gpuTemp"] = "GPU temperature graph",
+        ["gpuUsage"] = "GPU usage graph",
+        ["gpuMemUsage"] = "GPU memory graph",
+        ["gpuFan"] = "GPU fan graph",
+        ["maxValue"] = "Session-max readouts",
+        ["maxLabelGray"] = "Session-max labels",
+        ["devWarn1"] = "Staged warning 1 (coolest)",
+        ["devWarn2"] = "Staged warning 2",
+        ["devWarn3"] = "Staged warning 3",
+        ["devWarn4"] = "Staged warning 4",
+        ["devWarn5"] = "Staged warning 5 (critical)",
+        ["horizLine"] = "Separator lines",
+        ["staleBadge"] = "Stale-data badge",
+    };
+
     private readonly ObservableCollection<ColorRow> _rows = new();
 
     public ThemePage()
@@ -96,7 +133,7 @@ public partial class ThemePage : UserControl, ISettingsPage
         foreach (var d in Defaults)
         {
             var v = overrides.TryGetValue(d.Token, out var o) ? o : new[] { d.R, d.G, d.B, d.A };
-            _rows.Add(new ColorRow(d.Token, v[0], v[1], v[2], v[3]));
+            _rows.Add(new ColorRow(d.Token, v[0], v[1], v[2], v[3], TokenDesc.GetValueOrDefault(d.Token, "")));
         }
         // Preserve any custom tokens present in the file that we don't know about.
         foreach (var kv in overrides)

@@ -8,10 +8,18 @@
       <RowDefinition Height="*"/>
     </Grid.RowDefinitions>
 
-    <TextBlock Grid.Row="0" Text="Metrics (transparency — live shared-memory view, read-only)"
-               FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
+    <StackPanel Grid.Row="0">
+      <TextBlock Text="Live metrics" Style="{StaticResource PageTitle}"/>
+      <TextBlock Style="{StaticResource PageSub}"
+                 Text="Read-only view of everything the collector publishes right now — useful to check what a widget would show. Names ending in .max are session maxima. Refreshes every 2 s."/>
+    </StackPanel>
 
-    <TextBlock Grid.Row="1" x:Name="Header" Foreground="{StaticResource Sub}" Margin="0,0,0,10"/>
+    <DockPanel Grid.Row="1" Margin="0,0,0,10" LastChildFill="False">
+      <TextBox DockPanel.Dock="Left" x:Name="FilterBox" Width="240" TextChanged="Filter_Changed"
+               VerticalAlignment="Center" ToolTip="Filter by metric name (e.g. fps, gpu, net)"/>
+      <TextBlock DockPanel.Dock="Left" Text="filter" Style="{StaticResource Hint}" Margin="8,0,0,0"/>
+      <TextBlock DockPanel.Dock="Right" x:Name="Header" Foreground="{StaticResource Sub}" VerticalAlignment="Center"/>
+    </DockPanel>
 
     <DataGrid Grid.Row="2" x:Name="MetricGrid" IsReadOnly="True">
       <DataGrid.Columns>

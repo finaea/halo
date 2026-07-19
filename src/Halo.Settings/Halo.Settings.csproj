@@ -9,6 +9,7 @@
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
+    <ApplicationIcon>..\..\assets\halo.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup><ProjectReference Include="..\Halo.Shared\Halo.Shared.csproj" /></ItemGroup>
 </Project>

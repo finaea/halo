@@ -3,7 +3,9 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,14">
     <StackPanel>
-      <TextBlock Text="Autostart" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
+      <TextBlock Text="Autostart" Style="{StaticResource PageTitle}"/>
+      <TextBlock Style="{StaticResource PageSub}"
+                 Text="Make Halo start with Windows: the widgets via a per-user Run entry, the collector via an elevated scheduled task (it needs admin for the hardware sensors and frame capture)."/>
 
       <GroupBox Header="Widgets at login">
         <StackPanel>

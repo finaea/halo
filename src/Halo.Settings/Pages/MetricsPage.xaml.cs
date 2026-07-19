@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Threading;
 using Halo.Shared.Metrics;
 
@@ -17,9 +18,15 @@ public partial class MetricsPage : UserControl, ISettingsPage, IDisposable
     {
         InitializeComponent();
         MetricGrid.ItemsSource = _rows;
+        var view = CollectionViewSource.GetDefaultView(_rows);
+        view.Filter = o => FilterBox.Text.Length == 0 ||
+            ((MetricRow)o).Name.Contains(FilterBox.Text, StringComparison.OrdinalIgnoreCase);
         _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _timer.Tick += (_, _) => Refresh();
     }
+
+    private void Filter_Changed(object sender, TextChangedEventArgs e)
+        => CollectionViewSource.GetDefaultView(_rows).Refresh();
 
     public void OnEnter()
     {

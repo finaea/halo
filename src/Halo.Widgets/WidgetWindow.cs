@@ -188,7 +188,7 @@ public sealed unsafe class WidgetWindow : IDisposable
 
             bool useOpacityLayer = Config.Opacity < 0.999;
             if (useOpacityLayer)
-                _d2dDc.PushLayer(new LayerParameters1 { ContentBounds = new Rect(0, 0, 100000, 100000), Opacity = (float)Config.Opacity }, null);
+                _d2dDc.PushLayer(new LayerParameters1 { ContentBounds = new Rect(0, 0, 100000, 100000), Opacity = (float)Config.Opacity }, null!);
 
             Panel.Draw(_rc, Ctx);
 

@@ -26,6 +26,12 @@ public sealed class TrayIcon : IDisposable
         RegisterClassW(ref wc);
         _hwnd = CreateWindowExW(0, wc.lpszClassName, "HaloTray", 0, 0, 0, 0, 0, unchecked((nint)(-3)) /*HWND_MESSAGE*/, 0, wc.hInstance, 0);
 
+        string icoPath = Path.Combine(app.ProjectRoot, "assets", "halo.ico");
+        nint hIcon = File.Exists(icoPath)
+            ? LoadImageW(0, icoPath, 1 /*IMAGE_ICON*/, 0, 0, 0x10 /*LR_LOADFROMFILE*/ | 0x40 /*LR_DEFAULTSIZE*/)
+            : 0;
+        if (hIcon == 0) hIcon = LoadIconW(0, 32512 /*IDI_APPLICATION*/);
+
         var data = new NOTIFYICONDATAW
         {
             cbSize = (uint)Marshal.SizeOf<NOTIFYICONDATAW>(),
@@ -33,7 +39,7 @@ public sealed class TrayIcon : IDisposable
             uID = 1,
             uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP,
             uCallbackMessage = WM_APP_TRAY,
-            hIcon = LoadIconW(0, 32512 /*IDI_APPLICATION*/),
+            hIcon = hIcon,
             szTip = "Halo — Hardware Analytics & Live Overlay",
         };
         Shell_NotifyIconW(NIM_ADD, ref data);

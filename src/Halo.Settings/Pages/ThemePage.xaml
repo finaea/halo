@@ -9,26 +9,31 @@
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
-    <TextBlock Grid.Row="0" Text="Theme (config\theme.json override)" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10"/>
+    <StackPanel Grid.Row="0">
+      <TextBlock Text="Theme" Style="{StaticResource PageTitle}"/>
+      <TextBlock Style="{StaticResource PageSub}"
+                 Text="Colors used by every widget (saved to config\theme.json). Values are R G B A (0–255); the defaults are the extracted Rainformer palette. Widgets recolor live on Save."/>
+    </StackPanel>
 
     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
-      <TextBlock Text="Scale" Margin="0,0,10,0"/>
+      <TextBlock Text="Scale override" Margin="0,0,10,0"/>
       <TextBox x:Name="ScaleBox" Width="90"/>
-      <TextBlock Text="Empty tokens fall back to the extracted Rainformer defaults."
+      <TextBlock Text="Same value as 'Widget scale' on the General page (both edit theme.json)."
                  Foreground="{StaticResource Sub}" Margin="16,0,0,0"/>
     </StackPanel>
 
     <DataGrid Grid.Row="2" x:Name="ColorGrid" CanUserAddRows="False">
       <DataGrid.Columns>
-        <DataGridTextColumn Header="Token" Binding="{Binding Token}" IsReadOnly="True" Width="180"/>
-        <DataGridTextColumn Header="R" Binding="{Binding R}" Width="60"/>
-        <DataGridTextColumn Header="G" Binding="{Binding G}" Width="60"/>
-        <DataGridTextColumn Header="B" Binding="{Binding B}" Width="60"/>
-        <DataGridTextColumn Header="A" Binding="{Binding A}" Width="60"/>
-        <DataGridTemplateColumn Header="Preview" Width="140">
+        <DataGridTextColumn Header="Token" Binding="{Binding Token}" IsReadOnly="True" Width="150"/>
+        <DataGridTextColumn Header="Used for" Binding="{Binding Desc}" IsReadOnly="True" Width="210"/>
+        <DataGridTextColumn Header="R" Binding="{Binding R}" Width="55"/>
+        <DataGridTextColumn Header="G" Binding="{Binding G}" Width="55"/>
+        <DataGridTextColumn Header="B" Binding="{Binding B}" Width="55"/>
+        <DataGridTextColumn Header="A" Binding="{Binding A}" Width="55"/>
+        <DataGridTemplateColumn Header="Preview" Width="130">
           <DataGridTemplateColumn.CellTemplate>
             <DataTemplate>
-              <Border Background="{Binding Swatch}" Height="18" Width="110" Margin="6,2"
+              <Border Background="{Binding Swatch}" Height="18" Width="104" Margin="6,2"
                       BorderBrush="#606060" BorderThickness="1" CornerRadius="2"/>
             </DataTemplate>
           </DataGridTemplateColumn.CellTemplate>
