@@ -96,6 +96,29 @@ display's refresh are pure waste):
 Remaining from the original order: idle baseline measurement, volatile-string path (step 4's
 second half), split flush settings (step 5), lhm-cpu observation (step 6).
 
+## Idle-desktop baseline (2026-07-20 ~00:50, game closed, Code foreground, fps N/A throughout)
+
+| | CPU (one core) | RAM |
+|---|---|---|
+| Halo.Widgets | **1.9%** — event-silent, 5 Hz ticks, as designed | 141 MB |
+| Halo.Collector | 6.4% — providers + tap parsing desktop presents | 74 MB |
+| **PresentMonService** | **15.6% — HIGHER than under game load** | 23 MB |
+| **Halo total** | **23.9%** | 238 MB |
+| Old stack total (same window) | 17.6% (constant) + 1,836 MB parked | |
+
+**Finding: the service's CPU is constant, not load-driven** (12.6–15.6% regardless of game
+state) — pointing at the 5 ms manual ETW flush (200 kernel sweeps/s, always) plus the
+desktop-wide graphics-event firehose, not frame processing. It is now two-thirds of Halo's
+idle cost, and idle Halo (23.9%) currently sits *above* the old stack's constant (17.6%).
+
+**Round 2 proposal — make the fps pipeline idle-aware:**
+1. **Adaptive flush**: when no 3D target is tracked, re-issue `pmSetEtwFlushPeriod(100+)` and
+   slow the tap's flush loop to match; restore the configured 5 ms the moment a target
+   appears (both are runtime-adjustable calls; latency only matters while a game runs).
+2. Optionally idle the tap harder: disable its DXGI/D3D9 providers while target = 0 so the
+   desktop's present firehose (browsers, editors) never reaches the callback.
+3. Re-measure idle; target: Halo idle well under the old stack's 17.6%.
+
 ## Suggested attack order
 
 | Step | Change | Expected effect | Effort / risk |
