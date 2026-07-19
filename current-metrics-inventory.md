@@ -85,10 +85,11 @@ no runtime present event, so the presented panel falls back to the resolved lane
 | Frametime (displayed) | ms | — | — | Resolved lane, flip-to-flip · **rolling 1 s mean** | 10 Hz (hard) |
 | WORST (per stream) | ms | — | worst-per-window | **rolling 1 s max** | presented live / displayed 10 Hz |
 | Frametime graph (per stream) | — | MAHM sampled 1/s | PresentMon stream | shared frame ring, one bar per actual frame, lane-filtered (`Provisional` flag) · **raw per-frame, no aggregation** | event-driven (`FramesReady`, ~7 ms coalesce hard) |
-| FG multiplier | × | — | — | displayed rate ÷ sim cadence (`BetweenSimulationStart`) · **rolling 1 s ÷ decaying avg** | 10 Hz (hard) |
-| Display latency (P2D) | ms | — | — | resolved lane `MsUntilDisplayed` · **decaying avg** | 10 Hz (hard) |
-| Click/AllInput-to-Photon | ms | — | PresentMon latency | resolved lane · **decaying avg** | 10 Hz (hard) |
-| DLSS badge (SR/FG/RR, model) | — | NVIDIA App | module scan | NGX module scan of target process — poll · **latest** | every 10 s (hard) |
+| DLSS badge (version · SR/FG/RR · FG ×) | — | NVIDIA App | module scan | NGX module scan — poll · **latest**; FG × from `fps.fgratio` (displayed ÷ sim-pacing **calc**) | scan every 10 s; ratio 10 Hz (hard) |
+
+> Latency components (P2D / click / input) and the detailed DLSS / MODEL / FRAME GEN rows were
+> moved to the dedicated LATENCY / DLSS panel (§4b) on 2026-07-19 — the fps panels keep only the
+> compact badge above. The collector publishes those metrics either way; §4b documents them.
 
 > The original screenshot's 2 FPS 1% low / 618 ms frametime desktop artifacts are structurally
 > impossible now: lows are true rolling-window, and the panel goes to a dimmed "NO 3D APP" idle
