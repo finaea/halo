@@ -24,7 +24,7 @@ path keeps its own design rates (presented lane live; displayed lane drains + pu
 - **decaying avg** — running sum/count halved periodically (~rolling over the last few hundred samples)
 - **cumulative / running max** — since session start (or pipe reset: `reset-net`, `reset-max`)
 
-Original sources per the [handoff](CONVERSATION-HANDOFF.md): **HWiNFO** (temps/fans/clocks/power),
+Original sources in the replaced stack: **HWiNFO** (temps/fans/clocks/power),
 **MSI Afterburner MAHM** (FPS panel), **UsageMonitor plugin / perf counters** (per-core %, top
 processes), **Rainmeter built-ins** (time, disk space, network).
 

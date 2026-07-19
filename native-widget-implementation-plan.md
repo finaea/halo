@@ -4,7 +4,7 @@
 
 **Date:** 2026-07-19 · Supersedes the "InfoPanel first" interim plan — we skip straight to the final phase: a native, efficient, self-sufficient replacement for the Rainmeter + Rainformer + HWiNFO + Afterburner + RTSS + NVIDIA App stack.
 
-**Companion docs:** [current-metrics-inventory.md](current-metrics-inventory.md) (the ~85 metrics to replicate) · [desktop-widget-comparison.md](desktop-widget-comparison.md) (why nothing existing suffices) · [CONVERSATION-HANDOFF.md](CONVERSATION-HANDOFF.md) (architecture research)
+**Companion docs:** [current-metrics-inventory.md](current-metrics-inventory.md) (the ~85 metrics to replicate) · [global-installs.md](global-installs.md) (dependencies + new-PC setup). *(Pre-build research docs — widget comparison, conversation handoff, `memory/` notes — were retired 2026-07-20; see git history if needed.)*
 
 ---
 
