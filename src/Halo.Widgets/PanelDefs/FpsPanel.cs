@@ -126,18 +126,7 @@ public static class FpsPanel
         // (game name intentionally not rendered on this row — it collided with the
         // FRAMETIME/WORST texts; the original skin showed no app name either)
 
-        // ---- PC latency row (only when latency data present) ----
-        p.Elements.Add(new TextEl
-        {
-            Text = c => $"PC LAT: {ValueFormat.Fixed(c.Metrics.Value(MetricNames.LatencyClickMs), 0)}ms click · {ValueFormat.Fixed(c.Metrics.Value(MetricNames.LatencyAllInputMs), 0)}ms input",
-            VisibleWhen = c => !IsIdle(c)
-                && (c.Metrics.TryValue(MetricNames.LatencyClickMs, out _) || c.Metrics.TryValue(MetricNames.LatencyAllInputMs, out _)),
-            Style = TextStyle.Text8,
-            Align = TextAlign.Left,
-            Color = "text2",
-            FixedH = 11,
-            Advance = 1,
-        });
+        // (PC latency rows moved to the dedicated LATENCY / DLSS panel, 2026-07-19)
 
         // ---- DLSS badge row (only when any DLSS module is present) ----
         p.Elements.Add(new TextEl

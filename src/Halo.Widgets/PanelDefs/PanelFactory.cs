@@ -15,6 +15,7 @@ public static class PanelFactory
         "drives" => DrivesPanel.Build(ctx),
         "network" => NetworkPanel.Build(ctx),
         "fans" => FansPanel.Build(ctx),
+        "latency" => LatencyPanel.Build(ctx),
         "topcpu" => TopProcPanel.Build(ctx, byRam: false),
         "topram" => TopProcPanel.Build(ctx, byRam: true),
         _ => null,

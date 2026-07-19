@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Halo.Shared;
 using Halo.Shared.Config;
@@ -38,6 +38,8 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
     private long _lastTargetFrameQpc;
     private double _clickSum, _allInputSum;
     private int _clickCount, _allInputCount;
+    private double _pclSum, _simMsSum;          // marker-based PC latency / app simulation pacing
+    private int _pclCount, _simCount;
     private readonly List<FrameEntry> _pendingRing = new(256);
 
     private MetricSink? _sink;
@@ -73,6 +75,8 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         sink.Register(MetricNames.FpsAppPid, MetricType.Double, MetricUnit.Count, Name, 1);
         sink.Register(MetricNames.LatencyClickMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
         sink.Register(MetricNames.LatencyAllInputMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
+        sink.Register(MetricNames.LatencyPclMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
+        sink.Register(MetricNames.DlssModel, MetricType.String, MetricUnit.Text, Name, 0.5);
         sink.Register(MetricNames.DlssSrPresent, MetricType.Double, MetricUnit.None, Name, 0.5);
         sink.Register(MetricNames.DlssFgPresent, MetricType.Double, MetricUnit.None, Name, 0.5);
         sink.Register(MetricNames.DlssRrPresent, MetricType.Double, MetricUnit.None, Name, 0.5);
@@ -80,19 +84,28 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
 
         Stats.SetWindow(settings.FrameLowsWindowS);
 
-        if (!StartCapture(exe, trackFrameType: true) && !StartCapture(exe, trackFrameType: false))
-            return false;
-        return true;
+        // instrumentation ladder: prefer app-timing (marker-based PCL + sim pacing) + frame types
+        string[] argLadder =
+        [
+            " --track_frame_type --track_app_timing",
+            " --track_app_timing",
+            " --track_frame_type",
+            "",
+        ];
+        bool started = false;
+        foreach (string extra in argLadder)
+            if (StartCapture(exe, extra)) { started = true; break; }
+        return started;
     }
 
-    private bool StartCapture(string exe, bool trackFrameType)
+    private bool StartCapture(string exe, string extraArgs)
     {
         try
         {
             var psi = new ProcessStartInfo
             {
                 FileName = exe,
-                Arguments = "--output_stdout --stop_existing_session --session_name HaloPM" + (trackFrameType ? " --track_frame_type" : ""),
+                Arguments = "--output_stdout --stop_existing_session --session_name HaloPM" + extraArgs,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -105,7 +118,7 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             if (_proc.WaitForExit(1500))
             {
                 string err = _proc.StandardError.ReadToEnd();
-                Log.Warn($"presentmon exited {_proc.ExitCode} (trackFrameType={trackFrameType}): {Truncate(err, 400)}");
+                Log.Warn($"presentmon exited {_proc.ExitCode} (args=[{extraArgs}]): {Truncate(err, 400)}");
                 _proc = null;
                 return false;
             }
@@ -113,7 +126,7 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             _stopping = false;
             _pumpThread = new Thread(() => Pump(_proc)) { IsBackground = true, Name = "halo-pm-pump" };
             _pumpThread.Start();
-            Log.Info($"presentmon started (trackFrameType={trackFrameType})");
+            Log.Info($"presentmon started (args=[{extraArgs}])");
             return true;
         }
         catch (Exception ex)
@@ -192,6 +205,9 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
                     Pid = pid,
                 };
 
+                double pcl = ParseD(f, cols.Instrumented);
+                double simMs = ParseD(f, cols.SimStart);
+
                 lock (_statsLock)
                 {
                     Stats.Add(entry);
@@ -199,6 +215,8 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
                     _lastTargetFrameQpc = qpc;
                     if (!double.IsNaN(click) && click > 0) { _clickSum += click; _clickCount++; }
                     if (!double.IsNaN(allInput) && allInput > 0) { _allInputSum += allInput; _allInputCount++; }
+                    if (!double.IsNaN(pcl) && pcl > 0) { _pclSum += pcl; _pclCount++; }
+                    if (!double.IsNaN(simMs) && simMs > 0) { _simMsSum += simMs; _simCount++; }
                 }
             }
         }
@@ -221,7 +239,7 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
 
         FrameEntry[] ring;
         FrameStats.Result r;
-        double click = 0, allInput = 0;
+        double click = 0, allInput = 0, pcl = 0, simMs = 0;
         long lastFrame;
         lock (_statsLock)
         {
@@ -230,9 +248,13 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             r = Stats.Consume(Stopwatch.GetTimestamp());
             if (_clickCount > 0) { click = _clickSum / _clickCount; }
             if (_allInputCount > 0) { allInput = _allInputSum / _allInputCount; }
-            // decay latency accumulators slowly (rolling-ish, non-zero average per plan §7)
+            if (_pclCount > 0) { pcl = _pclSum / _pclCount; }
+            if (_simCount > 0) { simMs = _simMsSum / _simCount; }
+            // decay accumulators slowly (rolling-ish, non-zero average)
             if (_clickCount > 200) { _clickSum /= 2; _clickCount /= 2; }
             if (_allInputCount > 200) { _allInputSum /= 2; _allInputCount /= 2; }
+            if (_pclCount > 200) { _pclSum /= 2; _pclCount /= 2; }
+            if (_simCount > 200) { _simMsSum /= 2; _simCount /= 2; }
             lastFrame = _lastTargetFrameQpc;
         }
 
@@ -251,13 +273,19 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             sink.Set(MetricNames.FpsLow01Presented, r.Low01Presented);
             sink.Set(MetricNames.FpsLow1Displayed, r.Low1Displayed);
             sink.Set(MetricNames.FpsLow01Displayed, r.Low01Displayed);
-            sink.Set(MetricNames.FpsFgRatio, r.FgRatio);
+            // FG multiplier: prefer displayed-rate ÷ app-simulation-rate (works even when
+            // generated frames aren't type-tagged); fall back to FrameType-based ratio
+            double fgMult = simMs > 0.5 && r.FpsDisplayed > 0
+                ? Math.Clamp(r.FpsDisplayed * simMs / 1000.0, 0.25, 8)
+                : r.FgRatio;
+            sink.Set(MetricNames.FpsFgRatio, fgMult);
             if (click > 0) sink.Set(MetricNames.LatencyClickMs, click);
             if (allInput > 0) sink.Set(MetricNames.LatencyAllInputMs, allInput);
+            if (pcl > 0) sink.Set(MetricNames.LatencyPclMs, pcl);
         }
         else
         {
-            // "no 3D app" idle state (plan §7): stale fps metrics, widgets dim
+            // "no 3D app" idle state (plan Â§7): stale fps metrics, widgets dim
             sink.MarkAllStale("fps.");
             sink.MarkAllStale("latency.");
         }
@@ -282,8 +310,8 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             {
                 Stats.Clear();
                 _pendingRing.Clear();
-                _clickSum = _allInputSum = 0;
-                _clickCount = _allInputCount = 0;
+                _clickSum = _allInputSum = _pclSum = _simMsSum = 0;
+                _clickCount = _allInputCount = _pclCount = _simCount = 0;
                 _lastTargetFrameQpc = 0;
             }
             _targetPid = pid;
@@ -322,6 +350,8 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         _ngxScannedPid = pid;
         bool sr = false, fg = false, rr = false;
         string version = "";
+        int major = 0;
+        bool driverOverride = false;
         try
         {
             using var proc = Process.GetProcessById(pid);
@@ -330,7 +360,17 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
                 string f = m.ModuleName.ToLowerInvariant();
                 if (f.StartsWith("nvngx_dlssg")) { fg = true; }
                 else if (f.StartsWith("nvngx_dlssd")) { rr = true; }
-                else if (f.StartsWith("nvngx_dlss")) { sr = true; version = m.FileVersionInfo.FileVersion ?? ""; }
+                else if (f.StartsWith("nvngx_dlss"))
+                {
+                    sr = true;
+                    version = m.FileVersionInfo.FileVersion ?? "";
+                    major = m.FileVersionInfo.FileMajorPart;
+                    // NVIDIA App / driver DLSS overrides load the DLL from the DriverStore
+                    // instead of the game folder — a reliable App-free override signal.
+                    string path = m.FileName ?? "";
+                    driverOverride = path.Contains("\\DriverStore\\", StringComparison.OrdinalIgnoreCase)
+                                  || path.Contains("\\FileRepository\\", StringComparison.OrdinalIgnoreCase);
+                }
             }
         }
         catch (Exception ex)
@@ -341,6 +381,11 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         sink.Set(MetricNames.DlssFgPresent, fg ? 1 : 0);
         sink.Set(MetricNames.DlssRrPresent, rr ? 1 : 0);
         if (version.Length > 0) sink.SetString(MetricNames.DlssVersion, version);
+
+        // model family: DLL 310+ = DLSS4 transformer generation, older = CNN. The exact
+        // runtime preset without an override needs NGX hooking (out of scope, plan D5/§7).
+        string model = !sr ? "" : (major >= 310 ? "Transformer" : "CNN") + (driverOverride ? " · override" : " · game DLL");
+        sink.SetString(MetricNames.DlssModel, model);
     }
 
     private static double GetRefreshHz(nint hwnd)
@@ -375,11 +420,11 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         _proc = null;
     }
 
-    // ---- CSV header mapping (tolerates console-v2 "TimeInMs/MsBetween…", SDK "CPUStartTime/
+    // ---- CSV header mapping (tolerates console-v2 "TimeInMs/MsBetweenâ€¦", SDK "CPUStartTime/
     // FrameTime" and v1 naming; missing columns resolve to -1). Observed 2.5.1 console header:
-    // Application,ProcessID,…,TimeInMs,MsBetweenSimulationStart,MsBetweenPresents,
-    // MsBetweenDisplayChange,…,MsUntilDisplayed,CPUStartTimeInMs,… ----
-    private record struct Cols(int Pid, int Time, double TimeScale, int FrameTime, int DisplayedTime, int DisplayLatency, int Click, int AllInput, int FrameType);
+    // Application,ProcessID,â€¦,TimeInMs,MsBetweenSimulationStart,MsBetweenPresents,
+    // MsBetweenDisplayChange,â€¦,MsUntilDisplayed,CPUStartTimeInMs,â€¦ ----
+    private record struct Cols(int Pid, int Time, double TimeScale, int FrameTime, int DisplayedTime, int DisplayLatency, int Click, int AllInput, int FrameType, int Instrumented, int SimStart);
 
     private static Cols ParseHeader(string header)
     {
@@ -403,7 +448,9 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             DisplayLatency: Find("MsUntilDisplayed", "DisplayLatency"),
             Click: Find("MsClickToPhotonLatency", "ClickToPhotonLatency"),
             AllInput: Find("MsAllInputToPhotonLatency", "AllInputToPhotonLatency"),
-            FrameType: Find("FrameType"));
+            FrameType: Find("FrameType"),
+            Instrumented: Find("MsInstrumentedLatency", "InstrumentedLatency"),
+            SimStart: Find("MsBetweenSimulationStart"));
     }
 
     private static double ParseD(string[] f, int idx)
@@ -453,3 +500,4 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         public uint dmICMMethod, dmICMIntent, dmMediaType, dmDitherType, dmReserved1, dmReserved2, dmPanningWidth, dmPanningHeight;
     }
 }
+

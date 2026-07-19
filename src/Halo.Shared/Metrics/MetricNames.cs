@@ -87,12 +87,14 @@ public static class MetricNames
     public const string FpsAppPid = "fps.app.pid";
     public const string LatencyClickMs = "latency.click.ms";             // Click-to-Photon
     public const string LatencyAllInputMs = "latency.allinput.ms";       // All-Input-to-Photon
+    public const string LatencyPclMs = "latency.pcl.ms";                 // marker-based PC Latency (Reflex PCL Stats via PresentMon app-timing)
 
     // DLSS / NGX module inspection
     public const string DlssSrPresent = "dlss.sr.present";
     public const string DlssFgPresent = "dlss.fg.present";
     public const string DlssRrPresent = "dlss.rr.present";
     public const string DlssVersion = "dlss.version";
+    public const string DlssModel = "dlss.model";        // "Transformer/CNN · override/game DLL"
 
     // System
     public const string SysUptimeS = "sys.uptime.s";
