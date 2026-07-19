@@ -37,31 +37,31 @@ public static class FpsPanel
             Align = TextAlign.Center,
             Color = "title",
         });
-        // ---- app-name row (above Framerate, user request 2026-07-19) + focal FPS number ----
+        // ---- app-name row: full first line, one line only, ellipsis-clipped (never wraps);
+        // idle it reads "NO 3D APP" (plan §7 dimmed idle panel) ----
         p.Elements.Add(new TextEl
         {
-            Text = c => c.Metrics.Text(MetricNames.FpsAppName),
-            VisibleWhen = c => !IsIdle(c),
+            Text = c => IsIdle(c) ? "NO 3D APP" : c.Metrics.Text(MetricNames.FpsAppName),
+            ColorFn = c => IsIdle(c) ? "inactiveButton" : "text2",
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
-            Color = "text2",
-            WidthClip = 70,
-            AbsY = 30,
-            FixedH = 11,
-        });
-        // idle: the focal slot itself reads "NO 3D APP" (plan §7 dimmed idle panel)
-        p.Elements.Add(new TextEl
-        {
-            Text = c => IsIdle(c) ? "NO 3D APP" : $"{ValueFormat.Int0(c.Metrics.Value(fpsMetric))}FPS",
-            ColorFn = c => IsIdle(c) ? "inactiveButton" : CpuRamPanelImpl.WarnColor(c.Metrics.Value(fpsMetric), 30, 60, 90, 120),
-            Style = TextStyle.Bold8,
-            Align = TextAlign.Center,
+            WidthClip = ctx.Theme.ContentWidth,
             AbsY = 30,
             FixedH = 11,
         });
 
-        // ---- "Framerate: N%" row (% of ACTUAL refresh), + 1px usage bar ----
+        // ---- "Framerate: <N>FPS … N%" row (FPS number beside the label), + 1px usage bar ----
         p.Elements.Add(new TextEl { Text = _ => "Framerate:", Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", AbsY = 42, FixedH = 11 });
+        p.Elements.Add(new TextEl
+        {
+            Text = c => IsIdle(c) ? "—" : $"{ValueFormat.Int0(c.Metrics.Value(fpsMetric))}FPS",
+            ColorFn = c => IsIdle(c) ? "inactiveButton" : CpuRamPanelImpl.WarnColor(c.Metrics.Value(fpsMetric), 30, 60, 90, 120),
+            Style = TextStyle.Bold8,
+            Align = TextAlign.Left,
+            X = 66,                       // clears the "Framerate:" label at 8pt bold
+            SameRow = true,
+            FixedH = 11,
+        });
         p.Elements.Add(new TextEl
         {
             Text = c => IsIdle(c) ? "—" : $"{ValueFormat.Int0(RefreshPct(c, fpsMetric))}%",
