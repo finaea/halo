@@ -26,7 +26,7 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
 {
     public string Name => "pclstats";
     public double MaxRateHz => 20;
-    public double DefaultRateHz => 10;
+    public double DefaultRateHz => 5;
 
     // marker enum (PCLSTATS_LATENCY_MARKER_TYPE); confirmed values filled in from the header.
     private const int SIMULATION_START = 0;

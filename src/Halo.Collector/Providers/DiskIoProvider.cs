@@ -14,7 +14,7 @@ public sealed class DiskIoProvider(GeneralSettings settings) : ISensorProvider
 {
     public string Name => "disk-io";
     public double MaxRateHz => 64;
-    public double DefaultRateHz => 10;
+    public double DefaultRateHz => 5;
 
     private nint _query;
     private readonly List<(char Letter, nint Read, nint Write, nint Busy)> _counters = new();

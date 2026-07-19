@@ -6,7 +6,7 @@ namespace Halo.Shared.Config;
 /// <summary>config\settings.json — global app settings (hot-reloaded by both processes).</summary>
 public sealed class GeneralSettings
 {
-    public double DefaultRateHz { get; set; } = 10;
+    public double DefaultRateHz { get; set; } = 5;
     public bool LockAll { get; set; } = false;
     public double Scale { get; set; } = 1.7;
     public string FontFamily { get; set; } = "Trebuchet MS";

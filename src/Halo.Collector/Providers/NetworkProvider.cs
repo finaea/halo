@@ -13,7 +13,7 @@ public sealed class NetworkProvider(GeneralSettings settings) : ISensorProvider
 {
     public string Name => "network";
     public double MaxRateHz => 64;
-    public double DefaultRateHz => 10;
+    public double DefaultRateHz => 5;
 
     private static volatile bool _resetRequested;
     public static void RequestTotalsReset() => _resetRequested = true;

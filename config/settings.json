@@ -1,5 +1,5 @@
 {
-  "defaultRateHz": 10,
+  "defaultRateHz": 5,
   "lockAll": false,
   "scale": 1.7,
   "fontFamily": "Trebuchet MS",
