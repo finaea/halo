@@ -6,10 +6,14 @@ could be retired.
 
 **As-built update (evening 2026-07-19):** Halo now covers this inventory. The
 "Proposed replacement" column is the original plan, kept for the record; **"Halo source (as
-built)"** is what actually ships, tagged with how the value is produced. **"Rate"** is the actual
-cadence and whether it's hard-coded or a `config\settings.json` setting. Widget text repaints at
-the widget tick (`defaultRateHz` setting, per-widget `rateHz` override in `widgets.json`); frame
-graphs are event-driven (see §4). Dashboard cadence was lowered 10 → **5 Hz** on user preference
+built)"** is what actually ships, tagged with how the value is produced. **"Rate"** is the
+**collector-side cadence** — how often the value in shared memory is refreshed — and whether it's
+hard-coded or a `config\settings.json` setting. The display side is a separate, independent clock
+(see the *Widget layer* note at the bottom): widgets read shared memory at their own tick
+(`defaultRateHz` setting, per-widget `rateHz` override in `widgets.json`); what you see is the
+last published value at the last tick, so worst-case staleness ≈ one publish interval + one tick
+interval. Exception: the two fps panels are event-woken while a game runs (frame batches repaint
+the whole panel, text included), so their 5 Hz tick is only the idle/fallback rate. Dashboard cadence was lowered 10 → **5 Hz** on user preference
 (both the `defaultRateHz` setting and the previously-10 Hz hard-coded providers); the fps-counter
 path keeps its own design rates (numbers 10 Hz, presented lane live).
 
