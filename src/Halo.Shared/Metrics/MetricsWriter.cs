@@ -10,6 +10,9 @@ public sealed unsafe class MetricsWriter : IDisposable
     private readonly NativeSection _section;
     private readonly Dictionary<ulong, int> _indexById = new();
     private readonly object _registryLock = new();
+    private readonly object _frameLock = new();     // ring has multiple writer threads (poll + tap)
+    private readonly EventWaitHandle _framesReady =
+        new(false, EventResetMode.AutoReset, SharedMemoryLayout.FramesReadyEventName);
     private int _stringSlotsUsed;
 
     private byte* B => _section.Base;
@@ -113,15 +116,24 @@ public sealed unsafe class MetricsWriter : IDisposable
     /// <summary>Append frames to the ring and publish the cursor (single producer).</summary>
     public void AppendFrames(ReadOnlySpan<FrameEntry> frames)
     {
-        ulong cursor = *(ulong*)(B + SharedMemoryLayout.OffFrameCursor);
-        foreach (ref readonly var f in frames)
+        if (frames.Length == 0) return;
+        lock (_frameLock)
         {
-            byte* e = B + SharedMemoryLayout.FrameRingOffset + (int)(cursor % SharedMemoryLayout.FrameRingCapacity) * SharedMemoryLayout.FrameEntrySize;
-            *(FrameEntry*)e = f;
-            cursor++;
+            ulong cursor = *(ulong*)(B + SharedMemoryLayout.OffFrameCursor);
+            foreach (ref readonly var f in frames)
+            {
+                byte* e = B + SharedMemoryLayout.FrameRingOffset + (int)(cursor % SharedMemoryLayout.FrameRingCapacity) * SharedMemoryLayout.FrameEntrySize;
+                *(FrameEntry*)e = f;
+                cursor++;
+            }
+            Volatile.Write(ref *(ulong*)(B + SharedMemoryLayout.OffFrameCursor), cursor);
         }
-        Volatile.Write(ref *(ulong*)(B + SharedMemoryLayout.OffFrameCursor), cursor);
+        _framesReady.Set(); // fire-and-forget wake for frame-graph widgets; no waiter = no cost
     }
 
-    public void Dispose() => _section.Dispose();
+    public void Dispose()
+    {
+        _framesReady.Dispose();
+        _section.Dispose();
+    }
 }

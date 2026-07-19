@@ -82,6 +82,9 @@ internal static unsafe partial class Native
     [DllImport("user32")] public static extern nint SetCapture(nint hwnd);
     [DllImport("user32")] public static extern bool ReleaseCapture();
     [DllImport("user32")] public static extern uint MsgWaitForMultipleObjectsEx(uint count, nint* handles, uint timeoutMs, uint wakeMask, uint flags);
+    [DllImport("kernel32", CharSet = CharSet.Unicode)] public static extern nint OpenEventW(uint desiredAccess, bool inheritHandle, string name);
+    [DllImport("kernel32")] public static extern bool CloseHandle(nint handle);
+    public const uint SYNCHRONIZE = 0x00100000;
     [DllImport("user32")] public static extern nint GetForegroundWindow();
     [DllImport("user32")] public static extern bool SetForegroundWindow(nint hwnd);
 

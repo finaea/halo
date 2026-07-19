@@ -33,6 +33,8 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
     private Thread? _pumpThread;
     private volatile bool _stopping;
     private PresentMonSdkSource? _sdk;
+    private PresentTap? _tap;
+    private long _nextStatsQpc; // numbers cadence: 10 Hz (readable); frames drain at poll rate
     private readonly List<PresentMonSdkSource.FrameSample> _sdkScratch = new(256);
 
     private readonly object _statsLock = new();
@@ -67,13 +69,18 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         _proc = null;
         _sdk?.Dispose();
         _sdk = null;
+        _tap?.Dispose();
+        _tap = null;
 
         // registration is idempotent and must precede the elevation gate: the sdk transport
         // can attach to an already-installed running service without admin
         sink.Register(MetricNames.FpsPresented, MetricType.Double, MetricUnit.Fps, Name, MaxRateHz);
         sink.Register(MetricNames.FpsDisplayed, MetricType.Double, MetricUnit.Fps, Name, MaxRateHz);
-        sink.Register(MetricNames.FpsFrametimeMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
-        sink.Register(MetricNames.FpsFrametimeWorstMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
+        sink.Register(MetricNames.FpsFrametimePresentedMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
+        sink.Register(MetricNames.FpsFrametimePresentedWorstMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
+        sink.Register(MetricNames.FpsFrametimeDisplayedMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
+        sink.Register(MetricNames.FpsFrametimeDisplayedWorstMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
+        sink.Register(MetricNames.FpsTapActive, MetricType.Double, MetricUnit.None, Name, 1);
         sink.Register(MetricNames.FpsLow1Presented, MetricType.Double, MetricUnit.Fps, Name, MaxRateHz);
         sink.Register(MetricNames.FpsLow01Presented, MetricType.Double, MetricUnit.Fps, Name, MaxRateHz);
         sink.Register(MetricNames.FpsLow1Displayed, MetricType.Double, MetricUnit.Fps, Name, MaxRateHz);
@@ -105,6 +112,7 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             {
                 _sdk = sdk;
                 Log.Info($"presentmon transport: sdk ({sdk.Detail})");
+                StartTap(sink, elevated);
                 return true;
             }
             sdk.Dispose();
@@ -134,8 +142,29 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         bool started = false;
         foreach (string extra in argLadder)
             if (StartCapture(exe, extra)) { started = true; break; }
-        if (started) Log.Info("presentmon transport: console app");
+        if (started)
+        {
+            Log.Info("presentmon transport: console app");
+            StartTap(sink, elevated: true);
+        }
         return started;
+    }
+
+    /// <summary>Door-1 tap for the presented stream (settings.PresentedTap). Independent of the
+    /// resolved transport; failure just leaves the presented panel on the resolved lane.</summary>
+    private void StartTap(MetricSink sink, bool elevated)
+    {
+        if (!elevated || !settings.PresentedTap.Trim().Equals("auto", StringComparison.OrdinalIgnoreCase)) return;
+        var tap = new PresentTap();
+        if (tap.Start(sink, settings.FrameLowsWindowS, settings.PresentMonEtwFlushMs))
+        {
+            _tap = tap;
+            if (_targetPid != 0) tap.SetTarget(_targetPid);
+        }
+        else
+        {
+            tap.Dispose();
+        }
     }
 
     private bool StartCapture(string exe, string extraArgs)
@@ -279,15 +308,28 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         UpdateForegroundTarget(sink);
         DrainSdkFrames();
 
+        // frames flush to the shared ring at the full poll rate (the graph path)…
         FrameEntry[] ring;
-        FrameStats.Result r;
-        double click = 0, allInput = 0, simMs = 0, dispLat = 0;
         long lastFrame;
         lock (_statsLock)
         {
             ring = _pendingRing.ToArray();
             _pendingRing.Clear();
-            r = Stats.Consume(Stopwatch.GetTimestamp());
+            lastFrame = _lastTargetFrameQpc;
+        }
+        if (ring.Length > 0) sink.Writer.AppendFrames(ring);
+
+        // …numbers run at 10 Hz: they are rolling aggregates and faster text isn't readable.
+        // (The presented panel's live numbers come from the tap thread, not from here.)
+        long now = Stopwatch.GetTimestamp();
+        if (now < _nextStatsQpc) return;
+        _nextStatsQpc = now + Stopwatch.Frequency / 10;
+
+        FrameStats.Result r;
+        double click = 0, allInput = 0, simMs = 0, dispLat = 0;
+        lock (_statsLock)
+        {
+            r = Stats.Consume(now);
             if (_clickCount > 0) { click = _clickSum / _clickCount; }
             if (_allInputCount > 0) { allInput = _allInputSum / _allInputCount; }
             if (_simCount > 0) { simMs = _simMsSum / _simCount; }
@@ -297,22 +339,26 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             if (_allInputCount > 200) { _allInputSum /= 2; _allInputCount /= 2; }
             if (_simCount > 200) { _simMsSum /= 2; _simCount /= 2; }
             if (_dispLatCount > 200) { _dispLatSum /= 2; _dispLatCount /= 2; }
-            lastFrame = _lastTargetFrameQpc;
         }
 
-        if (ring.Length > 0) sink.Writer.AppendFrames(ring);
-
+        bool tapActive = _tap?.Active == true;
         bool active = _targetPid != 0 && lastFrame != 0 &&
-                      (Stopwatch.GetTimestamp() - lastFrame) < 2 * Stopwatch.Frequency;
+                      (now - lastFrame) < 2 * Stopwatch.Frequency;
 
         if (active && r.SampleCount > 0)
         {
-            sink.Set(MetricNames.FpsPresented, r.FpsPresented);
+            if (!tapActive)
+            {
+                // presented set is tap-owned while the tap sees frames; resolved fallback otherwise
+                sink.Set(MetricNames.FpsPresented, r.FpsPresented);
+                sink.Set(MetricNames.FpsLow1Presented, r.Low1Presented);
+                sink.Set(MetricNames.FpsLow01Presented, r.Low01Presented);
+                sink.Set(MetricNames.FpsFrametimePresentedMs, r.AvgFrametimeShortMs);
+                sink.Set(MetricNames.FpsFrametimePresentedWorstMs, r.WorstFrametimeMs);
+            }
             sink.Set(MetricNames.FpsDisplayed, r.FpsDisplayed);
-            sink.Set(MetricNames.FpsFrametimeMs, r.AvgFrametimeMs);
-            sink.Set(MetricNames.FpsFrametimeWorstMs, r.WorstFrametimeMs);
-            sink.Set(MetricNames.FpsLow1Presented, r.Low1Presented);
-            sink.Set(MetricNames.FpsLow01Presented, r.Low01Presented);
+            sink.Set(MetricNames.FpsFrametimeDisplayedMs, r.AvgDisplayedFtMs);
+            sink.Set(MetricNames.FpsFrametimeDisplayedWorstMs, r.WorstDisplayedFtMs);
             sink.Set(MetricNames.FpsLow1Displayed, r.Low1Displayed);
             sink.Set(MetricNames.FpsLow01Displayed, r.Low01Displayed);
             // FG multiplier: prefer displayed-rate ÷ app-simulation-rate (works even when
@@ -333,6 +379,7 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             sink.MarkStale(MetricNames.LatencyClickMs);
             sink.MarkStale(MetricNames.LatencyAllInputMs);
         }
+        sink.Set(MetricNames.FpsTapActive, tapActive ? 1 : 0);
     }
 
     /// <summary>sdk transport: pull queued frames into stats/ring (console pump pushes instead).</summary>
@@ -383,6 +430,7 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
                 _lastTargetFrameQpc = 0;
             }
             _sdk?.OnTargetChanged(_targetPid, pid);
+            _tap?.SetTarget(pid);
             _targetPid = pid;
             _targetName = name;
             _nextNgxScan = DateTime.MinValue; // rescan DLSS on app switch
@@ -495,6 +543,8 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         _proc = null;
         _sdk?.Dispose();
         _sdk = null;
+        _tap?.Dispose();
+        _tap = null;
     }
 
     // ---- CSV header mapping (tolerates console-v2 "TimeInMs/MsBetweenâ€¦", SDK "CPUStartTime/

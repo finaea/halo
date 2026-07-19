@@ -27,6 +27,9 @@ public sealed unsafe class App : IDisposable
     private volatile bool _deviceLost;
     private DateTime _nextWatchdogAttempt = DateTime.MinValue;
     private int _watchdogFailures;
+    private nint _framesReadyEvent;          // collector's frames-ready signal (0 until opened)
+    private long _nextFrameEventOpenQpc;
+    private long _nextFrameWakeQpc;          // coalesce event-driven repaints to ~refresh rate
     private DateTime _suppressSaveReload = DateTime.MinValue;
 
     public App(string projectRoot)
@@ -124,14 +127,51 @@ public sealed unsafe class App : IDisposable
                 }
             }
 
-            // sleep until next due tick or next message
+            // sleep until next due tick, next message, or the collector's frames-ready event
             long soonest = long.MaxValue;
             foreach (var w in _windows) soonest = Math.Min(soonest, w.NextDueQpc);
             now = Stopwatch.GetTimestamp();
             uint waitMs = soonest == long.MaxValue ? 100u
                 : (uint)Math.Clamp((soonest - now) * 1000 / qpf, 0, 250);
             if (waitMs > 0)
-                _ = MsgWaitForMultipleObjectsEx(0, null, waitMs, 0x04FF /*QS_ALLINPUT*/, 0x0004 /*MWMO_INPUTAVAILABLE*/);
+            {
+                if (_framesReadyEvent == 0 && now >= _nextFrameEventOpenQpc) TryOpenFramesEvent(now);
+                if (_framesReadyEvent != 0)
+                {
+                    nint h = _framesReadyEvent;
+                    uint wr = MsgWaitForMultipleObjectsEx(1, &h, waitMs, 0x04FF /*QS_ALLINPUT*/, 0x0004 /*MWMO_INPUTAVAILABLE*/);
+                    if (wr == 0 /*WAIT_OBJECT_0: frames appended*/) OnFramesReady();
+                }
+                else
+                {
+                    _ = MsgWaitForMultipleObjectsEx(0, null, waitMs, 0x04FF /*QS_ALLINPUT*/, 0x0004 /*MWMO_INPUTAVAILABLE*/);
+                }
+            }
+        }
+    }
+
+    /// <summary>The collector appended frames to the shared ring: pull frame-graph widgets'
+    /// next tick forward so the graph paints now instead of at its (fallback) poll tick.
+    /// Coalesced to ~7 ms so a busy tap lane can't repaint faster than the monitor refreshes.</summary>
+    private void OnFramesReady()
+    {
+        long now = Stopwatch.GetTimestamp();
+        long due = Math.Max(now, _nextFrameWakeQpc);
+        foreach (var w in _windows)
+            if (w.Panel.HasFrameGraph && w.NextDueQpc > due) w.NextDueQpc = due;
+        _nextFrameWakeQpc = due + Stopwatch.Frequency * 7 / 1000;
+    }
+
+    /// <summary>Fire-and-forget contract: the event may not exist yet (collector starting later,
+    /// or an older collector) — retry every 5 s; without it frame graphs just stay poll-driven.</summary>
+    private void TryOpenFramesEvent(long now)
+    {
+        _nextFrameEventOpenQpc = now + 5 * Stopwatch.Frequency;
+        nint h = OpenEventW(SYNCHRONIZE, false, Halo.Shared.Metrics.SharedMemoryLayout.FramesReadyEventName);
+        if (h != 0)
+        {
+            _framesReadyEvent = h;
+            Log.Info("frames-ready event connected — frame graphs are event-driven");
         }
     }
 
@@ -361,6 +401,7 @@ public sealed unsafe class App : IDisposable
         _tray?.Dispose();
         foreach (var w in _windows) w.Dispose();
         _windows.Clear();
+        if (_framesReadyEvent != 0) { CloseHandle(_framesReadyEvent); _framesReadyEvent = 0; }
         Metrics.Dispose();
         _dx.Dispose();
         ConfigStore.Dispose();

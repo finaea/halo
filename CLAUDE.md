@@ -46,14 +46,17 @@ HKCU Run `HaloWidgets` — both created only by `tools\install-halo.ps1`, remove
 - Metric names: `Halo.Shared\Metrics\MetricNames.cs`; `.max` suffix = session maximum.
 - Panel visual specs live in `tools\extracted\*.json` (faithful transcriptions of the
   original Rainmeter skins) — treat them as the source of truth for 1:1 parity.
-- PresentMon frame data uses the SDK transport by default (plan D7): bundled PresentMon 2
-  service (`tools\presentmon\sdk\`) spawned as a console-mode child — no SCM registration —
-  and P/Invoked `PresentMonAPI2.dll`; ETW flush tuned via `settings.PresentMonEtwFlushMs`
-  (default 5 ms). The provider polls at 60 Hz (frame ring + stats; 1%/0.1% lows cached at
-  2 Hz inside `FrameStats`), fps widgets tick at 100 Hz — the near-live fps-counter path.
-  The console capture app (`tools\presentmon\`) is the fallback
-  (`settings.PresentMonTransport`: auto | sdk | console). `Halo.Collector.exe --pm-smoketest [pid]`
-  verifies the SDK path end-to-end.
+- Frame data is two lanes. **Resolved lane** (plan D7): bundled PresentMon 2 service
+  (`tools\presentmon\sdk\`) spawned as a console-mode child — no SCM registration — and
+  P/Invoked `PresentMonAPI2.dll`; ETW flush via `settings.PresentMonEtwFlushMs` (5 ms),
+  60 Hz provider poll, numbers gated to 10 Hz, lows cached at 2 Hz; feeds the DISPLAYED
+  panel + all fate-dependent metrics. Console capture app is the fallback
+  (`settings.PresentMonTransport`). **Tap lane** (`PresentTap`, `settings.PresentedTap`):
+  own ETW session on the DXGI/D3D9 present-start events — no fate wait — feeding the
+  PRESENTED panel live (1 s FPS, 100 ms frametime mean, `FrameFlags.Provisional` ring
+  entries); Vulkan/OpenGL titles fall back to the resolved lane (`fps.tap.active`).
+  Widgets repaint frame graphs on the `Local\Halo.FramesReady.v1` event (~7 ms coalesce)
+  with their tick as fallback. Smoketests: `--pm-smoketest [pid]`, `--tap-smoketest <pid>`.
 
 ## Gotchas
 

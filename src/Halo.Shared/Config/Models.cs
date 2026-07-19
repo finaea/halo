@@ -16,6 +16,9 @@ public sealed class GeneralSettings
     public string PresentMonTransport { get; set; } = "auto";
     /// <summary>SDK transport: ETW buffer flush period requested from the service, ms (1–1000; 0 = service default).</summary>
     public int PresentMonEtwFlushMs { get; set; } = 5;
+    /// <summary>Door-1 present tap for the presented FPS panel: "auto" (DXGI/D3D9 titles get a
+    /// live presented stream, others fall back to the resolved lane) or "off".</summary>
+    public string PresentedTap { get; set; } = "auto";
     /// <summary>Graph history depth in seconds (widget-local rings).</summary>
     public double GraphHistoryS { get; set; } = 600;
     public string ExternalIpUrl { get; set; } = "https://api.ipify.org";

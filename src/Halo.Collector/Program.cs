@@ -69,6 +69,37 @@ if (args.Contains("--pm-smoketest"))
     return 0;
 }
 
+// --tap-smoketest <pid>: verify the door-1 present tap end-to-end (needs admin). Prints
+// presents/second and the age of the newest one for a DXGI or D3D9 app.
+if (args.Contains("--tap-smoketest"))
+{
+    string tapRoot = FindProjectRoot(AppContext.BaseDirectory);
+    Log.Init(Path.Combine(tapRoot, "logs"), "tap-smoketest", alsoConsole: true);
+    if (!IsElevated()) { Console.WriteLine("needs admin (owns an ETW session)"); return 3; }
+    int tapPid = args.Where(a => int.TryParse(a, out _)).Select(int.Parse).FirstOrDefault();
+    if (tapPid == 0) { Console.WriteLine("usage: Halo.Collector.exe --tap-smoketest <pid of a presenting app>"); return 3; }
+    using var tap = new PresentTap();
+    int tapCount = 0;
+    long tapLastQpc = 0;
+    float tapLastFt = 0;
+    tap.Observer = e => { Interlocked.Increment(ref tapCount); Volatile.Write(ref tapLastQpc, e.Qpc); tapLastFt = e.FrametimeMs; };
+    // private session name so a running collector's "HaloTap" session is never hijacked
+    if (!tap.Start(null, 60, 5, sessionName: "HaloTapTest")) { Console.WriteLine("tap failed (see log above)"); return 3; }
+    tap.SetTarget(tapPid);
+    Console.WriteLine($"tap up, watching pid {tapPid}");
+    for (int s = 1; s <= 5; s++)
+    {
+        Thread.Sleep(1000);
+        int c = Interlocked.Exchange(ref tapCount, 0);
+        long lq = Volatile.Read(ref tapLastQpc);
+        string detail = lq != 0
+            ? $" | last ft={tapLastFt:0.00}ms age={(System.Diagnostics.Stopwatch.GetTimestamp() - lq) * 1000.0 / System.Diagnostics.Stopwatch.Frequency:0}ms"
+            : "";
+        Console.WriteLine($"t+{s}s: {c} presents{detail}");
+    }
+    return 0;
+}
+
 // Halo.Collector — elevated data process (plan §4). Single instance.
 using var singleInstance = new Mutex(true, "Local\\Halo.Collector.SingleInstance", out bool isNew);
 if (!isNew)

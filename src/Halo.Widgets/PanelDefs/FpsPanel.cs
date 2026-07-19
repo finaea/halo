@@ -27,6 +27,8 @@ public static class FpsPanel
         string fpsMetric = presented ? MetricNames.FpsPresented : MetricNames.FpsDisplayed;
         string low1 = presented ? MetricNames.FpsLow1Presented : MetricNames.FpsLow1Displayed;
         string low01 = presented ? MetricNames.FpsLow01Presented : MetricNames.FpsLow01Displayed;
+        string ftMetric = presented ? MetricNames.FpsFrametimePresentedMs : MetricNames.FpsFrametimeDisplayedMs;
+        string ftWorstMetric = presented ? MetricNames.FpsFrametimePresentedWorstMs : MetricNames.FpsFrametimeDisplayedWorstMs;
 
         // ---- title band: centered title + right-slot status chip ----
         p.TitleElements.Add(new TextEl
@@ -104,7 +106,7 @@ public static class FpsPanel
         // ---- frametime row: "FRAMETIME: N.Nms" | "WORST: N.Nms" (white pill like the lows row) ----
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "FRAMETIME: —" : $"FRAMETIME: {ValueFormat.Fixed(c.Metrics.Value(MetricNames.FpsFrametimeMs), 1)}ms",
+            Text = c => IsIdle(c) ? "FRAMETIME: —" : $"FRAMETIME: {ValueFormat.Fixed(c.Metrics.Value(ftMetric), 1)}ms",
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
             Color = "text2",
@@ -116,7 +118,7 @@ public static class FpsPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "WORST: —" : $"WORST: {ValueFormat.Fixed(c.Metrics.Value(MetricNames.FpsFrametimeWorstMs), 1)}ms",
+            Text = c => IsIdle(c) ? "WORST: —" : $"WORST: {ValueFormat.Fixed(c.Metrics.Value(ftWorstMetric), 1)}ms",
             Style = TextStyle.Text8,
             Align = TextAlign.Right,
             Color = "text2",
@@ -149,6 +151,13 @@ public static class FpsPanel
             H = 25,
             FrameSample = f => presented ? f.FrametimeMs : f.DisplayedFtMs,
             FrameDisplayedOnly = !presented,
+            // lane selection: the presented graph rides the door-1 tap when it's live (falling
+            // back to resolved frames otherwise); the displayed graph is always resolved-lane
+            FrameFilter = presented
+                ? (c, f) => c.Metrics.Value(MetricNames.FpsTapActive) >= 1
+                    ? (f.Flags & (uint)FrameFlags.Provisional) != 0
+                    : (f.Flags & (uint)FrameFlags.Provisional) == 0
+                : (c, f) => (f.Flags & (uint)FrameFlags.Provisional) == 0,
             Series =
             {
                 new GraphSeries

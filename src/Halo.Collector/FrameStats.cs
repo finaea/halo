@@ -61,6 +61,8 @@ public sealed class FrameStats(double windowSeconds)
     public readonly record struct Result(
         double FpsPresented, double FpsDisplayed,
         double AvgFrametimeMs, double WorstFrametimeMs,
+        double AvgFrametimeShortMs,                       // presented mean over the newest 100 ms
+        double AvgDisplayedFtMs, double WorstDisplayedFtMs, // flip-to-flip over the newest 1 s
         double Low1Presented, double Low01Presented,
         double Low1Displayed, double Low01Displayed,
         double FgRatio, int SampleCount);
@@ -83,14 +85,15 @@ public sealed class FrameStats(double windowSeconds)
         int n = _window.Count;
         if (n == 0) return default;
 
-        long headlineCutoff = dataNow - _qpcFreq; // newest 1 s of frames
+        long headlineCutoff = dataNow - _qpcFreq;      // newest 1 s of frames
+        long shortCutoff = dataNow - _qpcFreq / 10;    // newest 100 ms (live FRAMETIME readout)
 
         bool lowsDue = dataNow >= _nextLowsQpc;
         if (lowsDue) _nextLowsQpc = dataNow + _qpcFreq / 2;
 
         int displayedCount = 0, appCount = 0;
-        int n1 = 0, displayed1 = 0;
-        double worst1 = 0, ftSum1 = 0;
+        int n1 = 0, displayed1 = 0, nShort = 0, dispN1 = 0;
+        double worst1 = 0, ftSum1 = 0, ftSumShort = 0, dispSum1 = 0, dispWorst1 = 0;
         long oldest1 = dataNow;
         List<float>? presentedFts = lowsDue ? new List<float>(n) : null;
         List<float>? displayedFts = lowsDue ? new List<float>(n) : null;
@@ -109,8 +112,22 @@ public sealed class FrameStats(double windowSeconds)
                 if (n1 == 0 || s.Qpc < oldest1) oldest1 = s.Qpc;
                 n1++;
                 ftSum1 += s.PresentedFtMs;
-                if (s.Displayed) displayed1++;
                 if (s.PresentedFtMs > worst1) worst1 = s.PresentedFtMs;
+                if (s.Displayed)
+                {
+                    displayed1++;
+                    if (s.DisplayedFtMs > 0)
+                    {
+                        dispN1++;
+                        dispSum1 += s.DisplayedFtMs;
+                        if (s.DisplayedFtMs > dispWorst1) dispWorst1 = s.DisplayedFtMs;
+                    }
+                }
+                if (s.Qpc >= shortCutoff)
+                {
+                    nShort++;
+                    ftSumShort += s.PresentedFtMs;
+                }
             }
         }
 
@@ -131,6 +148,9 @@ public sealed class FrameStats(double windowSeconds)
             FpsDisplayed: fpsDisplayed,
             AvgFrametimeMs: n1 > 0 ? ftSum1 / n1 : 0,
             WorstFrametimeMs: worst1,
+            AvgFrametimeShortMs: nShort > 0 ? ftSumShort / nShort : 0,
+            AvgDisplayedFtMs: dispN1 > 0 ? dispSum1 / dispN1 : 0,
+            WorstDisplayedFtMs: dispWorst1,
             Low1Presented: _low1P,
             Low01Presented: _low01P,
             Low1Displayed: _low1D,

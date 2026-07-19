@@ -155,31 +155,24 @@ public sealed class GraphEl : Element
     /// <summary>When set, samples come from the shared frame ring instead (per-frame graph).</summary>
     public Func<Halo.Shared.Metrics.FrameEntry, double>? FrameSample;
     public bool FrameDisplayedOnly;
+    /// <summary>Optional per-frame predicate — lane selection by FrameFlags (tap vs resolved).</summary>
+    public Func<PanelContext, Halo.Shared.Metrics.FrameEntry, bool>? FrameFilter;
 
     private long _lastSampleTick = -1;
     private bool _dirty = true;
-    private readonly Queue<(long Qpc, double V)> _pendingFrames = new();
-
-    /// <summary>PresentMon's stdout arrives in ~1 s bursts; releasing frames by their own
-    /// timestamps (delayed by this smoothing latency) makes the graph scroll continuously
-    /// instead of lurching once per burst.</summary>
-    private const double FrameSmoothingDelayS = 1.25;
 
     public override bool Update(PanelContext ctx)
     {
         if (FrameSample != null)
         {
+            // frames arrive in small timestamped batches (≤17 ms resolved lane, per-flush tap
+            // lane) and are drawn the tick they land — the 1.25 s pacing queue that smoothed
+            // the old console transport's 1 s stdout bursts is gone with the transport
             foreach (ref readonly var f in ctx.Metrics.NewFrames)
             {
                 if (FrameDisplayedOnly && (f.Flags & (uint)Halo.Shared.Metrics.FrameFlags.Displayed) == 0) continue;
-                _pendingFrames.Enqueue((f.Qpc, FrameSample(f)));
-            }
-            long releaseBefore = System.Diagnostics.Stopwatch.GetTimestamp()
-                               - (long)(FrameSmoothingDelayS * System.Diagnostics.Stopwatch.Frequency);
-            bool overflow = _pendingFrames.Count > 4096; // safety: never accumulate unbounded
-            while (_pendingFrames.Count > 0 && (overflow || _pendingFrames.Peek().Qpc <= releaseBefore))
-            {
-                double v = _pendingFrames.Dequeue().V;
+                if (FrameFilter != null && !FrameFilter(ctx, f)) continue;
+                double v = FrameSample(f);
                 foreach (var s in Series) s.Ring.Add(v);
                 _dirty = true;
             }

@@ -14,6 +14,11 @@ public sealed class Panel
     public List<Element> TitleElements = new();
     public List<Element> Elements = new();
 
+    private bool? _hasFrameGraph;
+    /// <summary>True when any element draws per-frame data from the shared frame ring — these
+    /// panels are pulled forward by the frames-ready event instead of waiting for their tick.</summary>
+    public bool HasFrameGraph => _hasFrameGraph ??= Elements.Any(e => e is GraphEl { FrameSample: not null });
+
     public double ComputedHeight { get; private set; }
 
     private readonly List<Element> _visible = new();

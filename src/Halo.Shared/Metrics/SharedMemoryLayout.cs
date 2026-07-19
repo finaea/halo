@@ -17,6 +17,10 @@ namespace Halo.Shared.Metrics;
 public static class SharedMemoryLayout
 {
     public const string SectionName = "Local\\Halo.Metrics.v1";
+    /// <summary>Auto-reset event set by the writer after frame-ring appends; widgets may wait
+    /// on it to repaint frame graphs immediately instead of on their poll tick. Fire-and-forget:
+    /// a missing/ignored event degrades to pure polling on both sides.</summary>
+    public const string FramesReadyEventName = "Local\\Halo.FramesReady.v1";
     public const uint Magic = 0x4F4C4148;           // "HALO"
     public const uint Version = 1;
 
@@ -79,6 +83,7 @@ public enum FrameFlags : uint
     AppFrame = 4,       // FrameType == Application (rendered, not generated)
     Generated = 8,      // frame-generation frame (DLSS-G etc.)
     Repeated = 16,      // FrameType == Repeated
+    Provisional = 32,   // door-1 tap lane: present observed, fate unknown (never revised)
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 4)]

@@ -75,8 +75,14 @@ public static class MetricNames
     // FPS / frame pipeline (PresentMon)
     public const string FpsPresented = "fps.presented";
     public const string FpsDisplayed = "fps.displayed";
-    public const string FpsFrametimeMs = "fps.frametime.ms";             // avg present-to-present over window
-    public const string FpsFrametimeWorstMs = "fps.frametime.worst.ms";  // worst in last widget tick window
+    // per-stream frametimes: the presented pair is tap-sourced when the door-1 tap is active
+    // (100 ms rolling mean, live) and resolved-lane otherwise; the displayed pair is always
+    // resolved-lane, flip-to-flip based (what the screen actually did)
+    public const string FpsFrametimePresentedMs = "fps.frametime.presented.ms";
+    public const string FpsFrametimePresentedWorstMs = "fps.frametime.presented.worst.ms";
+    public const string FpsFrametimeDisplayedMs = "fps.frametime.displayed.ms";
+    public const string FpsFrametimeDisplayedWorstMs = "fps.frametime.displayed.worst.ms";
+    public const string FpsTapActive = "fps.tap.active";                 // 1 = presented lane is the door-1 tap
     public const string FpsLow1Presented = "fps.low1.presented";
     public const string FpsLow01Presented = "fps.low01.presented";
     public const string FpsLow1Displayed = "fps.low1.displayed";
