@@ -57,8 +57,7 @@ public static class FpsPanel
             Text = c => IsIdle(c) ? "—" : $"{ValueFormat.Int0(c.Metrics.Value(fpsMetric))}FPS",
             ColorFn = c => IsIdle(c) ? "inactiveButton" : CpuRamPanelImpl.WarnColor(c.Metrics.Value(fpsMetric), 30, 60, 90, 120),
             Style = TextStyle.Bold8,
-            Align = TextAlign.Left,
-            X = 66,                       // clears the "Framerate:" label at 8pt bold
+            Align = TextAlign.Center,     // centered between "Framerate:" and the % value
             SameRow = true,
             FixedH = 11,
         });
