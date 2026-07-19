@@ -42,8 +42,8 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
     // frame accounting (accessed from ETW thread + poll thread). All times are the ETW
     // session-relative millisecond clock (monotonic), which is all interval math needs.
     private readonly object _lock = new();
-    private readonly Dictionary<ulong, double> _simStartMs = new();  // frameId -> SimulationStart ms
-    private double _pclSumMs;
+    private readonly Dictionary<ulong, double> _pingMs = new();      // frameId -> PC_LATENCY_PING ms
+    private double _pclSumMs;                                        // ping->present (I2FS + FS2P)
     private int _pclCount;
     private int _simCountWindow;
     private double _windowStartMs = -1;
@@ -126,20 +126,25 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
             switch (marker)
             {
                 case SIMULATION_START:
-                    _simStartMs[frameId] = ms;
-                    _simCountWindow++;
-                    if (_simStartMs.Count > 512) TrimOldest();
+                    _simCountWindow++; // counted for rendered-rate (pre-frame-gen) only
                     break;
 
-                // frame reaches the screen: PRESENT_END (or the async-present variant) is the
-                // last ETW-visible point. SimulationStart→PresentEnd is the pure-ETW PCL proxy
-                // (frame-start-to-present); it under-reports the overlay's number by the
-                // scan-out/flip time (P2D), which ETW can't see without LDAT hardware.
+                // The game emits PC_LATENCY_PING as a synthetic input on ~5-10 frames/sec
+                // (100-300 ms self-ping). The overlay measures latency on exactly these frames.
+                // We stamp the ping time by FrameID and pair it to that frame's present.
+                case PC_LATENCY_PING:
+                    _pingMs[frameId] = ms;
+                    if (_pingMs.Count > 256) TrimOldest();
+                    break;
+
+                // ping → present = input-sampling wait (I2FS) + render pipeline (FS2P). The
+                // widget adds present→display (P2D) for the full click-to-photon-equivalent
+                // number the overlay shows. Continuous, no real clicks needed.
                 case PRESENT_END:
                 case OUT_OF_BAND_PRESENT_END:
-                    if (_simStartMs.Remove(frameId, out double simMs) && ms > simMs)
+                    if (_pingMs.Remove(frameId, out double pingMs) && ms > pingMs)
                     {
-                        double lat = ms - simMs;
+                        double lat = ms - pingMs;
                         if (lat is > 0 and < 500) { _pclSumMs += lat; _pclCount++; }
                     }
                     break;
@@ -149,9 +154,9 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
 
     private void TrimOldest()
     {
-        // drop the 128 lowest frame ids (stale, never matched a present)
-        foreach (var k in _simStartMs.Keys.OrderBy(x => x).Take(128).ToList())
-            _simStartMs.Remove(k);
+        // drop the 64 lowest frame ids whose present we never saw (stale pings)
+        foreach (var k in _pingMs.Keys.OrderBy(x => x).Take(64).ToList())
+            _pingMs.Remove(k);
     }
 
     public void Poll(MetricSink sink)
@@ -173,7 +178,7 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
                 _windowStartMs = _lastEventMs;
             }
             if (_pclCount > 200) { _pclSumMs /= 2; _pclCount /= 2; } // rolling, not cumulative
-            fresh = _simStartMs.Count > 0 || _pclCount > 0;
+            fresh = _pingMs.Count > 0 || _pclCount > 0 || _simCountWindow > 0;
         }
 
         if (pcl > 0) sink.Set(MetricNames.LatencyPclMs, pcl);
@@ -186,7 +191,7 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
             _nextHistLog = DateTime.UtcNow.AddSeconds(3);
             string hist;
             lock (_lock) hist = string.Join(" ", _markerHist.OrderBy(k => k.Key).Select(k => $"m{k.Key}={k.Value}"));
-            Log.Info($"pcl-hist: {hist} | pending-sim={_simStartMs.Count} pclCount={_pclCount}");
+            Log.Info($"pcl-hist: {hist} | pending-ping={_pingMs.Count} pclCount={_pclCount}");
         }
     }
 

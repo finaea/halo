@@ -29,26 +29,24 @@ public static class LatencyPanel
             Color = "title",
         });
 
-        // headline: full click-to-photon latency — this is what NVIDIA's overlay PCL reports
-        // (input click → pixels on screen). Kept as a rolling average by the collector so it
-        // persists between clicks. Matches the overlay within a couple ms.
+        // headline: PC latency the overlay's way — measured on the game's ping-tagged frames
+        // (continuous, ~5-10/s), NOT real clicks. = ping→present (input wait + render pipeline,
+        // from PCL markers) + present→display (P2D, from PresentMon). Tracks the overlay live.
         p.Elements.Add(new TextEl { Text = _ => "PC LAT:", Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", AbsY = 30, FixedH = 11 });
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) || !c.Metrics.TryValue(MetricNames.LatencyClickMs, out double v, 5) ? "N/A" : $"{ValueFormat.Int0(v)}ms",
-            ColorFn = c => !IsIdle(c) && c.Metrics.TryValue(MetricNames.LatencyClickMs, out double v, 5) ? CpuRamPanelImpl.WarnColor(v, 20, 35, 50, 70) : "inactiveButton",
+            Text = c => IsIdle(c) || PcLatency(c) <= 0 ? "N/A" : $"{ValueFormat.Int0(PcLatency(c))}ms",
+            ColorFn = c => !IsIdle(c) && PcLatency(c) > 0 ? CpuRamPanelImpl.WarnColor(PcLatency(c), 20, 35, 50, 70) : "inactiveButton",
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
             FixedH = 11,
         });
 
-        // breakdown pill: render pipeline (SimStart→Present, PCL markers) + present→display (P2D).
-        // These are the ETW-visible components; their sum is frame-start-to-display, a touch
-        // under the headline which also includes the OS input-stack wait.
+        // breakdown pill: input+render pipeline (ping→present) + present→display (P2D)
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "RENDER: —" : $"RENDER: {ValueFormat.Fixed(c.Metrics.Value(MetricNames.LatencyPclMs), 1)}ms",
+            Text = c => IsIdle(c) ? "PIPELINE: —" : $"PIPELINE: {ValueFormat.Fixed(c.Metrics.Value(MetricNames.LatencyPclMs), 1)}ms",
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
             Color = "text2",
@@ -67,10 +65,10 @@ public static class LatencyPanel
             SameRow = true,
             FixedH = 11,
         });
-        // continuous input-to-photon (all input, not just clicks) — updates every frame
+        // click-to-photon (only refreshes on real mouse clicks) as a secondary reference
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "INPUT: —" : $"INPUT: {ValueFormat.Int0(c.Metrics.Value(MetricNames.LatencyAllInputMs))}ms input-to-photon",
+            Text = c => IsIdle(c) || !c.Metrics.TryValue(MetricNames.LatencyClickMs, out double v, 10) ? "CLICK: —" : $"CLICK: {ValueFormat.Int0(v)}ms",
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
             Color = "text2",
@@ -152,8 +150,7 @@ public static class LatencyPanel
                     Color = "histogram",
                     Ring = new HistoryRing(188),
                     FixedMax = null,
-                    Sample = c => c.Metrics.TryValue(MetricNames.LatencyClickMs, out double v, maxAgeS: 5) ? v
-                                : c.Metrics.Value(MetricNames.LatencyAllInputMs),
+                    Sample = c => PcLatency(c),
                 },
             },
         });
@@ -162,6 +159,15 @@ public static class LatencyPanel
     }
 
     private static bool IsIdle(PanelContext c) => !c.Metrics.TryValue(MetricNames.FpsPresented, out _, maxAgeS: 3);
+
+    /// <summary>Overlay-equivalent PC latency = ping→present (I2FS+FS2P, PCL markers) +
+    /// present→display (P2D). Continuous over ping-tagged frames. 0 if no marker data.</summary>
+    private static double PcLatency(PanelContext c)
+    {
+        if (!c.Metrics.TryValue(MetricNames.LatencyPclMs, out double pipeline, maxAgeS: 3) || pipeline <= 0) return 0;
+        double p2d = c.Metrics.TryValue(MetricNames.FpsDisplayLatencyMs, out double d, maxAgeS: 3) ? d : 0;
+        return pipeline + p2d;
+    }
 
     /// <summary>Frame-gen multiplier = displayed rate ÷ true rendered (pre-FG) rate from PCL
     /// simulation markers; falls back to PresentMon's sim-pacing ratio when render rate absent.</summary>
