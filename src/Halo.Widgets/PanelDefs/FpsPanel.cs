@@ -110,18 +110,8 @@ public static class FpsPanel
             SameRow = true,
             FixedH = 11,
         });
-        // running game name, centered between FRAMETIME and WORST (only when active)
-        p.Elements.Add(new TextEl
-        {
-            Text = c => c.Metrics.Text(MetricNames.FpsAppName),
-            VisibleWhen = c => !IsIdle(c),
-            Style = TextStyle.Text8,
-            Align = TextAlign.Center,
-            Color = "text2",
-            WidthClip = 58,
-            SameRow = true,
-            FixedH = 11,
-        });
+        // (game name intentionally not rendered on this row — it collided with the
+        // FRAMETIME/WORST texts; the original skin showed no app name either)
 
         // ---- PC latency row (only when latency data present) ----
         p.Elements.Add(new TextEl

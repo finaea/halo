@@ -20,14 +20,35 @@ public sealed class MetricCache : IDisposable
     public double HeartbeatAge => _reader.HeartbeatAgeSeconds;
     public int CollectorPid => _reader.CollectorPid;
 
+    private long _attachedStartQpc;
+
     /// <summary>Call once per master tick. Handles attach/detach on collector restart.</summary>
     public void Tick()
     {
         if (!Attached)
         {
             Attached = _reader.TryAttach();
-            if (Attached) _idx.Clear();
+            if (Attached)
+            {
+                _idx.Clear();
+                _attachedStartQpc = _reader.CollectorStartQpc;
+                _frameCursor = 0;
+            }
             if (!Attached) return;
+        }
+
+        // A restarted collector reuses the same named section (we keep it alive via our
+        // handle) but rebuilds the registry — cached name→index mappings become WRONG,
+        // silently mixing metrics across slots (observed 2026-07-19). Detect via start QPC.
+        if (_reader.CollectorStartQpc != _attachedStartQpc)
+        {
+            Halo.Shared.Log.Warn("collector restarted — invalidating metric index cache");
+            _reader.Detach();
+            _idx.Clear();
+            _frameCursor = 0;
+            _frameCount = 0;
+            Attached = false;
+            return; // re-attach next tick
         }
         if (_reader.HeartbeatAgeSeconds > 30)
         {
