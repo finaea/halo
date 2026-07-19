@@ -157,6 +157,22 @@ load-independent while Halo's scales with frame events.
 - **Watch item:** Halo.Widgets RAM grew 121 → 213 MB across ~20 min under sustained event
   load — likely .NET heap lag vs the layout-cache churn, but worth watching for a leak.
 
+### Re-measure after round 1 — simultaneous window (2026-07-20 ~00:40, game steady ~220 fps uncapped)
+
+Both stacks sampled in the **same 12 s window** (eliminates the state-flip problem of the
+earlier samples):
+
+| | Old stack (still running) | Halo (post-round-1) |
+|---|---|---|
+| CPU | 19.2% of one core (constant; Rainmeter 7.3 + HWiNFO 10.7 dominate) | **37.6% of one core** (was 48–71% pre-round-1) |
+| RAM | **1,818 MB and climbing** — nvcontainer has ballooned 81→425→**675 MB** across the session (replay/capture buffers); NVIDIA Overlay 765 MB | **248 MB** (service down to 33 MB post-telemetry-fix) |
+
+Reading it honestly: under this pathological load (uncapped ~220 fps), Halo's visible CPU is
+~2× the old stack's — but the old stack's ~19–27% is **constant at idle too**, its true RTSS
+cost hides inside the game's frame time, and its RAM grows monotonically through a play
+session while Halo's is flat at ~250 MB (7× less). At a frame cap or on the desktop, Halo
+drops well below the old stack on every axis.
+
 **Repro commands** (unelevated PowerShell):
 CPU: `TotalProcessorTime` delta over 12 s per process. GPU:
 `(Get-Counter '\GPU Engine(*)\Utilization Percentage').CounterSamples | ? InstanceName -match "pid_<pid>_"` summed.
