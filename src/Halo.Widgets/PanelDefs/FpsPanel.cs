@@ -37,7 +37,18 @@ public static class FpsPanel
             Align = TextAlign.Center,
             Color = "title",
         });
-        // ---- focal FPS number (centered, warn-colored; JSON size 8 / AbsY 30) ----
+        // ---- app-name row (above Framerate, user request 2026-07-19) + focal FPS number ----
+        p.Elements.Add(new TextEl
+        {
+            Text = c => c.Metrics.Text(MetricNames.FpsAppName),
+            VisibleWhen = c => !IsIdle(c),
+            Style = TextStyle.Text8,
+            Align = TextAlign.Left,
+            Color = "text2",
+            WidthClip = 70,
+            AbsY = 30,
+            FixedH = 11,
+        });
         // idle: the focal slot itself reads "NO 3D APP" (plan §7 dimmed idle panel)
         p.Elements.Add(new TextEl
         {
@@ -49,8 +60,8 @@ public static class FpsPanel
             FixedH = 11,
         });
 
-        // ---- "Framerate: N%" row (% of ACTUAL refresh) flanking the big number, + 1px usage bar ----
-        p.Elements.Add(new TextEl { Text = _ => "Framerate:", Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", AbsY = 32, FixedH = 11 });
+        // ---- "Framerate: N%" row (% of ACTUAL refresh), + 1px usage bar ----
+        p.Elements.Add(new TextEl { Text = _ => "Framerate:", Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", AbsY = 42, FixedH = 11 });
         p.Elements.Add(new TextEl
         {
             Text = c => IsIdle(c) ? "—" : $"{ValueFormat.Int0(RefreshPct(c, fpsMetric))}%",
@@ -91,13 +102,16 @@ public static class FpsPanel
             FixedH = 11,
         });
 
-        // ---- frametime row: "FRAMETIME: N.Nms" | "WORST: N.Nms" ----
+        // ---- frametime row: "FRAMETIME: N.Nms" | "WORST: N.Nms" (white pill like the lows row) ----
         p.Elements.Add(new TextEl
         {
             Text = c => IsIdle(c) ? "FRAMETIME: —" : $"FRAMETIME: {ValueFormat.Fixed(c.Metrics.Value(MetricNames.FpsFrametimeMs), 1)}ms",
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
             Color = "text2",
+            SolidColor = "solidLabel",
+            SolidW = t.ContentWidth,
+            SolidH = 11,
             FixedH = 11,
             Advance = 1,
         });

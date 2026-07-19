@@ -20,7 +20,7 @@ public sealed class FrameStats(double windowSeconds)
     }
 
     private readonly Queue<Sample> _window = new(16384);
-    private double _worstSinceConsume;
+    private long _lastQpc;
     private long _qpcFreq = System.Diagnostics.Stopwatch.Frequency;
     private double _windowSeconds = windowSeconds;
 
@@ -37,7 +37,7 @@ public sealed class FrameStats(double windowSeconds)
             Generated = (f.Flags & (uint)FrameFlags.Generated) != 0,
         };
         _window.Enqueue(s);
-        if (f.FrametimeMs > _worstSinceConsume) _worstSinceConsume = f.FrametimeMs;
+        if (f.Qpc > _lastQpc) _lastQpc = f.Qpc;
         Trim(f.Qpc);
     }
 
@@ -51,7 +51,7 @@ public sealed class FrameStats(double windowSeconds)
     public void Clear()
     {
         _window.Clear();
-        _worstSinceConsume = 0;
+        _lastQpc = 0;
     }
 
     public readonly record struct Result(
@@ -61,46 +61,59 @@ public sealed class FrameStats(double windowSeconds)
         double Low1Displayed, double Low01Displayed,
         double FgRatio, int SampleCount);
 
-    /// <summary>Compute stats over the current window; resets the worst-frametime accumulator.</summary>
+    /// <summary>
+    /// Window semantics (refined 2026-07-19 on user request):
+    ///  - headline FPS / FRAMETIME / WORST: rolling 1 s ANCHORED TO THE NEWEST FRAME's
+    ///    timestamp — PresentMon's stdout arrives in ~1 s bursts, so wall-clock anchoring
+    ///    made most polls see an empty "last second" (WORST flickered 0). WORST = the
+    ///    longest single frame in that second, so a hitch stays readable for a full second.
+    ///  - 1% / 0.1% lows and FG ratio: the full rolling window (default 60 s, configurable).
+    /// </summary>
     public Result Consume(long nowQpc)
     {
-        Trim(nowQpc);
+        if (_window.Count == 0 || _lastQpc == 0) return default;
+        long dataNow = _lastQpc;
+        Trim(dataNow);
         int n = _window.Count;
-        if (n == 0)
-        {
-            _worstSinceConsume = 0;
-            return default;
-        }
+        if (n == 0) return default;
 
-        // effective window span: from oldest sample to now (avoids inflated FPS during ramp-up)
-        double spanS = Math.Max(0.001, (double)(nowQpc - _window.Peek().Qpc) / _qpcFreq);
+        long headlineCutoff = dataNow - _qpcFreq; // newest 1 s of frames
 
         int displayedCount = 0, appCount = 0;
-        double ftSum = 0;
+        int n1 = 0, displayed1 = 0;
+        double worst1 = 0, ftSum1 = 0;
+        long oldest1 = dataNow;
         var presentedFts = new List<float>(n);
         var displayedFts = new List<float>(n);
         foreach (var s in _window)
         {
             presentedFts.Add(s.PresentedFtMs);
-            ftSum += s.PresentedFtMs;
             if (s.Displayed)
             {
                 displayedCount++;
                 if (s.DisplayedFtMs > 0) displayedFts.Add(s.DisplayedFtMs);
             }
             if (!s.Generated) appCount++;
+
+            if (s.Qpc >= headlineCutoff)
+            {
+                if (n1 == 0 || s.Qpc < oldest1) oldest1 = s.Qpc;
+                n1++;
+                ftSum1 += s.PresentedFtMs;
+                if (s.Displayed) displayed1++;
+                if (s.PresentedFtMs > worst1) worst1 = s.PresentedFtMs;
+            }
         }
 
-        double fpsPresented = n / spanS;
-        double fpsDisplayed = displayedCount / spanS;
-        double worst = _worstSinceConsume;
-        _worstSinceConsume = 0;
+        double span1 = Math.Max(0.1, (double)(dataNow - oldest1) / _qpcFreq);
+        double fpsPresented = n1 > 0 ? n1 / span1 : 0;
+        double fpsDisplayed = n1 > 0 ? displayed1 / span1 : 0;
 
         return new Result(
             FpsPresented: fpsPresented,
             FpsDisplayed: fpsDisplayed,
-            AvgFrametimeMs: ftSum / n,
-            WorstFrametimeMs: worst,
+            AvgFrametimeMs: n1 > 0 ? ftSum1 / n1 : 0,
+            WorstFrametimeMs: worst1,
             Low1Presented: LowFps(presentedFts, 0.01),
             Low01Presented: LowFps(presentedFts, 0.001),
             Low1Displayed: LowFps(displayedFts, 0.01),

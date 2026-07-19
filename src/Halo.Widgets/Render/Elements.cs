@@ -158,6 +158,12 @@ public sealed class GraphEl : Element
 
     private long _lastSampleTick = -1;
     private bool _dirty = true;
+    private readonly Queue<(long Qpc, double V)> _pendingFrames = new();
+
+    /// <summary>PresentMon's stdout arrives in ~1 s bursts; releasing frames by their own
+    /// timestamps (delayed by this smoothing latency) makes the graph scroll continuously
+    /// instead of lurching once per burst.</summary>
+    private const double FrameSmoothingDelayS = 1.25;
 
     public override bool Update(PanelContext ctx)
     {
@@ -166,7 +172,14 @@ public sealed class GraphEl : Element
             foreach (ref readonly var f in ctx.Metrics.NewFrames)
             {
                 if (FrameDisplayedOnly && (f.Flags & (uint)Halo.Shared.Metrics.FrameFlags.Displayed) == 0) continue;
-                double v = FrameSample(f);
+                _pendingFrames.Enqueue((f.Qpc, FrameSample(f)));
+            }
+            long releaseBefore = System.Diagnostics.Stopwatch.GetTimestamp()
+                               - (long)(FrameSmoothingDelayS * System.Diagnostics.Stopwatch.Frequency);
+            bool overflow = _pendingFrames.Count > 4096; // safety: never accumulate unbounded
+            while (_pendingFrames.Count > 0 && (overflow || _pendingFrames.Peek().Qpc <= releaseBefore))
+            {
+                double v = _pendingFrames.Dequeue().V;
                 foreach (var s in Series) s.Ring.Add(v);
                 _dirty = true;
             }

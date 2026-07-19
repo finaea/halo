@@ -131,9 +131,11 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             string? header = reader.ReadLine();
             if (header == null) return;
             var cols = ParseHeader(header);
+            Log.Info($"presentmon columns: time={cols.Time}(x{cols.TimeScale}) ft={cols.FrameTime} dispFt={cols.DisplayedTime} dispLat={cols.DisplayLatency} click={cols.Click} allInput={cols.AllInput} frameType={cols.FrameType} | header: {Truncate(header, 800)}");
             long qpcFreq = Stopwatch.Frequency;
             long anchorQpc = 0;
             double anchorTime = double.NaN;
+            long synthQpc = 0; // fallback timeline accumulated from frametimes (no usable time column)
 
             string? line;
             while (!_stopping && (line = reader.ReadLine()) != null)
@@ -145,7 +147,7 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
                 int target = _targetPid;
                 if (target == 0 || pid != (uint)target) continue;
 
-                double t = ParseD(f, cols.Time);
+                double t = ParseD(f, cols.Time) * cols.TimeScale;
                 double ft = ParseD(f, cols.FrameTime);
                 double dispFt = ParseD(f, cols.DisplayedTime);
                 double dispLat = ParseD(f, cols.DisplayLatency);
@@ -158,7 +160,20 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
                     anchorTime = t;
                     anchorQpc = Stopwatch.GetTimestamp();
                 }
-                long qpc = double.IsNaN(t) ? Stopwatch.GetTimestamp() : anchorQpc + (long)((t - anchorTime) * qpcFreq);
+                long qpc;
+                if (!double.IsNaN(t))
+                {
+                    qpc = anchorQpc + (long)((t - anchorTime) * qpcFreq);
+                }
+                else
+                {
+                    // no time column: build a monotonic timeline by accumulating frametimes
+                    // (bursty stdout would otherwise clump many frames onto one timestamp,
+                    // which wrecks any short-window rate math)
+                    if (synthQpc == 0) synthQpc = Stopwatch.GetTimestamp();
+                    else synthQpc += (long)((double.IsNaN(ft) ? 0.007 : ft / 1000.0) * qpcFreq);
+                    qpc = synthQpc;
+                }
 
                 bool displayed = !double.IsNaN(dispLat) || (!double.IsNaN(dispFt) && dispFt > 0);
                 bool generated = frameType.Length > 0 && !frameType.Equals("Application", StringComparison.OrdinalIgnoreCase)
@@ -360,8 +375,11 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         _proc = null;
     }
 
-    // ---- CSV header mapping (tolerates v1/v2 naming and missing columns) ----
-    private record struct Cols(int Pid, int Time, int FrameTime, int DisplayedTime, int DisplayLatency, int Click, int AllInput, int FrameType);
+    // ---- CSV header mapping (tolerates console-v2 "TimeInMs/MsBetween…", SDK "CPUStartTime/
+    // FrameTime" and v1 naming; missing columns resolve to -1). Observed 2.5.1 console header:
+    // Application,ProcessID,…,TimeInMs,MsBetweenSimulationStart,MsBetweenPresents,
+    // MsBetweenDisplayChange,…,MsUntilDisplayed,CPUStartTimeInMs,… ----
+    private record struct Cols(int Pid, int Time, double TimeScale, int FrameTime, int DisplayedTime, int DisplayLatency, int Click, int AllInput, int FrameType);
 
     private static Cols ParseHeader(string header)
     {
@@ -374,14 +392,17 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
                         return i;
             return -1;
         }
+        int time = Find("TimeInMs", "CPUStartTimeInMs", "CPUStartTime", "TimeInSeconds");
+        double timeScale = time >= 0 && names[time].Trim().EndsWith("InMs", StringComparison.OrdinalIgnoreCase) ? 0.001 : 1.0;
         return new Cols(
             Pid: Find("ProcessID"),
-            Time: Find("CPUStartTime", "TimeInSeconds"),
-            FrameTime: Find("FrameTime", "msBetweenPresents"),
-            DisplayedTime: Find("DisplayedTime", "msBetweenDisplayChange"),
-            DisplayLatency: Find("DisplayLatency", "msUntilDisplayed"),
-            Click: Find("ClickToPhotonLatency"),
-            AllInput: Find("AllInputToPhotonLatency"),
+            Time: time,
+            TimeScale: timeScale,
+            FrameTime: Find("MsBetweenPresents", "FrameTime"),
+            DisplayedTime: Find("MsBetweenDisplayChange", "DisplayedTime"),
+            DisplayLatency: Find("MsUntilDisplayed", "DisplayLatency"),
+            Click: Find("MsClickToPhotonLatency", "ClickToPhotonLatency"),
+            AllInput: Find("MsAllInputToPhotonLatency", "AllInputToPhotonLatency"),
             FrameType: Find("FrameType"));
     }
 
