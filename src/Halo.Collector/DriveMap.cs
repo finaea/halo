@@ -37,10 +37,25 @@ public static class DriveMap
         return result;
     }
 
-    private static uint? GetDiskNumber(char letter)
+    private static unsafe uint? GetDiskNumber(char letter)
     {
         using var h = CreateFileW($"\\\\.\\{letter}:", 0, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, 0, 0);
         if (h.IsInvalid) return null;
+
+        // VOLUME_DISK_EXTENTS works for both basic and dynamic (LDM) volumes —
+        // IOCTL_STORAGE_GET_DEVICE_NUMBER fails on dynamic volumes (observed: drive H).
+        // Layout: NumberOfDiskExtents(4) pad(4) then extents[]: DiskNumber(4) pad(4)
+        // StartingOffset(8) ExtentLength(8). A spanned volume returns several extents;
+        // the first disk is good enough for a temperature readout.
+        byte* buf = stackalloc byte[8 + 4 * 24];
+        if (DeviceIoControlP(h, IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, null, 0, buf, 8 + 4 * 24, out _, 0))
+        {
+            uint extents = *(uint*)buf;
+            if (extents >= 1) return *(uint*)(buf + 8);
+            return null;
+        }
+
+        // fallback for exotic volume stacks
         var sdn = new STORAGE_DEVICE_NUMBER();
         return DeviceIoControl(h, IOCTL_STORAGE_GET_DEVICE_NUMBER, 0, 0, ref sdn, (uint)Marshal.SizeOf<STORAGE_DEVICE_NUMBER>(), out _, 0)
             ? sdn.DeviceNumber : null;
@@ -80,6 +95,7 @@ public static class DriveMap
     private const uint FILE_SHARE_READ = 1, FILE_SHARE_WRITE = 2, OPEN_EXISTING = 3;
     private const uint IOCTL_STORAGE_GET_DEVICE_NUMBER = 0x2D1080;
     private const uint IOCTL_STORAGE_QUERY_PROPERTY = 0x2D1400;
+    private const uint IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS = 0x560000;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct STORAGE_DEVICE_NUMBER { public uint DeviceType, DeviceNumber, PartitionNumber; }
