@@ -91,6 +91,56 @@ across ~20 provider/ETW threads.
 | 5 | Split `presentMonEtwFlushMs` into service/tap settings, raise service side | −service flush cost, keeps tap live | small |
 | 6 | Re-check lhm-cpu `lastPoll` spikes over a few sessions | confirm or retire the saturation theory | observation |
 
+---
+
+## Old stack vs Halo — measured head-to-head (2026-07-20 ~00:20)
+
+The retired stack was found **still running** alongside Halo, so both sides were measured live
+with the identical method, minutes apart. Caveat on states: the old-stack sample landed while
+the game was backgrounded, the Halo samples while it was foreground (218 → 252 fps uncapped) —
+which is the *unfavorable* direction for Halo, since the old stack's cost is nearly
+load-independent while Halo's scales with frame events.
+
+| Old stack process | CPU (one core) | GPU | RAM |
+|---|---|---|---|
+| Rainmeter (Rainformer suite) | 11.7% | 0.3% | 283 MB |
+| HWiNFO64 | 13.1% | 0% | 43 MB |
+| MSI Afterburner | 1.0% | 0% | 41 MB |
+| RTSS + HooksLoader | ~0% (visible; hook cost hides *inside the game's frame time*) | 0% | 76 MB |
+| NVIDIA Overlay (×5) | 0.5% | 0% | **735 MB** |
+| nvcontainer (×4) | 0.6% | 0% | 81 MB |
+| *(NVDisplay.Container excluded — driver infra that stays regardless)* | | | *(141 MB)* |
+| **Old stack total** | **27% core (1.35% machine), constant** | 0.3% | **~1,260 MB** |
+
+| Halo (game foreground, uncapped) | CPU (one core) | GPU | RAM |
+|---|---|---|---|
+| @218 fps | 48% core (2.4% machine) | 1.7% | 385 MB |
+| @252 fps | 71% core (3.6% machine) | 1.8% | 462 MB |
+| idle desktop (estimate — clean sample still needed) | ~12–15% core | ~0% | ~380 MB |
+
+### Verdict: saved or lost?
+
+- **RAM: big save — roughly −800 MB** (~1.26 GB → ~0.4 GB). The NVIDIA overlay's five
+  processes (735 MB) were the elephant; Halo replaces that functionality for ~0.
+- **GPU: wash.** Both sides <2% on this card — noise.
+- **CPU at idle desktop: save, roughly half** (est. ~12–15% vs a constant 27% of one core —
+  Rainmeter's 1 s skin updates + HWiNFO's sensor polling never stop; Halo's fps path goes
+  quiet without a game). Needs one clean idle measurement to confirm.
+- **CPU in-game: Halo's *visible* number is higher** (48–71% vs ~27% of one core), **but the
+  comparison is between different currencies**: Halo's cost runs on spare cores, outside the
+  game's frame path; RTSS/overlay cost executes *inside* the present path (hook + OSD drawn by
+  the game's own render thread), taxing fps directly in a way Task Manager never attributes.
+  On a 20-thread CPU with cores to spare, background % is cheap; in-frame microseconds are not.
+  Halo's in-game cost also scales with fps (252 fps uncapped is the pathological case — a
+  144-cap roughly halves the event rate) and steps 1–2 of the attack order above target
+  exactly this number.
+- **Action item this comparison surfaced: the old stack is still running.** Every number in
+  the "old stack" table is being paid *right now, on top of Halo*. Decommissioning it
+  (Rainmeter skins ×, HWiNFO ×, AB/RTSS ×, NVIDIA overlay off) is the single largest
+  optimization available today: −27% of a core and −1.3 GB immediately.
+- **Watch item:** Halo.Widgets RAM grew 121 → 213 MB across ~20 min under sustained event
+  load — likely .NET heap lag vs the layout-cache churn, but worth watching for a leak.
+
 **Repro commands** (unelevated PowerShell):
 CPU: `TotalProcessorTime` delta over 12 s per process. GPU:
 `(Get-Counter '\GPU Engine(*)\Utilization Percentage').CounterSamples | ? InstanceName -match "pid_<pid>_"` summed.
