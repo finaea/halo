@@ -15,7 +15,7 @@ public sealed class GeneralSettings
     /// <summary>Frame-data transport: "auto" (SDK service, console-app fallback), "sdk", "console".</summary>
     public string PresentMonTransport { get; set; } = "auto";
     /// <summary>SDK transport: ETW buffer flush period requested from the service, ms (1–1000; 0 = service default).</summary>
-    public int PresentMonEtwFlushMs { get; set; } = 20;
+    public int PresentMonEtwFlushMs { get; set; } = 5;
     /// <summary>Graph history depth in seconds (widget-local rings).</summary>
     public double GraphHistoryS { get; set; } = 600;
     public string ExternalIpUrl { get; set; } = "https://api.ipify.org";

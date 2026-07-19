@@ -49,7 +49,9 @@ HKCU Run `HaloWidgets` — both created only by `tools\install-halo.ps1`, remove
 - PresentMon frame data uses the SDK transport by default (plan D7): bundled PresentMon 2
   service (`tools\presentmon\sdk\`) spawned as a console-mode child — no SCM registration —
   and P/Invoked `PresentMonAPI2.dll`; ETW flush tuned via `settings.PresentMonEtwFlushMs`
-  (default 20 ms). The console capture app (`tools\presentmon\`) is the fallback
+  (default 5 ms). The provider polls at 60 Hz (frame ring + stats; 1%/0.1% lows cached at
+  2 Hz inside `FrameStats`), fps widgets tick at 100 Hz — the near-live fps-counter path.
+  The console capture app (`tools\presentmon\`) is the fallback
   (`settings.PresentMonTransport`: auto | sdk | console). `Halo.Collector.exe --pm-smoketest [pid]`
   verifies the SDK path end-to-end.
 

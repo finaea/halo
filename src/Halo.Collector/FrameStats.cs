@@ -23,6 +23,8 @@ public sealed class FrameStats(double windowSeconds)
     private long _lastQpc;
     private long _qpcFreq = System.Diagnostics.Stopwatch.Frequency;
     private double _windowSeconds = windowSeconds;
+    private long _nextLowsQpc;                       // lows recompute cadence (2 Hz): the full-window
+    private double _low1P, _low01P, _low1D, _low01D; // sort is the only expensive part of Consume
 
     public void SetWindow(double seconds) => _windowSeconds = seconds;
 
@@ -52,6 +54,8 @@ public sealed class FrameStats(double windowSeconds)
     {
         _window.Clear();
         _lastQpc = 0;
+        _nextLowsQpc = 0;
+        _low1P = _low01P = _low1D = _low01D = 0;
     }
 
     public readonly record struct Result(
@@ -68,6 +72,8 @@ public sealed class FrameStats(double windowSeconds)
     ///    made most polls see an empty "last second" (WORST flickered 0). WORST = the
     ///    longest single frame in that second, so a hitch stays readable for a full second.
     ///  - 1% / 0.1% lows and FG ratio: the full rolling window (default 60 s, configurable).
+    ///    Lows are recomputed at 2 Hz and cached between (they move slowly; the sort dominates
+    ///    Consume's cost, which otherwise runs at the provider poll rate — 60 Hz).
     /// </summary>
     public Result Consume(long nowQpc)
     {
@@ -79,19 +85,22 @@ public sealed class FrameStats(double windowSeconds)
 
         long headlineCutoff = dataNow - _qpcFreq; // newest 1 s of frames
 
+        bool lowsDue = dataNow >= _nextLowsQpc;
+        if (lowsDue) _nextLowsQpc = dataNow + _qpcFreq / 2;
+
         int displayedCount = 0, appCount = 0;
         int n1 = 0, displayed1 = 0;
         double worst1 = 0, ftSum1 = 0;
         long oldest1 = dataNow;
-        var presentedFts = new List<float>(n);
-        var displayedFts = new List<float>(n);
+        List<float>? presentedFts = lowsDue ? new List<float>(n) : null;
+        List<float>? displayedFts = lowsDue ? new List<float>(n) : null;
         foreach (var s in _window)
         {
-            presentedFts.Add(s.PresentedFtMs);
+            presentedFts?.Add(s.PresentedFtMs);
             if (s.Displayed)
             {
                 displayedCount++;
-                if (s.DisplayedFtMs > 0) displayedFts.Add(s.DisplayedFtMs);
+                if (s.DisplayedFtMs > 0) displayedFts?.Add(s.DisplayedFtMs);
             }
             if (!s.Generated) appCount++;
 
@@ -109,15 +118,23 @@ public sealed class FrameStats(double windowSeconds)
         double fpsPresented = n1 > 0 ? n1 / span1 : 0;
         double fpsDisplayed = n1 > 0 ? displayed1 / span1 : 0;
 
+        if (lowsDue)
+        {
+            _low1P = LowFps(presentedFts!, 0.01);
+            _low01P = LowFps(presentedFts!, 0.001);
+            _low1D = LowFps(displayedFts!, 0.01);
+            _low01D = LowFps(displayedFts!, 0.001);
+        }
+
         return new Result(
             FpsPresented: fpsPresented,
             FpsDisplayed: fpsDisplayed,
             AvgFrametimeMs: n1 > 0 ? ftSum1 / n1 : 0,
             WorstFrametimeMs: worst1,
-            Low1Presented: LowFps(presentedFts, 0.01),
-            Low01Presented: LowFps(presentedFts, 0.001),
-            Low1Displayed: LowFps(displayedFts, 0.01),
-            Low01Displayed: LowFps(displayedFts, 0.001),
+            Low1Presented: _low1P,
+            Low01Presented: _low01P,
+            Low1Displayed: _low1D,
+            Low01Displayed: _low01D,
             FgRatio: appCount > 0 ? (double)displayedCount / appCount : 0,
             SampleCount: n);
     }

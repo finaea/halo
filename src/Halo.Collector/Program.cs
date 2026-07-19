@@ -46,7 +46,7 @@ if (args.Contains("--pm-smoketest"))
     if (pid == 0) pid = System.Diagnostics.Process.GetProcessesByName("dwm").FirstOrDefault()?.Id ?? 0;
     if (pid == 0) { Console.WriteLine("no target pid"); return 3; }
     using var sdk = new PresentMonSdkSource();
-    if (!sdk.Start(pmRoot, IsElevated(), 20, ownService: false)) { Console.WriteLine("sdk transport unavailable (see log above)"); return 3; }
+    if (!sdk.Start(pmRoot, IsElevated(), 0, ownService: false)) { Console.WriteLine("sdk transport unavailable (see log above)"); return 3; }
     Console.WriteLine($"sdk up ({sdk.Detail}), tracking pid {pid}");
     sdk.OnTargetChanged(0, pid);
     if (!sdk.Tracking) { Console.WriteLine("tracking failed"); return 3; }

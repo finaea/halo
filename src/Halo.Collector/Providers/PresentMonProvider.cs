@@ -26,8 +26,8 @@ namespace Halo.Collector.Providers;
 public sealed class PresentMonProvider(string projectRoot, GeneralSettings settings) : ISensorProvider
 {
     public string Name => "presentmon";
-    public double MaxRateHz => 20;     // stats publish rate; frames themselves are event-driven
-    public double DefaultRateHz => 10;
+    public double MaxRateHz => 120;    // frame drain + stats publish; lows cached at 2 Hz inside FrameStats
+    public double DefaultRateHz => 60; // near-live fps counter: frames reach the ring in ≤17 ms batches
 
     private Process? _proc;
     private Thread? _pumpThread;
@@ -54,6 +54,7 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
     private MetricSink? _sink;
     private DateTime _nextNgxScan = DateTime.MinValue;
     private int _ngxScannedPid;
+    private long _nextSlowPublishQpc; // 1 Hz cadence for app name/pid/refresh (constants between target changes)
 
     public bool Initialize(MetricSink sink)
     {
@@ -385,15 +386,21 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             _targetPid = pid;
             _targetName = name;
             _nextNgxScan = DateTime.MinValue; // rescan DLSS on app switch
+            _nextSlowPublishQpc = 0;          // republish name/pid/refresh immediately
             Log.Info($"presentmon target: {(pid == 0 ? "none" : $"{name} ({pid})")}");
         }
 
-        sink.SetString(MetricNames.FpsAppName, _targetName);
-        sink.Set(MetricNames.FpsAppPid, _targetPid);
+        long qnow = Stopwatch.GetTimestamp();
+        if (qnow >= _nextSlowPublishQpc)
+        {
+            _nextSlowPublishQpc = qnow + Stopwatch.Frequency;
+            sink.SetString(MetricNames.FpsAppName, _targetName);
+            sink.Set(MetricNames.FpsAppPid, _targetPid);
 
-        // monitor refresh of the window's monitor (req: read actual refresh, not hardcoded 144)
-        double hz = GetRefreshHz(hwnd);
-        if (hz > 0) sink.Set(MetricNames.FpsRefreshHz, hz);
+            // monitor refresh of the window's monitor (req: read actual refresh, not hardcoded 144)
+            double hz = GetRefreshHz(hwnd);
+            if (hz > 0) sink.Set(MetricNames.FpsRefreshHz, hz);
+        }
 
         if (_targetPid != 0 && DateTime.UtcNow >= _nextNgxScan)
         {
