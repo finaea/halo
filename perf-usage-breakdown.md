@@ -247,3 +247,25 @@ the old stack never had, and nothing injected into any game.
 CPU: `TotalProcessorTime` delta over 12 s per process. GPU:
 `(Get-Counter '\GPU Engine(*)\Utilization Percentage').CounterSamples | ? InstanceName -match "pid_<pid>_"` summed.
 Context stamp: `Halo.Collector.exe --dump | Select-String "fps.app.name|fps.presented|fps.tap.active"`.
+
+---
+
+## fps-displayed widget disabled (2026-07-20) — same game, uncapped ~231 fps
+
+User disabled the DISPLAYED fps panel in Settings (one fps widget remains: PRESENTED).
+Comparable load to the final-state row above (~223 → ~231 fps, FG ×2.02, tap active).
+
+| | CPU (one core) | GPU | RAM |
+|---|---|---|---|
+| Halo.Widgets | **12.5%** (was 21.6% with both fps panels) | 0.96% | 134 MB |
+| PresentMonService | 7.1% | 0% | 32 MB |
+| Halo.Collector | 6.2% | 0% | 94 MB |
+| **Total** | **25.8% core (1.3% of machine)** | ~1% | **260 MB** |
+
+- **Widgets −9.1 points (−42%)**: the disabled panel's window is fully disposed — no layout,
+  no paint, no frames-ready wakes for it. This is the per-fps-panel repaint cost measured
+  directly; it also bounds what optimization #4 (layout/volatile-string path) can recover.
+- Service/collector read ~3 points lower each than the final-state row; they don't depend on
+  widget enablement (collector publishes both lanes regardless), so treat that as run-to-run
+  variance, not a saving from the disable.
+- Collector RAM 75→94 MB — added to the existing Widgets long-session RAM watch item.
