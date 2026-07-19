@@ -42,9 +42,11 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
     // frame accounting (accessed from ETW thread + poll thread). All times are the ETW
     // session-relative millisecond clock (monotonic), which is all interval math needs.
     private readonly object _lock = new();
-    private readonly Dictionary<ulong, double> _pingMs = new();      // frameId -> PC_LATENCY_PING ms
-    private double _pclSumMs;                                        // ping->present (I2FS + FS2P)
-    private int _pclCount;
+    private readonly Dictionary<ulong, double> _pingConsumeMs = new();  // frameId -> PC_LATENCY_PING (consume) ms
+    private readonly Dictionary<ulong, double> _queueForFrame = new();  // frameId -> queue wait (post→consume)
+    private double _lastInputPostMs = -1;                              // PCLStatsInput (post) ms
+    private double _renderSumMs; private int _renderCount;             // ping consume → present (FS2P)
+    private double _queueSumMs; private int _queueCount;               // input post → ping consume (I2FS, ②a)
     private int _simCountWindow;
     private double _windowStartMs = -1;
     private double _lastEventMs;
@@ -56,7 +58,8 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
     {
         if (!IsElevated()) return false; // ETW real-time session needs admin
 
-        sink.Register(MetricNames.LatencyPclMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
+        sink.Register(MetricNames.LatencyQueueMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
+        sink.Register(MetricNames.LatencyRenderMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
         sink.Register(MetricNames.RenderRateHz, MetricType.Double, MetricUnit.Hertz, Name, MaxRateHz);
 
         Guid guid = providerGuidOverride != Guid.Empty
@@ -111,13 +114,21 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
 
     private void OnEvent(TraceEvent data)
     {
-        // TraceLogging payloads: marker type + frame id. Field names vary by header revision;
-        // probe the common spellings.
+        double ms = data.TimeStampRelativeMSec;
+
+        // "PCLStatsInput" fires when the game's ping thread POSTS the synthetic input (the top
+        // of segment ②a — where the NVIDIA overlay starts its clock). It carries no FrameID;
+        // we time-correlate it to the next PC_LATENCY_PING (consume) below.
+        if (data.EventName == "PCLStatsInput")
+        {
+            lock (_lock) _lastInputPostMs = ms;
+            return;
+        }
+
+        // TraceLogging payloads: marker type + frame id. Field names vary by header revision.
         int marker = ReadInt(data, "Marker", "marker", "markerType", "MarkerType", "type");
         ulong frameId = ReadULong(data, "FrameID", "frameID", "FrameId", "frameId", "frame");
         if (marker < 0) return;
-
-        double ms = data.TimeStampRelativeMSec;
 
         lock (_lock)
         {
@@ -129,23 +140,27 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
                     _simCountWindow++; // counted for rendered-rate (pre-frame-gen) only
                     break;
 
-                // The game emits PC_LATENCY_PING as a synthetic input on ~5-10 frames/sec
-                // (100-300 ms self-ping). The overlay measures latency on exactly these frames.
-                // We stamp the ping time by FrameID and pair it to that frame's present.
+                // PC_LATENCY_PING = the synthetic input consumed at frame start (~5-10/sec).
+                // queue wait (②a) = this consume time − the matching PCLStatsInput post time.
                 case PC_LATENCY_PING:
-                    _pingMs[frameId] = ms;
-                    if (_pingMs.Count > 256) TrimOldest();
+                    _pingConsumeMs[frameId] = ms;
+                    _queueForFrame[frameId] = (_lastInputPostMs >= 0 && ms > _lastInputPostMs && ms - _lastInputPostMs < 200)
+                        ? ms - _lastInputPostMs : double.NaN;
+                    if (_pingConsumeMs.Count > 256) TrimOldest();
                     break;
 
-                // ping → present = input-sampling wait (I2FS) + render pipeline (FS2P). The
-                // widget adds present→display (P2D) for the full click-to-photon-equivalent
-                // number the overlay shows. Continuous, no real clicks needed.
+                // present closes the frame: render (FS2P) = present − ping-consume; queue (②a)
+                // was stamped above. Widget adds present→display (P2D) for the full LAT.
                 case PRESENT_END:
                 case OUT_OF_BAND_PRESENT_END:
-                    if (_pingMs.Remove(frameId, out double pingMs) && ms > pingMs)
+                    if (_pingConsumeMs.Remove(frameId, out double consumeMs) && ms > consumeMs)
                     {
-                        double lat = ms - pingMs;
-                        if (lat is > 0 and < 500) { _pclSumMs += lat; _pclCount++; }
+                        double render = ms - consumeMs;
+                        if (render is > 0 and < 500) { _renderSumMs += render; _renderCount++; }
+                        if (_queueForFrame.Remove(frameId, out double q) && !double.IsNaN(q))
+                        {
+                            _queueSumMs += q; _queueCount++;
+                        }
                     }
                     break;
             }
@@ -155,8 +170,11 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
     private void TrimOldest()
     {
         // drop the 64 lowest frame ids whose present we never saw (stale pings)
-        foreach (var k in _pingMs.Keys.OrderBy(x => x).Take(64).ToList())
-            _pingMs.Remove(k);
+        foreach (var k in _pingConsumeMs.Keys.OrderBy(x => x).Take(64).ToList())
+        {
+            _pingConsumeMs.Remove(k);
+            _queueForFrame.Remove(k);
+        }
     }
 
     public void Poll(MetricSink sink)
@@ -164,11 +182,13 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
         if (_session == null) return;
         if (_etwThread is { IsAlive: false }) throw new InvalidOperationException("pclstats ETW thread died");
 
-        double pcl = 0, renderHz = 0;
-        bool fresh;
+        double render = 0, queue = 0, renderHz = 0;
+        bool fresh, haveQueue;
         lock (_lock)
         {
-            if (_pclCount > 0) pcl = _pclSumMs / _pclCount;
+            if (_renderCount > 0) render = _renderSumMs / _renderCount;
+            if (_queueCount > 0) queue = _queueSumMs / _queueCount;
+            haveQueue = _queueCount > 0;
             if (_windowStartMs < 0) _windowStartMs = _lastEventMs;
             double windowMs = _lastEventMs - _windowStartMs;
             if (windowMs >= 500 && _simCountWindow > 0)
@@ -177,12 +197,15 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
                 _simCountWindow = 0;
                 _windowStartMs = _lastEventMs;
             }
-            if (_pclCount > 200) { _pclSumMs /= 2; _pclCount /= 2; } // rolling, not cumulative
-            fresh = _pingMs.Count > 0 || _pclCount > 0 || _simCountWindow > 0;
+            if (_renderCount > 200) { _renderSumMs /= 2; _renderCount /= 2; } // rolling, not cumulative
+            if (_queueCount > 200) { _queueSumMs /= 2; _queueCount /= 2; }
+            fresh = _pingConsumeMs.Count > 0 || _renderCount > 0 || _simCountWindow > 0;
         }
 
-        if (pcl > 0) sink.Set(MetricNames.LatencyPclMs, pcl);
-        else sink.MarkStale(MetricNames.LatencyPclMs);
+        if (render > 0) sink.Set(MetricNames.LatencyRenderMs, render);
+        else sink.MarkStale(MetricNames.LatencyRenderMs);
+        if (haveQueue) sink.Set(MetricNames.LatencyQueueMs, queue);
+        else sink.MarkStale(MetricNames.LatencyQueueMs);
         if (renderHz > 0) sink.Set(MetricNames.RenderRateHz, renderHz);
         else if (!fresh) sink.MarkStale(MetricNames.RenderRateHz);
 
@@ -190,8 +213,9 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
         {
             _nextHistLog = DateTime.UtcNow.AddSeconds(3);
             string hist;
-            lock (_lock) hist = string.Join(" ", _markerHist.OrderBy(k => k.Key).Select(k => $"m{k.Key}={k.Value}"));
-            Log.Info($"pcl-hist: {hist} | pending-ping={_pingMs.Count} pclCount={_pclCount}");
+            int qc;
+            lock (_lock) { hist = string.Join(" ", _markerHist.OrderBy(k => k.Key).Select(k => $"m{k.Key}={k.Value}")); qc = _queueCount; }
+            Log.Info($"pcl-hist: {hist} | render={render:0.0} queue={queue:0.0} qCount={qc} inputPost={(_lastInputPostMs >= 0 ? "y" : "n")}");
         }
     }
 

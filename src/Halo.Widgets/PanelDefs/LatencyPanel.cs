@@ -29,9 +29,8 @@ public static class LatencyPanel
             Color = "title",
         });
 
-        // headline: PC latency the overlay's way — measured on the game's ping-tagged frames
-        // (continuous, ~5-10/s), NOT real clicks. = ping→present (input wait + render pipeline,
-        // from PCL markers) + present→display (P2D, from PresentMon). Tracks the overlay live.
+        // ROW 1 — headline PC latency the overlay's way: continuous, ping/marker-based,
+        // starting at ②a (input enters the game). = queue wait + render + display.
         p.Elements.Add(new TextEl { Text = _ => "PC LAT:", Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", AbsY = 30, FixedH = 11 });
         p.Elements.Add(new TextEl
         {
@@ -43,10 +42,10 @@ public static class LatencyPanel
             FixedH = 11,
         });
 
-        // breakdown pill: input+render pipeline (ping→present) + present→display (P2D)
+        // ROW 2 — the three components that sum to ROW 1 (queue + render + display), on a pill.
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "PIPELINE: —" : $"PIPELINE: {ValueFormat.Fixed(c.Metrics.Value(MetricNames.LatencyPclMs), 1)}ms",
+            Text = c => IsIdle(c) ? "QUEUE —" : $"QUEUE {ValueFormat.Int0(Comp(c, MetricNames.LatencyQueueMs))}",
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
             Color = "text2",
@@ -58,22 +57,44 @@ public static class LatencyPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "DISPLAY: —" : $"DISPLAY: {ValueFormat.Fixed(c.Metrics.Value(MetricNames.FpsDisplayLatencyMs), 1)}ms",
+            Text = c => IsIdle(c) ? "REND —" : $"REND {ValueFormat.Int0(Comp(c, MetricNames.LatencyRenderMs))}",
+            Style = TextStyle.Text8,
+            Align = TextAlign.Center,
+            Color = "text2",
+            SameRow = true,
+            FixedH = 11,
+        });
+        p.Elements.Add(new TextEl
+        {
+            Text = c => IsIdle(c) ? "DISP —" : $"DISP {ValueFormat.Int0(Comp(c, MetricNames.FpsDisplayLatencyMs))}",
             Style = TextStyle.Text8,
             Align = TextAlign.Right,
             Color = "text2",
             SameRow = true,
             FixedH = 11,
         });
-        // click-to-photon (only refreshes on real mouse clicks) as a secondary reference
+
+        // ROW 3 — PresentMon click-to-photon + input-to-photon references, on a pill.
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) || !c.Metrics.TryValue(MetricNames.LatencyClickMs, out double v, 10) ? "CLICK: —" : $"CLICK: {ValueFormat.Int0(v)}ms",
+            Text = c => IsIdle(c) || !c.Metrics.TryValue(MetricNames.LatencyClickMs, out double v, 10) ? "CLICK —" : $"CLICK {ValueFormat.Int0(v)}ms",
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
             Color = "text2",
+            SolidColor = "solidLabel",
+            SolidW = t.ContentWidth,
+            SolidH = 11,
             FixedH = 11,
             Advance = 1,
+        });
+        p.Elements.Add(new TextEl
+        {
+            Text = c => IsIdle(c) ? "INPUT —" : $"INPUT {ValueFormat.Int0(c.Metrics.Value(MetricNames.LatencyAllInputMs))}ms",
+            Style = TextStyle.Text8,
+            Align = TextAlign.Right,
+            Color = "text2",
+            SameRow = true,
+            FixedH = 11,
         });
 
         // DLSS: version + loaded features
@@ -160,13 +181,16 @@ public static class LatencyPanel
 
     private static bool IsIdle(PanelContext c) => !c.Metrics.TryValue(MetricNames.FpsPresented, out _, maxAgeS: 3);
 
-    /// <summary>Overlay-equivalent PC latency = ping→present (I2FS+FS2P, PCL markers) +
-    /// present→display (P2D). Continuous over ping-tagged frames. 0 if no marker data.</summary>
+    private static double Comp(PanelContext c, string metric)
+        => c.Metrics.TryValue(metric, out double v, maxAgeS: 3) ? v : 0;
+
+    /// <summary>Overlay-equivalent PC latency, continuous over ping-tagged frames, starting at
+    /// ②a = queue wait (input post→consume) + render (consume→present) + display (P2D).
+    /// Requires at least the render component; queue/display add on when present.</summary>
     private static double PcLatency(PanelContext c)
     {
-        if (!c.Metrics.TryValue(MetricNames.LatencyPclMs, out double pipeline, maxAgeS: 3) || pipeline <= 0) return 0;
-        double p2d = c.Metrics.TryValue(MetricNames.FpsDisplayLatencyMs, out double d, maxAgeS: 3) ? d : 0;
-        return pipeline + p2d;
+        if (!c.Metrics.TryValue(MetricNames.LatencyRenderMs, out double render, maxAgeS: 3) || render <= 0) return 0;
+        return Comp(c, MetricNames.LatencyQueueMs) + render + Comp(c, MetricNames.FpsDisplayLatencyMs);
     }
 
     /// <summary>Frame-gen multiplier = displayed rate ÷ true rendered (pre-FG) rate from PCL

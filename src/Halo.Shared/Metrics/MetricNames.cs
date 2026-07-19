@@ -87,7 +87,8 @@ public static class MetricNames
     public const string FpsAppPid = "fps.app.pid";
     public const string LatencyClickMs = "latency.click.ms";             // Click-to-Photon
     public const string LatencyAllInputMs = "latency.allinput.ms";       // All-Input-to-Photon
-    public const string LatencyPclMs = "latency.pcl.ms";                 // true marker-based PC Latency (Reflex PCL Stats ETW consumer)
+    public const string LatencyQueueMs = "latency.queue.ms";             // input queue wait: PCLStatsInput post → ping consume (I2FS, ②a)
+    public const string LatencyRenderMs = "latency.render.ms";           // ping consume → present (render pipeline, FS2P)
     public const string RenderRateHz = "render.rate.hz";                 // game-rendered (pre-frame-gen) rate from PCL simulation markers
     public const string FpsDisplayLatencyMs = "fps.displaylatency.ms";   // present→displayed (P2D) from PresentMon MsUntilDisplayed
 
