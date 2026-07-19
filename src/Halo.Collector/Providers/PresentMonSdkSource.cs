@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Halo.Shared;
 using Halo.Shared.Metrics;
 
@@ -50,7 +51,10 @@ internal sealed class PresentMonSdkSource : IDisposable
          PmApi.Metric.UntilDisplayed],
     ];
 
-    public bool Start(string projectRoot, bool elevated, int etwFlushMs)
+    /// <param name="ownService">true (collector): kill any stray Halo service child and spawn a
+    /// fresh one — a leftover child from a hard-killed collector may be data-dead and cannot be
+    /// healed once attached to. false (diagnostics): attach to whatever is running, own nothing.</param>
+    public bool Start(string projectRoot, bool elevated, int etwFlushMs, bool ownService = true)
     {
         Reset();
 
@@ -75,21 +79,33 @@ internal sealed class PresentMonSdkSource : IDisposable
             return false;
         }
 
-        // (1) installed Intel service on the default pipe (works without elevation)
+        // (1) installed Intel service on the default pipe (works without elevation;
+        // externally managed, assumed healthy)
         if (PmApi.pmOpenSession(out _session) == PmApi.Ok)
         {
             Detail = "attached to installed service";
         }
-        // (2) a still-running Halo-owned service child (e.g. collector crashed and restarted)
-        else if (PmApi.pmOpenSessionWithPipe(out _session, OwnPipe) == PmApi.Ok)
+        // (2) diagnostics mode: attach to a running Halo service child (e.g. the collector's)
+        else if (!ownService && PmApi.pmOpenSessionWithPipe(out _session, OwnPipe) == PmApi.Ok)
         {
             Detail = "attached to existing Halo service child";
         }
-        // (3) spawn the bundled service; its real-time ETW session needs elevation
+        // (3) own a fresh service child; its real-time ETW session needs elevation
         else
         {
             _session = 0;
-            if (!elevated || !File.Exists(exe) || !SpawnService(exe) || !ConnectOwnPipe())
+            if (!ownService || !elevated || !File.Exists(exe))
+            {
+                Reset();
+                return false;
+            }
+            // a leftover child survives schtasks /End of the collector, and ETW sessions
+            // outlive hard-killed owners: both linger in unknown state and can shadow or
+            // starve a fresh capture — clear them before spawning
+            KillStrayServiceChildren(exe);
+            StopStaleEtwSession("HaloPMSvc");
+            StopStaleEtwSession("HaloPM");
+            if (!SpawnService(exe) || !ConnectOwnPipe())
             {
                 Reset();
                 return false;
@@ -137,6 +153,22 @@ internal sealed class PresentMonSdkSource : IDisposable
         Log.Warn("presentmon sdk: no frame query variant accepted");
         Reset();
         return false;
+    }
+
+    private static void KillStrayServiceChildren(string exe)
+    {
+        foreach (var p in Process.GetProcessesByName("PresentMonService"))
+        {
+            try
+            {
+                if (!string.Equals(p.MainModule?.FileName, exe, StringComparison.OrdinalIgnoreCase)) continue;
+                Log.Info($"presentmon sdk: killing stray service child {p.Id}");
+                p.Kill(entireProcessTree: true);
+                p.WaitForExit(2000);
+            }
+            catch { } // access denied / already gone — the spawn will surface any real problem
+            finally { p.Dispose(); }
+        }
     }
 
     private bool SpawnService(string exe)
@@ -258,6 +290,59 @@ internal sealed class PresentMonSdkSource : IDisposable
 
     private double ReadD(int blobStart, int offset)
         => offset >= 0 ? BitConverter.ToDouble(_buffer, blobStart + offset) : double.NaN;
+
+    private static void StopStaleEtwSession(string name)
+    {
+        const uint EVENT_TRACE_CONTROL_STOP = 1;
+        const uint WNODE_FLAG_TRACED_GUID = 0x00020000;
+        const int ERROR_WMI_INSTANCE_NOT_FOUND = 4201;
+        int structSize = Marshal.SizeOf<EventTraceProperties>();
+        int size = structSize + 4096; // room for the logger/logfile name strings ControlTrace writes back
+        nint buf = Marshal.AllocHGlobal(size);
+        try
+        {
+            Marshal.Copy(new byte[size], 0, buf, size);
+            var props = new EventTraceProperties();
+            props.Wnode.BufferSize = (uint)size;
+            props.Wnode.Flags = WNODE_FLAG_TRACED_GUID;
+            props.LoggerNameOffset = (uint)structSize;
+            props.LogFileNameOffset = (uint)(structSize + 2048);
+            Marshal.StructureToPtr(props, buf, false);
+            int rc = ControlTraceW(0, name, buf, EVENT_TRACE_CONTROL_STOP);
+            if (rc == 0) Log.Info($"presentmon sdk: stopped stale ETW session '{name}'");
+            else if (rc != ERROR_WMI_INSTANCE_NOT_FOUND) Log.Warn($"presentmon sdk: stop ETW session '{name}': error {rc}");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buf);
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WnodeHeader
+    {
+        public uint BufferSize;
+        public uint ProviderId;
+        public ulong HistoricalContext;
+        public ulong TimeStamp;
+        public Guid Guid;
+        public uint ClientContext;
+        public uint Flags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct EventTraceProperties
+    {
+        public WnodeHeader Wnode;
+        public uint BufferSize, MinimumBuffers, MaximumBuffers, MaximumFileSize, LogFileMode, FlushTimer, EnableFlags;
+        public int AgeLimit;
+        public uint NumberOfBuffers, FreeBuffers, EventsLost, BuffersWritten, LogBuffersLost, RealTimeBuffersLost;
+        public nint LoggerThreadId;
+        public uint LogFileNameOffset, LoggerNameOffset;
+    }
+
+    [DllImport("advapi32", CharSet = CharSet.Unicode)]
+    private static extern int ControlTraceW(ulong traceHandle, string instanceName, nint properties, uint controlCode);
 
     private void Reset()
     {
