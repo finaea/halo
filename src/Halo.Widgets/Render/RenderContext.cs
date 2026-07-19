@@ -61,9 +61,13 @@ public sealed class RenderContext : IDisposable
         return f;
     }
 
-    public IDWriteTextLayout Layout(string text, TextStyle style, float maxWidth = 4096)
+    public IDWriteTextLayout Layout(string text, TextStyle style, float maxWidth = 4096,
+        (int Start, int Len, double SizePt)? inlineSize = null)
     {
-        var key = (text, style);
+        // inline-sized layouts get a distinct cache key (\u0001 never occurs in display text)
+        string keyText = inlineSize is { Len: > 0 } r0
+            ? $"{text}\u0001{r0.Start},{r0.Len},{r0.SizePt}" : text;
+        var key = (keyText, style);
         if (_layouts.TryGetValue(key, out var l)) return l;
         if (_layouts.Count > 512)
         {
@@ -71,6 +75,10 @@ public sealed class RenderContext : IDisposable
             _layouts.Clear();
         }
         l = DWrite.CreateTextLayout(text, Format(style), maxWidth, 512);
+        // Rainmeter InlineSetting=Size equivalent: a sub-range at a different size, sharing
+        // the line's baseline (Rainformer's clock renders "H:mm" at 20 and ":ss" at 13)
+        if (inlineSize is { Len: > 0 } r)
+            l.SetFontSize(Theme.FontPx((float)r.SizePt), new Vortice.DirectWrite.TextRange((uint)r.Start, (uint)r.Len));
         _layouts[key] = l;
         return l;
     }
@@ -88,9 +96,10 @@ public sealed class RenderContext : IDisposable
     public float TextWidth(string text, TextStyle style)
         => Layout(text, style).Metrics.WidthIncludingTrailingWhitespace;
 
-    public void DrawText(string text, TextStyle style, Color4 color, double x, double y, TextAlign align, double? boxW = null)
+    public void DrawText(string text, TextStyle style, Color4 color, double x, double y, TextAlign align,
+        double? boxW = null, (int Start, int Len, double SizePt)? inlineSize = null)
     {
-        var layout = Layout(text, style);
+        var layout = Layout(text, style, 4096, inlineSize);
         float w = layout.Metrics.WidthIncludingTrailingWhitespace;
         float dx = align switch
         {

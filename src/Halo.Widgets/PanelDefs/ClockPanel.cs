@@ -28,11 +28,14 @@ public static class ClockPanel
             Color = "text2",
         });
 
-        // big time — Rainformer: size 20, but 13 when showing seconds (InlinePattern)
+        // big time — Rainformer meterTime: FontSize=20 with InlineSetting=Size|13 applied to
+        // the pattern's capture group, i.e. "H:mm" renders at 20 and only the ":ss" tail at 13
         p.Elements.Add(new TextEl
         {
             Text = c => c.Now.ToString("H:mm:ss"),
-            Style = new TextStyle(13, true),
+            Style = new TextStyle(20, true),
+            InlineSizePt = 13,
+            InlineRange = s => { int i = s.LastIndexOf(':'); return i > 0 ? (i, s.Length - i) : (0, 0); },
             Align = TextAlign.Center,
             Color = "text",
             AbsY = ctx.Theme.TopMarginFormula - 4,

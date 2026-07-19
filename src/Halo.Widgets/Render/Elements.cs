@@ -54,6 +54,10 @@ public sealed class TextEl : Element
     public string? SolidColor;               // label pill behind the text
     public double? SolidW, SolidH;
     public double WidthClip;                 // >0: clip/ellipsis to this width (ClipString)
+    /// <summary>Rainmeter InlineSetting=Size equivalent: render the returned (start,len) range
+    /// of the text at InlineSizePt instead of the style size (baseline-shared).</summary>
+    public Func<string, (int Start, int Len)>? InlineRange;
+    public double InlineSizePt;
 
     private string _cached = "";
     private string _cachedColor = "";
@@ -91,7 +95,10 @@ public sealed class TextEl : Element
                 text = text[..^1];
             if (text.Length < _cached.Length) text += "…";
         }
-        rc.DrawText(text, Style, theme.Color(_cachedColor), x, Y, Align);
+        (int Start, int Len, double SizePt)? inline = null;
+        if (InlineRange != null && InlineRange(text) is { Len: > 0 } r)
+            inline = (r.Start, r.Len, InlineSizePt);
+        rc.DrawText(text, Style, theme.Color(_cachedColor), x, Y, Align, inlineSize: inline);
     }
 }
 
