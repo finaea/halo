@@ -41,6 +41,8 @@ public sealed class ProviderHost : IDisposable
         public double LastPollMs;
 
         private Thread? _thread;
+        private string? _lastErrorSig;
+        private DateTime _nextErrorLog;
 
         public void Start()
         {
@@ -94,7 +96,22 @@ public sealed class ProviderHost : IDisposable
                     }
                     catch (Exception ex)
                     {
-                        if (++consecutiveErrors <= 3) Log.Error($"{Provider.Name}: poll failed ({consecutiveErrors})", ex);
+                        consecutiveErrors++;
+                        // identical failures repeat across re-init cycles (e.g. LHM NRE
+                        // streaks) — full detail on first sight, then one line per 5 min
+                        // so a flaky sensor can't flood the log
+                        string sig = $"{ex.GetType().Name}:{ex.Message}";
+                        if (sig != _lastErrorSig)
+                        {
+                            Log.Error($"{Provider.Name}: poll failed ({consecutiveErrors})", ex);
+                            _lastErrorSig = sig;
+                            _nextErrorLog = DateTime.UtcNow.AddMinutes(5);
+                        }
+                        else if (DateTime.UtcNow >= _nextErrorLog)
+                        {
+                            Log.Warn($"{Provider.Name}: poll still failing ({sig})");
+                            _nextErrorLog = DateTime.UtcNow.AddMinutes(5);
+                        }
                         if (consecutiveErrors >= 10)
                         {
                             Log.Warn($"{Provider.Name}: too many poll failures, re-initialising");

@@ -38,6 +38,7 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
     private Thread? _etwThread;
     private volatile bool _stopping;
     private readonly bool _discovery = Environment.GetEnvironmentVariable("HaloPclDiscovery") == "1";
+    private readonly HashSet<string> _discoverySeen = new();
 
     // frame accounting (accessed from ETW thread + poll thread). All times are the ETW
     // session-relative millisecond clock (monotonic), which is all interval math needs.
@@ -107,12 +108,16 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
     private void OnAnyEvent(TraceEvent data)
     {
         if (!_discovery) return;
-        // one-time-ish dump of shape; throttled by only logging PC-latency-ish providers
+        // dump each distinct event SHAPE once — per-event logging flooded a session log
+        // to 232 MB (384k identical lines) when discovery was left on with a game running
         if (data.ProviderName?.Contains("PCL", StringComparison.OrdinalIgnoreCase) == true
             || data.ProviderName?.Contains("Latency", StringComparison.OrdinalIgnoreCase) == true)
         {
-            var fields = string.Join(",", data.PayloadNames);
-            Log.Info($"pcl-discovery: prov='{data.ProviderName}' ev='{data.EventName}' id={data.ID} fields=[{fields}]");
+            if (_discoverySeen.Add($"{data.ProviderName}/{data.EventName}/{(int)data.ID}"))
+            {
+                var fields = string.Join(",", data.PayloadNames);
+                Log.Info($"pcl-discovery: prov='{data.ProviderName}' ev='{data.EventName}' id={data.ID} fields=[{fields}]");
+            }
         }
     }
 
