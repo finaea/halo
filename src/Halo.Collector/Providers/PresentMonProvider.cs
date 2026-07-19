@@ -27,14 +27,13 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
 {
     public string Name => "presentmon";
     public double MaxRateHz => 120;    // frame drain + stats publish; lows cached at 2 Hz inside FrameStats
-    public double DefaultRateHz => 60; // near-live fps counter: frames reach the ring in ≤17 ms batches
+    public double DefaultRateHz => 40; // frames reach the ring in ≤25 ms batches; stats publish per poll
 
     private Process? _proc;
     private Thread? _pumpThread;
     private volatile bool _stopping;
     private PresentMonSdkSource? _sdk;
     private PresentTap? _tap;
-    private long _nextStatsQpc; // numbers cadence: 10 Hz (readable); frames drain at poll rate
     private readonly List<PresentMonSdkSource.FrameSample> _sdkScratch = new(256);
 
     private readonly object _statsLock = new();
@@ -308,7 +307,6 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         UpdateForegroundTarget(sink);
         DrainSdkFrames();
 
-        // frames flush to the shared ring at the full poll rate (the graph path)…
         FrameEntry[] ring;
         long lastFrame;
         lock (_statsLock)
@@ -319,11 +317,9 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         }
         if (ring.Length > 0) sink.Writer.AppendFrames(ring);
 
-        // …numbers run at 10 Hz: they are rolling aggregates and faster text isn't readable.
-        // (The presented panel's live numbers come from the tap thread, not from here.)
+        // stats are consumed and published every poll — rolling aggregates glide, so there is
+        // no flicker to gate against; the lows stay cheap via FrameStats' 2 Hz cache
         long now = Stopwatch.GetTimestamp();
-        if (now < _nextStatsQpc) return;
-        _nextStatsQpc = now + Stopwatch.Frequency / 10;
 
         FrameStats.Result r;
         double click = 0, allInput = 0, simMs = 0, dispLat = 0;

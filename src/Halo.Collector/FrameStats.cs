@@ -62,7 +62,7 @@ public sealed class FrameStats(double windowSeconds)
         double FpsPresented, double FpsDisplayed,
         double AvgFrametimeMs, double WorstFrametimeMs,
         double AvgFrametimeShortMs,                       // presented mean over the newest 100 ms
-        double AvgDisplayedFtMs, double WorstDisplayedFtMs, // flip-to-flip over the newest 1 s
+        double AvgDisplayedFtMs, double WorstDisplayedFtMs, // flip-to-flip: 100 ms mean / 1 s max
         double Low1Presented, double Low01Presented,
         double Low1Displayed, double Low01Displayed,
         double FgRatio, int SampleCount);
@@ -73,9 +73,11 @@ public sealed class FrameStats(double windowSeconds)
     ///    timestamp — PresentMon's stdout arrives in ~1 s bursts, so wall-clock anchoring
     ///    made most polls see an empty "last second" (WORST flickered 0). WORST = the
     ///    longest single frame in that second, so a hitch stays readable for a full second.
+    ///  - FRAMETIME means (both streams): rolling 100 ms — live-feeling readouts; WORST stays
+    ///    the 1 s max so hitches remain readable for a full second.
     ///  - 1% / 0.1% lows and FG ratio: the full rolling window (default 60 s, configurable).
     ///    Lows are recomputed at 2 Hz and cached between (they move slowly; the sort dominates
-    ///    Consume's cost, which otherwise runs at the provider poll rate — 60 Hz).
+    ///    Consume's cost, which otherwise runs at the provider poll rate — 40 Hz).
     /// </summary>
     public Result Consume(long nowQpc)
     {
@@ -92,8 +94,8 @@ public sealed class FrameStats(double windowSeconds)
         if (lowsDue) _nextLowsQpc = dataNow + _qpcFreq / 2;
 
         int displayedCount = 0, appCount = 0;
-        int n1 = 0, displayed1 = 0, nShort = 0, dispN1 = 0;
-        double worst1 = 0, ftSum1 = 0, ftSumShort = 0, dispSum1 = 0, dispWorst1 = 0;
+        int n1 = 0, displayed1 = 0, nShort = 0, dispNShort = 0;
+        double worst1 = 0, ftSum1 = 0, ftSumShort = 0, dispSumShort = 0, dispWorst1 = 0;
         long oldest1 = dataNow;
         List<float>? presentedFts = lowsDue ? new List<float>(n) : null;
         List<float>? displayedFts = lowsDue ? new List<float>(n) : null;
@@ -116,17 +118,13 @@ public sealed class FrameStats(double windowSeconds)
                 if (s.Displayed)
                 {
                     displayed1++;
-                    if (s.DisplayedFtMs > 0)
-                    {
-                        dispN1++;
-                        dispSum1 += s.DisplayedFtMs;
-                        if (s.DisplayedFtMs > dispWorst1) dispWorst1 = s.DisplayedFtMs;
-                    }
+                    if (s.DisplayedFtMs > dispWorst1) dispWorst1 = s.DisplayedFtMs;
                 }
                 if (s.Qpc >= shortCutoff)
                 {
                     nShort++;
                     ftSumShort += s.PresentedFtMs;
+                    if (s.Displayed && s.DisplayedFtMs > 0) { dispNShort++; dispSumShort += s.DisplayedFtMs; }
                 }
             }
         }
@@ -149,7 +147,7 @@ public sealed class FrameStats(double windowSeconds)
             AvgFrametimeMs: n1 > 0 ? ftSum1 / n1 : 0,
             WorstFrametimeMs: worst1,
             AvgFrametimeShortMs: nShort > 0 ? ftSumShort / nShort : 0,
-            AvgDisplayedFtMs: dispN1 > 0 ? dispSum1 / dispN1 : 0,
+            AvgDisplayedFtMs: dispNShort > 0 ? dispSumShort / dispNShort : 0,
             WorstDisplayedFtMs: dispWorst1,
             Low1Presented: _low1P,
             Low01Presented: _low01P,

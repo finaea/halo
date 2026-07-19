@@ -15,7 +15,7 @@ last published value at the last tick, so worst-case staleness ≈ one publish i
 interval. Exception: the two fps panels are event-woken while a game runs (frame batches repaint
 the whole panel, text included), so their 5 Hz tick is only the idle/fallback rate. Dashboard cadence was lowered 10 → **5 Hz** on user preference
 (both the `defaultRateHz` setting and the previously-10 Hz hard-coded providers); the fps-counter
-path keeps its own design rates (numbers 10 Hz, presented lane live).
+path keeps its own design rates (presented lane live; displayed lane drains + publishes at 40 Hz).
 
 **Value-semantics tags used below:**
 - **latest** — instantaneous sensor/OS read at poll time, no aggregation
@@ -82,14 +82,14 @@ no runtime present event, so the presented panel falls back to the resolved lane
 | Metric | Unit | Old source | Proposed replacement | Halo source (as built) | Rate |
 |---|---|---|---|---|---|
 | Framerate (presented) | fps | Afterburner MAHM `Framerate` | PresentMon | Tap — ETW push · **rolling 1 s** (count ÷ actual span) | live, per present (flush = setting `presentMonEtwFlushMs`, 5 ms) |
-| Framerate (displayed) | fps | — (didn't exist) | PresentMon Displayed | Resolved lane · **rolling 1 s** (displayed frames only) | numbers 10 Hz (hard); drain 60 Hz (hard, cap 120) |
+| Framerate (displayed) | fps | — (didn't exist) | PresentMon Displayed | Resolved lane · **rolling 1 s** (displayed frames only) | published per drain — 40 Hz (hard, cap 120) |
 | Framerate % of refresh | % | skin math /144 | read actual refresh | widget-side derived: rolling FPS ÷ `fps.refresh.hz` (poll · **latest**) | refresh poll 1 Hz (hard) |
 | 1% / 0.1% low (per stream) | fps | Afterburner (since-reset window) | true windowed lows | 1000 ÷ mean of worst 1%/0.1% frametimes · **rolling 60 s** (setting `frameLowsWindowS`) | recomputed 2 Hz (hard) |
 | Frametime (presented) | ms | Afterburner `Frametime` | PresentMon per-frame | Tap · **rolling 100 ms mean** | live, per present |
-| Frametime (displayed) | ms | — | — | Resolved lane, flip-to-flip · **rolling 1 s mean** | 10 Hz (hard) |
-| WORST (per stream) | ms | — | worst-per-window | **rolling 1 s max** | presented live / displayed 10 Hz |
+| Frametime (displayed) | ms | — | — | Resolved lane, flip-to-flip · **rolling 100 ms mean** | 40 Hz (per drain) |
+| WORST (per stream) | ms | — | worst-per-window | **rolling 1 s max** | presented live / displayed 40 Hz |
 | Frametime graph (per stream) | — | MAHM sampled 1/s | PresentMon stream | shared frame ring, one bar per actual frame, lane-filtered (`Provisional` flag) · **raw per-frame, no aggregation** | event-driven (`FramesReady`, ~7 ms coalesce hard) |
-| DLSS badge (version · SR/FG/RR · FG ×) | — | NVIDIA App | module scan | NGX module scan — poll · **latest**; FG × from `fps.fgratio` (displayed ÷ sim-pacing **calc**) | scan every 10 s; ratio 10 Hz (hard) |
+| DLSS badge (version · SR/FG/RR · FG ×) | — | NVIDIA App | module scan | NGX module scan — poll · **latest**; FG × from `fps.fgratio` (displayed ÷ sim-pacing **calc**) | scan every 10 s; ratio 40 Hz (per drain) |
 
 > Latency components (P2D / click / input) and the detailed DLSS / MODEL / FRAME GEN rows were
 > moved to the dedicated LATENCY / DLSS panel (§4b) on 2026-07-19 — the fps panels keep only the
@@ -110,9 +110,9 @@ App. Idle-dims like the FPS panels.
 | PC LAT (headline, warn-colored) | ms | NVIDIA App overlay only | plan §7: marker-based PCL | widget-side sum **calc** = QUEUE + REND + DISP (overlay-equivalent, starts at input-enters-game) | components below; repaint at widget tick |
 | QUEUE (input post → consume) | ms | — | — | PclStats — NVIDIA Reflex ETW markers (self-ping) · **rolling ~1.5 s avg** | 5 Hz publish (hard, cap 20) |
 | REND (consume → present) | ms | — | — | PclStats markers · **rolling ~1.5 s avg** | 5 Hz (hard) |
-| DISP (present → photon, P2D) | ms | — | — | resolved lane `MsUntilDisplayed` · **decaying avg** | 10 Hz (hard, fps gate) |
-| CLICK (click-to-photon) | ms | — | PresentMon latency | resolved lane `ClickToPhoton` · **decaying avg** | 10 Hz (hard) |
-| INPUT (all-input-to-photon) | ms | — | PresentMon latency | resolved lane · **decaying avg** | 10 Hz (hard) |
+| DISP (present → photon, P2D) | ms | — | — | resolved lane `MsUntilDisplayed` · **decaying avg** | 40 Hz (rides the drain publish) |
+| CLICK (click-to-photon) | ms | — | PresentMon latency | resolved lane `ClickToPhoton` · **decaying avg** | 40 Hz (rides the drain publish) |
+| INPUT (all-input-to-photon) | ms | — | PresentMon latency | resolved lane · **decaying avg** | 40 Hz (rides the drain publish) |
 | DLSS version + features (SR/FG/RR) | — | NVIDIA App | NGX module scan | NGX DLL scan of target process — poll · **latest** | every 10 s (hard) |
 | MODEL (Transformer/CNN · override vs game DLL) | — | NVIDIA App | DLL version/path heuristic | module scan (DLL ≥310 = Transformer; DriverStore path = override) · **latest** | every 10 s (hard) |
 | FRAME GEN multiplier | × | — | — | widget-side **calc**: `fps.displayed` ÷ `render.rate.hz` (PCL sim-marker cadence · rolling ≥0.5 s); falls back to PresentMon sim-pacing ratio | components 5–10 Hz |
@@ -189,7 +189,7 @@ App. Idle-dims like the FPS panels.
 
 | Provider | Mechanism | Poll / push | Value semantics | Rate | Configurable? |
 |---|---|---|---|---|---|
-| **PresentMon resolved lane** | PresentMon 2 service child + `PresentMonAPI2.dll` frame queries | pull (drain) | rolling 1 s (fps/ft), rolling 60 s (lows), decaying avg (latencies) | drain 60 Hz (hard, cap 120); numbers 10 Hz (hard); lows 2 Hz (hard); ETW flush 5 ms (**setting**) | transport/tap/flush/lows-window via settings |
+| **PresentMon resolved lane** | PresentMon 2 service child + `PresentMonAPI2.dll` frame queries | pull (drain) | rolling 1 s (fps/worst), rolling 100 ms (ft mean), rolling 60 s (lows), decaying avg (latencies) | drain + publish 40 Hz (hard, cap 120); lows 2 Hz (hard); ETW flush 5 ms (**setting**) | transport/tap/flush/lows-window via settings |
 | **PresentTap (door-1)** | own ETW session, DXGI/D3D9 Present_Start via TraceEvent | **push** (per present) | rolling 1 s (fps/lows/worst), rolling 100 ms (frametime), raw per-frame (graph) | live; flush 5 ms (**setting**) | `presentedTap` on/off |
 | **PclStats** | NVIDIA Reflex marker ETW session | push (markers) → 10 Hz publish | rolling ~1.5 s avg | 5 Hz (hard, cap 20) | — |
 | **NVML** | NVIDIA management lib | poll | latest | 5 Hz (**setting**, cap 20) | `defaultRateHz` |

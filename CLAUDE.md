@@ -49,8 +49,9 @@ HKCU Run `HaloWidgets` — both created only by `tools\install-halo.ps1`, remove
 - Frame data is two lanes. **Resolved lane** (plan D7): bundled PresentMon 2 service
   (`tools\presentmon\sdk\`) spawned as a console-mode child — no SCM registration — and
   P/Invoked `PresentMonAPI2.dll`; ETW flush via `settings.PresentMonEtwFlushMs` (5 ms),
-  60 Hz provider poll, numbers gated to 10 Hz, lows cached at 2 Hz; feeds the DISPLAYED
-  panel + all fate-dependent metrics. Console capture app is the fallback
+  40 Hz provider poll with stats published every poll (lows cached at 2 Hz); feeds the
+  DISPLAYED panel + all fate-dependent metrics. FRAMETIME means on both panels are rolling
+  100 ms; WORST is the 1 s max. Console capture app is the fallback
   (`settings.PresentMonTransport`). **Tap lane** (`PresentTap`, `settings.PresentedTap`):
   own ETW session on the DXGI/D3D9 present-start events — no fate wait — feeding the
   PRESENTED panel live (1 s FPS, 100 ms frametime mean, `FrameFlags.Provisional` ring
