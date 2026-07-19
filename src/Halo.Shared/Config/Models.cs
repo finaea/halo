@@ -14,8 +14,10 @@ public sealed class GeneralSettings
     public double FrameLowsWindowS { get; set; } = 60;
     /// <summary>Frame-data transport: "auto" (SDK service, console-app fallback), "sdk", "console".</summary>
     public string PresentMonTransport { get; set; } = "auto";
-    /// <summary>SDK transport: ETW buffer flush period requested from the service, ms (1–1000; 0 = service default).</summary>
-    public int PresentMonEtwFlushMs { get; set; } = 5;
+    /// <summary>ETW buffer flush period while a game is tracked, ms (1–1000; 0 = service default).
+    /// Applies to the PresentMon service and the present tap; both relax automatically when no
+    /// 3D app is in the foreground (idle mode).</summary>
+    public int PresentMonEtwFlushMs { get; set; } = 10;
     /// <summary>Door-1 present tap for the presented FPS panel: "auto" (DXGI/D3D9 titles get a
     /// live presented stream, others fall back to the resolved lane) or "off".</summary>
     public string PresentedTap { get; set; } = "auto";

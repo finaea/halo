@@ -37,6 +37,18 @@ internal sealed class PresentMonSdkSource : IDisposable
 
     public bool Tracking { get; private set; }
     public string Detail { get; private set; } = "";
+    private int _flushMs;
+
+    /// <summary>Runtime flush knob (idle-aware pipeline): the service's ETW flush cadence only
+    /// buys latency while a game is tracked; the provider relaxes it on idle. The flush is a
+    /// constant per-sweep cost (it ran 200 kernel sweeps/s at 5 ms, game or no game).</summary>
+    public void SetFlushPeriod(int ms)
+    {
+        if (_session == 0 || ms <= 0 || ms == _flushMs) return;
+        int st = PmApi.pmSetEtwFlushPeriod(_session, (uint)Math.Clamp(ms, 1, 1000));
+        if (st == PmApi.Ok) _flushMs = ms;
+        else Log.Warn($"presentmon sdk: set etw flush {ms} ms: {PmApi.StatusName(st)}");
+    }
 
     /// <summary>Frame-metric ladder: full instrumentation first, degrade if the service rejects.</summary>
     private static readonly PmApi.Metric[][] QueryLadder =
@@ -123,6 +135,8 @@ internal sealed class PresentMonSdkSource : IDisposable
         // 5 s maximum instead of the default (it was burning service CPU for metrics nobody reads)
         int stTel = PmApi.pmSetTelemetryPollingPeriod(_session, 0, 5000);
         if (stTel != PmApi.Ok) Log.Warn($"presentmon sdk: set telemetry period: {PmApi.StatusName(stTel)}");
+
+        _flushMs = etwFlushMs;
 
         foreach (var metrics in QueryLadder)
         {

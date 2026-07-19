@@ -81,7 +81,7 @@ no runtime present event, so the presented panel falls back to the resolved lane
 
 | Metric | Unit | Old source | Proposed replacement | Halo source (as built) | Rate |
 |---|---|---|---|---|---|
-| Framerate (presented) | fps | Afterburner MAHM `Framerate` | PresentMon | Tap — ETW push · **rolling 1 s** (count ÷ actual span) | live, per present (flush = setting `presentMonEtwFlushMs`, 5 ms) |
+| Framerate (presented) | fps | Afterburner MAHM `Framerate` | PresentMon | Tap — ETW push · **rolling 1 s** (count ÷ actual span) | live, per present (flush = setting `presentMonEtwFlushMs`, 10 ms; idle-aware) |
 | Framerate (displayed) | fps | — (didn't exist) | PresentMon Displayed | Resolved lane · **rolling 1 s** (displayed frames only) | published per drain — 40 Hz (hard, cap 120) |
 | Framerate % of refresh | % | skin math /144 | read actual refresh | widget-side derived: rolling FPS ÷ `fps.refresh.hz` (poll · **latest**) | refresh poll 1 Hz (hard) |
 | 1% / 0.1% low (per stream) | fps | Afterburner (since-reset window) | true windowed lows | 1000 ÷ mean of worst 1%/0.1% frametimes · **rolling 60 s** (setting `frameLowsWindowS`) | recomputed 2 Hz (hard) |
@@ -189,8 +189,8 @@ App. Idle-dims like the FPS panels.
 
 | Provider | Mechanism | Poll / push | Value semantics | Rate | Configurable? |
 |---|---|---|---|---|---|
-| **PresentMon resolved lane** | PresentMon 2 service child + `PresentMonAPI2.dll` frame queries | pull (drain) | rolling 1 s (fps/worst), rolling 100 ms (ft mean), rolling 60 s (lows), decaying avg (latencies) | drain + publish 40 Hz (hard, cap 120); lows 2 Hz (hard); ETW flush 5 ms (**setting**) | transport/tap/flush/lows-window via settings |
-| **PresentTap (door-1)** | own ETW session, DXGI/D3D9 Present_Start via TraceEvent | **push** (per present) | rolling 1 s (fps/lows/worst), rolling 100 ms (frametime), raw per-frame (graph) | live; flush 5 ms (**setting**) | `presentedTap` on/off |
+| **PresentMon resolved lane** | PresentMon 2 service child + `PresentMonAPI2.dll` frame queries | pull (drain) | rolling 1 s (fps/worst), rolling 100 ms (ft mean), rolling 60 s (lows), decaying avg (latencies) | drain + publish 40 Hz (hard, cap 120); lows 2 Hz (hard); ETW flush 10 ms (**setting**, idle-aware) | transport/tap/flush/lows-window via settings |
+| **PresentTap (door-1)** | own ETW session, DXGI/D3D9 Present_Start via TraceEvent | **push** (per present) | rolling 1 s (fps/lows/worst), rolling 100 ms (frametime), raw per-frame (graph) | live; flush 10 ms (**setting**, idle-aware) | `presentedTap` on/off |
 | **PclStats** | NVIDIA Reflex marker ETW session | push (markers) → 10 Hz publish | rolling ~1.5 s avg | 5 Hz (hard, cap 20) | — |
 | **NVML** | NVIDIA management lib | poll | latest | 5 Hz (**setting**, cap 20) | `defaultRateHz` |
 | **LHM CPU** | MSR via PawnIO | poll | latest | 5 Hz (**setting**, cap 20) | `defaultRateHz` |

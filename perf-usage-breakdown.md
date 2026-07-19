@@ -119,6 +119,27 @@ idle cost, and idle Halo (23.9%) currently sits *above* the old stack's constant
    desktop's present firehose (browsers, editors) never reaches the callback.
 3. Re-measure idle; target: Halo idle well under the old stack's 17.6%.
 
+### Round 2 results (2026-07-20 ~00:43, idle desktop, idle mode engaged)
+
+Implemented: frame-based idle detection (10 s without frames for the tracked pid — NOT
+focus-based; any desktop app becomes a target when focused, only presenting apps make frames)
+→ service flush relaxed to 100 ms + tap providers muted + tap flush 250 ms. Frames resuming
+re-arms within ~150 ms via the resolved lane (tap mute never blinds detection — the presented
+panel rides its resolved fallback for the first moments of a game). Active flush default also
+changed 5 → 10 ms (user preference).
+
+| | Idle before round 2 | Idle after | 
+|---|---|---|
+| PresentMonService | 15.6% core | **0.0%** |
+| Halo.Collector | 6.4% | 5.1% |
+| Halo.Widgets | 1.9% | 3.2% (noise) |
+| **Halo total** | **23.9% core** | **8.3% core (0.42% machine)**, 299 MB |
+
+Idle Halo is now **less than half the old stack's constant 17.6%**, closing the one axis
+where it still lost. Remaining backlog: volatile-string layout path, split service/tap flush
+settings (only relevant if 10 ms proves too coarse for the tap), lhm-cpu spike observation,
+Widgets long-session RAM observation.
+
 ## Suggested attack order
 
 | Step | Change | Expected effect | Effort / risk |

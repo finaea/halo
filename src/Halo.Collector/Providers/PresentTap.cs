@@ -33,6 +33,9 @@ internal sealed class PresentTap : IDisposable
     private volatile bool _stopping;
     private MetricSink? _sink;
     private volatile int _targetPid;
+    private volatile int _flushPeriodMs = 10;
+    private int _activeFlushMs = 10;
+    private bool _idle;
     private long _lastFrameQpc;
 
     private readonly object _lock = new();         // guards _stats + _lastBySwapchain
@@ -69,11 +72,12 @@ internal sealed class PresentTap : IDisposable
             { IsBackground = true, Name = "halo-tap-etw" };
             _etwThread.Start();
 
-            int period = Math.Clamp(flushMs <= 0 ? 5 : flushMs, 1, 100);
-            _flushThread = new Thread(() => FlushLoop(period)) { IsBackground = true, Name = "halo-tap-flush" };
+            _activeFlushMs = Math.Clamp(flushMs <= 0 ? 10 : flushMs, 1, 100);
+            _flushPeriodMs = _activeFlushMs;
+            _flushThread = new Thread(FlushLoop) { IsBackground = true, Name = "halo-tap-flush" };
             _flushThread.Start();
 
-            Log.Info($"present-tap: session up (DXGI + D3D9, flush {period} ms)");
+            Log.Info($"present-tap: session up (DXGI + D3D9, flush {_activeFlushMs} ms)");
             return true;
         }
         catch (Exception ex)
@@ -84,20 +88,52 @@ internal sealed class PresentTap : IDisposable
         }
     }
 
-    private void FlushLoop(int periodMs)
+    private void FlushLoop()
     {
-        _ = timeBeginPeriod(1); // Sleep(5) is otherwise ~15.6 ms granular
+        _ = timeBeginPeriod(1); // Sleep(10) is otherwise ~15.6 ms granular
         try
         {
             while (!_stopping)
             {
-                Thread.Sleep(periodMs);
+                Thread.Sleep(_flushPeriodMs); // idle mode slows this without restarting the thread
                 try { _session?.Flush(); }
                 catch { if (!_stopping) throw; }
             }
         }
         catch (Exception ex) { if (!_stopping) Log.Error("present-tap flush", ex); }
         finally { _ = timeEndPeriod(1); }
+    }
+
+    /// <summary>Idle-aware pipeline: with no 3D target there is nothing worth low latency, but
+    /// the desktop's present firehose (browsers, editors) still hits our providers and the
+    /// flush still sweeps kernel buffers. Idle mutes the providers (session and consumer thread
+    /// stay alive) and relaxes the flush; re-arming is instant and loses only the first few
+    /// presents after a target appears — which the target-switch stats reset discards anyway.</summary>
+    public void SetIdle(bool idle)
+    {
+        if (_session == null || idle == _idle) return;
+        try
+        {
+            if (idle)
+            {
+                _session.DisableProvider(DxgiProvider);
+                _session.DisableProvider(D3D9Provider);
+                _flushPeriodMs = 250;
+            }
+            else
+            {
+                _session.EnableProvider(DxgiProvider, TraceEventLevel.Informational, ulong.MaxValue);
+                _session.EnableProvider(D3D9Provider, TraceEventLevel.Informational, ulong.MaxValue);
+                _flushPeriodMs = _activeFlushMs;
+            }
+            _idle = idle;
+            Log.Info(idle ? "present-tap: idle (providers muted, flush 250 ms)"
+                          : $"present-tap: active (flush {_activeFlushMs} ms)");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"present-tap: idle transition failed: {ex.Message}");
+        }
     }
 
     public void SetTarget(int pid)

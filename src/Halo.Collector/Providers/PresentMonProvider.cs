@@ -56,6 +56,8 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
     private DateTime _nextNgxScan = DateTime.MinValue;
     private int _ngxScannedPid;
     private long _nextSlowPublishQpc; // 1 Hz cadence for app name/pid/refresh (constants between target changes)
+    private long _idleSinceQpc;       // 0 while a target is tracked
+    private bool _fpsIdleMode;        // relaxed flush + muted tap after 10 s without a target
 
     public bool Initialize(MetricSink sink)
     {
@@ -70,6 +72,8 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         _sdk = null;
         _tap?.Dispose();
         _tap = null;
+        _fpsIdleMode = false;
+        _idleSinceQpc = 0;
 
         // registration is idempotent and must precede the elevation gate: the sdk transport
         // can attach to an already-installed running service without admin
@@ -305,6 +309,7 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             throw new InvalidOperationException("presentmon process not running"); // host re-inits with backoff
 
         UpdateForegroundTarget(sink);
+        UpdateIdleMode();
         DrainSdkFrames();
 
         FrameEntry[] ring;
@@ -378,6 +383,39 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         sink.Set(MetricNames.FpsTapActive, tapActive ? 1 : 0);
     }
 
+    /// <summary>Idle-aware fps pipeline: ETW flush cadence and the tap's providers only buy
+    /// latency while a game is presenting, but their cost runs regardless — measured at ~2/3
+    /// of Halo's idle CPU. The criterion is FRAMES, not focus: any foreground app becomes a
+    /// "target" (editors, browsers), but only a presenting 3D app produces frames for its own
+    /// pid. 10 s without frames → relax the service flush, mute the tap; frames resuming (or
+    /// a target switch, handled in UpdateForegroundTarget) re-arms instantly.</summary>
+    private void UpdateIdleMode()
+    {
+        long now = Stopwatch.GetTimestamp();
+        long lastFrame;
+        lock (_statsLock) lastFrame = _lastTargetFrameQpc;
+        if (lastFrame != 0) _idleSinceQpc = 0;
+        else if (_idleSinceQpc == 0) _idleSinceQpc = now; // no frames yet: anchor the countdown
+
+        long anchor = lastFrame != 0 ? lastFrame : _idleSinceQpc;
+        bool shouldIdle = now - anchor > 10 * Stopwatch.Frequency;
+        if (shouldIdle == _fpsIdleMode) return;
+
+        _fpsIdleMode = shouldIdle;
+        if (shouldIdle)
+        {
+            _sdk?.SetFlushPeriod(100);
+            _tap?.SetIdle(true);
+            Log.Info("fps pipeline idle: no frames for 10 s — service flush 100 ms, tap muted");
+        }
+        else
+        {
+            _sdk?.SetFlushPeriod(settings.PresentMonEtwFlushMs);
+            _tap?.SetIdle(false);
+            Log.Info("fps pipeline active: full flush cadence restored");
+        }
+    }
+
     /// <summary>sdk transport: pull queued frames into stats/ring (console pump pushes instead).</summary>
     private void DrainSdkFrames()
     {
@@ -427,6 +465,10 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             }
             _sdk?.OnTargetChanged(_targetPid, pid);
             _tap?.SetTarget(pid);
+            // idle enter/exit is frame-based (UpdateIdleMode), NOT focus-based: any desktop app
+            // becomes a target when focused, but only presenting apps produce frames. On a real
+            // game start, resolved-lane frames (unaffected by tap mute) exit idle within ~150 ms
+            // and the presented panel rides its resolved fallback until the tap re-arms.
             _targetPid = pid;
             _targetName = name;
             _nextNgxScan = DateTime.MinValue; // rescan DLSS on app switch

@@ -48,9 +48,10 @@ HKCU Run `HaloWidgets` — both created only by `tools\install-halo.ps1`, remove
   original Rainmeter skins) — treat them as the source of truth for 1:1 parity.
 - Frame data is two lanes. **Resolved lane** (plan D7): bundled PresentMon 2 service
   (`tools\presentmon\sdk\`) spawned as a console-mode child — no SCM registration — and
-  P/Invoked `PresentMonAPI2.dll`; ETW flush via `settings.PresentMonEtwFlushMs` (5 ms),
+  P/Invoked `PresentMonAPI2.dll`; ETW flush via `settings.PresentMonEtwFlushMs` (10 ms),
   40 Hz provider poll with stats published every poll (lows cached at 2 Hz); feeds the
-  DISPLAYED panel + all fate-dependent metrics. FRAMETIME means on both panels are rolling
+  DISPLAYED panel + all fate-dependent metrics. The fps pipeline is idle-aware: 10 s
+  without frames → service flush 100 ms + tap providers muted; frames re-arm it (~150 ms). FRAMETIME means on both panels are rolling
   100 ms; WORST is the 1 s max. Console capture app is the fallback
   (`settings.PresentMonTransport`). **Tap lane** (`PresentTap`, `settings.PresentedTap`):
   own ETW session on the DXGI/D3D9 present-start events — no fate wait — feeding the
