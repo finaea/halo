@@ -4,9 +4,10 @@ using Vortice.Mathematics;
 namespace Halo.Widgets;
 
 /// <summary>
-/// Visual tokens extracted from RainformerHWiv2 (@Resources\Variables.inc, light set — the
-/// values the skins actually reference). Overridable via config\theme.json; values are facts
-/// extracted from the user's own config, no GPL code (plan §9.2).
+/// Visual tokens extracted from the Rainformer skin (@Resources\Variables.inc, light set — the
+/// values the skins actually reference; reference copy in the user's Rainmeter Skins folder).
+/// Overridable via config\theme.json; values are facts extracted from the user's own config,
+/// no GPL code (plan §9.2).
 /// </summary>
 public sealed class Theme
 {

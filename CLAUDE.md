@@ -41,8 +41,10 @@ HKCU Run `HaloWidgets` — both created only by `tools\install-halo.ps1`, remove
 
 - Layout coordinates are **logical units** (panel = 206 wide); theme scale (1.7) is applied
   once in the renderer. 8-pt text rows use `FixedH = 11` (Rainformer's effective line height).
-- Colors only via `Theme` tokens (extracted from `RainformerHWiv2\@Resources\Variables.inc` —
-  values only, no GPL code). Staged warn colors: `CpuRamPanelImpl.WarnColor`.
+- Colors only via `Theme` tokens (extracted from the Rainformer skin's `@Resources\Variables.inc` —
+  values only, no GPL code; reference copy lives at
+  `C:\Users\final\Documents\Rainmeter\Skins\RainformerHWi`, no longer vendored in this repo).
+  Staged warn colors: `CpuRamPanelImpl.WarnColor`.
 - Metric names: `Halo.Shared\Metrics\MetricNames.cs`; `.max` suffix = session maximum.
 - Panel visual specs live in `tools\extracted\*.json` (faithful transcriptions of the
   original Rainmeter skins) — treat them as the source of truth for 1:1 parity.
