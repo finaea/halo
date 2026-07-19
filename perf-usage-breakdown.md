@@ -217,6 +217,32 @@ cost hides inside the game's frame time, and its RAM grows monotonically through
 session while Halo's is flat at ~250 MB (7× less). At a frame cap or on the desktop, Halo
 drops well below the old stack on every axis.
 
+---
+
+## Final state (2026-07-20 ~00:52) — old stack decommissioned
+
+Rainmeter, HWiNFO, Afterburner, RTSS, and the NVIDIA overlay are **shut down**. Remaining
+non-Halo residue: `nvcontainer` ×3 (445 MB) — NVIDIA driver/app container infrastructure that
+survives overlay shutdown; trimmable via NVIDIA app background settings if desired.
+
+Halo alone, game running uncapped ~223 fps (worst case):
+
+| | CPU (one core) | GPU | RAM |
+|---|---|---|---|
+| Halo.Widgets | 21.6% | 1.2% | 140 MB |
+| PresentMonService | 10.8% (was 16.6–21.1 pre-optimization) | 0% | 22 MB |
+| Halo.Collector | 9.1% | 0% | 75 MB |
+| **Total** | **41.4% core (2.1% of machine)** | 1.2% | **236 MB** |
+
+Idle: **8.3% of one core, ~300 MB** (round-2 table above). The round-2 idle mode also passed
+its first real-world exercise: the log shows active→idle→active transitions tracking the
+game's lifecycle exactly (frame-based re-arm at 00:51:23 on game return).
+
+Net vs the start of the evening (old stack constant 19–27% core + 1.4→1.8 GB growing, plus
+pre-optimization Halo at 48–71% core): the machine now runs **one** monitoring stack at
+2.1% total CPU under worst-case load, 0.4% idle, ~0.25 GB flat — with latency/DLSS telemetry
+the old stack never had, and nothing injected into any game.
+
 **Repro commands** (unelevated PowerShell):
 CPU: `TotalProcessorTime` delta over 12 s per process. GPU:
 `(Get-Counter '\GPU Engine(*)\Utilization Percentage').CounterSamples | ? InstanceName -match "pid_<pid>_"` summed.
