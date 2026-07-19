@@ -119,6 +119,11 @@ internal sealed class PresentMonSdkSource : IDisposable
             if (st != PmApi.Ok) Log.Warn($"presentmon sdk: set etw flush {etwFlushMs} ms: {PmApi.StatusName(st)}");
         }
 
+        // we consume frame events only — park the service's hardware-telemetry sampling at its
+        // 5 s maximum instead of the default (it was burning service CPU for metrics nobody reads)
+        int stTel = PmApi.pmSetTelemetryPollingPeriod(_session, 0, 5000);
+        if (stTel != PmApi.Ok) Log.Warn($"presentmon sdk: set telemetry period: {PmApi.StatusName(stTel)}");
+
         foreach (var metrics in QueryLadder)
         {
             var elements = new PmApi.QueryElement[metrics.Length];

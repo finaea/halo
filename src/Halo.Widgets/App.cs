@@ -168,7 +168,9 @@ public sealed unsafe class App : IDisposable
         else
         {
             due = now;
-            _nextFrameWakeQpc = now + Stopwatch.Frequency * 7 / 1000;
+            // 16 ms ≈ the 60 Hz widget monitor's refresh: repainting faster than the panel's
+            // own display can show is pure CPU waste (was 7 ms, sized for a 144 Hz display)
+            _nextFrameWakeQpc = now + Stopwatch.Frequency * 16 / 1000;
         }
         foreach (var w in _windows)
             if (w.Panel.HasFrameGraph && w.NextDueQpc > due) w.NextDueQpc = due;

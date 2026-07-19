@@ -56,8 +56,8 @@ HKCU Run `HaloWidgets` — both created only by `tools\install-halo.ps1`, remove
   own ETW session on the DXGI/D3D9 present-start events — no fate wait — feeding the
   PRESENTED panel live (1 s FPS, 100 ms frametime mean, `FrameFlags.Provisional` ring
   entries); Vulkan/OpenGL titles fall back to the resolved lane (`fps.tap.active`).
-  Widgets repaint frame graphs on the `Local\Halo.FramesReady.v1` event (~7 ms coalesce)
-  with their tick as fallback. Smoketests: `--pm-smoketest [pid]`, `--tap-smoketest <pid>`.
+  Widgets repaint frame graphs on the `Local\Halo.FramesReady.v1` event (16 ms coalesce —
+  matched to the 60 Hz widget monitor) with their tick as fallback. Smoketests: `--pm-smoketest [pid]`, `--tap-smoketest <pid>`.
 
 ## Gotchas
 

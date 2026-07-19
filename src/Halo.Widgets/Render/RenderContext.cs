@@ -25,7 +25,12 @@ public sealed class RenderContext : IDisposable
 
     private readonly Dictionary<uint, ID2D1SolidColorBrush> _brushes = new();
     private readonly Dictionary<TextStyle, IDWriteTextFormat> _formats = new();
-    private readonly Dictionary<(string, TextStyle), IDWriteTextLayout> _layouts = new();
+    // two-generation layout cache: fps panels create new layouts continuously (their numbers
+    // change per repaint), and the old clear-everything sweep also disposed hot static labels,
+    // forcing rebuilds. Hits promote from the previous generation; a full generation without a
+    // hit means an entry is truly stale and gets disposed at the next rotation.
+    private Dictionary<(string, TextStyle), IDWriteTextLayout> _layouts = new();
+    private Dictionary<(string, TextStyle), IDWriteTextLayout> _layoutsPrev = new();
     private readonly Dictionary<TextStyle, float> _lineHeights = new();
 
     public RenderContext(ID2D1DeviceContext dc, IDWriteFactory dwrite, IDWriteFontCollection1? customFonts, Theme theme)
@@ -69,10 +74,16 @@ public sealed class RenderContext : IDisposable
             ? $"{text}\u0001{r0.Start},{r0.Len},{r0.SizePt}" : text;
         var key = (keyText, style);
         if (_layouts.TryGetValue(key, out var l)) return l;
-        if (_layouts.Count > 512)
+        if (_layoutsPrev.Remove(key, out l))
         {
-            foreach (var v in _layouts.Values) v.Dispose();
-            _layouts.Clear();
+            _layouts[key] = l; // still hot: promote instead of rebuilding
+            return l;
+        }
+        if (_layouts.Count >= 384)
+        {
+            foreach (var v in _layoutsPrev.Values) v.Dispose();
+            _layoutsPrev.Clear();
+            (_layouts, _layoutsPrev) = (_layoutsPrev, _layouts);
         }
         l = DWrite.CreateTextLayout(text, Format(style), maxWidth, 512);
         // Rainmeter InlineSetting=Size equivalent: a sub-range at a different size, sharing
@@ -127,7 +138,8 @@ public sealed class RenderContext : IDisposable
         foreach (var b in _brushes.Values) b.Dispose();
         foreach (var f in _formats.Values) f.Dispose();
         foreach (var l in _layouts.Values) l.Dispose();
-        _brushes.Clear(); _formats.Clear(); _layouts.Clear();
+        foreach (var l in _layoutsPrev.Values) l.Dispose();
+        _brushes.Clear(); _formats.Clear(); _layouts.Clear(); _layoutsPrev.Clear();
     }
 }
 

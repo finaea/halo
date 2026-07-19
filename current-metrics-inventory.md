@@ -34,7 +34,7 @@ processes), **Rainmeter built-ins** (time, disk space, network).
 
 | Metric | Example | Old source | Proposed replacement | Halo source (as built) | Rate |
 |---|---|---|---|---|---|
-| Date (D/M/Y) | 19/7/2026 | Rainmeter `Time` | keep (built-in) | widget-side, system clock at render (no metric) · **latest** | widget tick 10 Hz (setting) |
+| Date (D/M/Y) | 19/7/2026 | Rainmeter `Time` | keep (built-in) | widget-side, system clock at render (no metric) · **latest** | widget tick 5 Hz (setting) |
 | Day of year | Day: 200 | Rainmeter `Time` | keep | widget-side · **latest** | widget tick |
 | Time (HH:MM:SS) | 00:20:39 | Rainmeter `Time` | keep | widget-side · **latest** | widget tick |
 | Day of week | SUNDAY | Rainmeter `Time` | keep | widget-side · **latest** | widget tick |
@@ -77,7 +77,7 @@ RTSS-class live. **Displayed panel** = resolved lane: bundled PresentMon 2 servi
 (`PresentMonAPI2.dll`), fate-aware (displayed vs dropped, flip times). Vulkan/OpenGL titles have
 no runtime present event, so the presented panel falls back to the resolved lane
 (`fps.tap.active`, setting `presentedTap`). Frame graphs on both panels repaint on the
-`FramesReady` event (~7 ms coalesce, hard) with the widget tick as fallback — not on a poll.
+`FramesReady` event (16 ms coalesce = 60 Hz widget monitor, hard) with the widget tick as fallback — not on a poll.
 
 | Metric | Unit | Old source | Proposed replacement | Halo source (as built) | Rate |
 |---|---|---|---|---|---|
@@ -88,7 +88,7 @@ no runtime present event, so the presented panel falls back to the resolved lane
 | Frametime (presented) | ms | Afterburner `Frametime` | PresentMon per-frame | Tap · **rolling 100 ms mean** | live, per present |
 | Frametime (displayed) | ms | — | — | Resolved lane, flip-to-flip · **rolling 100 ms mean** | 40 Hz (per drain) |
 | WORST (per stream) | ms | — | worst-per-window | **rolling 1 s max** | presented live / displayed 40 Hz |
-| Frametime graph (per stream) | — | MAHM sampled 1/s | PresentMon stream | shared frame ring, one bar per actual frame, lane-filtered (`Provisional` flag) · **raw per-frame, no aggregation** | event-driven (`FramesReady`, ~7 ms coalesce hard) |
+| Frametime graph (per stream) | — | MAHM sampled 1/s | PresentMon stream | shared frame ring, one bar per actual frame, lane-filtered (`Provisional` flag) · **raw per-frame, no aggregation** | event-driven (`FramesReady`, 16 ms coalesce hard) |
 | DLSS badge (version · SR/FG/RR · FG ×) | — | NVIDIA App | module scan | NGX module scan — poll · **latest**; FG × from `fps.fgratio` (displayed ÷ sim-pacing **calc**) | scan every 10 s; ratio 40 Hz (per drain) |
 
 > Latency components (P2D / click / input) and the detailed DLSS / MODEL / FRAME GEN rows were
@@ -211,7 +211,7 @@ App. Idle-dims like the FPS panels.
 **Widget layer:** text panels tick at 5 Hz (**setting** `defaultRateHz`; per-widget `rateHz` in
 `widgets.json`, cap 100); sparklines sample their metric at 1–2 Hz (hard, per panel) — each point
 carries the semantics of the metric it samples; frame graphs repaint on the
-`Local\Halo.FramesReady.v1` event, coalesced to ~7 ms (hard), widget tick as fallback, and draw
+`Local\Halo.FramesReady.v1` event, coalesced to 16 ms (60 Hz widget monitor, hard), widget tick as fallback, and draw
 **raw per-frame values** with no sampling.
 
 **Grand total: ~85 individual metric values on screen** (drives ×7 and cores ×20 dominate) — all

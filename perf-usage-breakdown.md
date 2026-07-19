@@ -80,6 +80,22 @@ across ~20 provider/ETW threads.
 
 ---
 
+## Round 1 results (2026-07-20 ~00:25, game @229 fps — comparable load)
+
+Steps 1+2 applied, plus a two-generation layout cache, plus the coalesce retuned to the
+**60 Hz widget monitor** (16 ms, not the 12 ms the doc guessed — repaints beyond the panel
+display's refresh are pure waste):
+
+| Process | Before (218–252 fps) | After (229 fps) | Δ |
+|---|---|---|---|
+| Halo.Widgets | 24.8–41.6% core, 121→213 MB | **17.7% core, 119 MB** | ≈ −50% CPU; RAM growth suspect addressed (observe long-run) |
+| PresentMonService | 16.6–21.1% core, 168–190 MB | **14.3% core, 65 MB** | −20% CPU, **−120 MB RAM** (telemetry rings) |
+| Halo.Collector | 6.5–8.3% core | 9.1% core | ~flat (tap event volume scales with fps) |
+| **Total** | 48–71% core, 385–462 MB | **41% core (2.1% machine), 312 MB** | ≈ −40% CPU, −25% RAM under load |
+
+Remaining from the original order: idle baseline measurement, volatile-string path (step 4's
+second half), split flush settings (step 5), lhm-cpu observation (step 6).
+
 ## Suggested attack order
 
 | Step | Change | Expected effect | Effort / risk |

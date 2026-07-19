@@ -97,6 +97,11 @@ internal static unsafe class PmApi
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern int pmSetEtwFlushPeriod(nint session, uint periodMs);
 
+    /// <summary>How often the service samples GPU/CPU hardware telemetry (4–5000 ms). Halo
+    /// consumes none of those metrics, so we park it at the maximum.</summary>
+    [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
+    public static extern int pmSetTelemetryPollingPeriod(nint session, uint reserved, uint timeMs);
+
     [DllImport(Dll, CallingConvention = CallingConvention.Cdecl)]
     public static extern int pmRegisterFrameQuery(nint session, out nint query,
         [In, Out] QueryElement[] elements, ulong numElements, out uint blobSize);
