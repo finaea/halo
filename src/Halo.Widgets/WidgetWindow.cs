@@ -40,6 +40,8 @@ public sealed unsafe class WidgetWindow : IDisposable
     private int _pxW, _pxH;
     private bool _needsFullRedraw = true;
 
+    public bool IsDragging => _dragging;
+
     // drag state
     private bool _dragging;
     private POINT _dragStartCursor;

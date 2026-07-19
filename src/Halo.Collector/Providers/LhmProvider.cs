@@ -147,7 +147,9 @@ public sealed class LhmProvider : ISensorProvider
                     case SensorType.Power when v > 0 && s.Name is "CPU Package" or "Package":
                         sink.Set(MetricNames.CpuPackagePowerW, v);
                         break;
-                    case SensorType.Clock when s.Name.StartsWith("CPU Core", StringComparison.Ordinal):
+                    case SensorType.Clock when !s.Name.Contains("Bus", StringComparison.OrdinalIgnoreCase):
+                        // core clocks are named "CPU Core #N" (or "Core #N" depending on LHM
+                        // version); take the max of everything that isn't the bus clock
                         if (v > maxCoreClock) maxCoreClock = v;
                         break;
                 }
@@ -189,7 +191,13 @@ public sealed class LhmProvider : ISensorProvider
 
     private void PollStorage(MetricSink sink)
     {
-        _letterToModel ??= DriveMap.LetterToModel(DriveLetters());
+        if (_letterToModel == null)
+        {
+            _letterToModel = DriveMap.LetterToModel(DriveLetters());
+            var missing = DriveLetters().Where(l => !_letterToModel.ContainsKey(l)).ToList();
+            if (missing.Count > 0)
+                Log.Warn($"lhm-storage: no disk-model descriptor for volume(s) {string.Join(",", missing)} — temps will read N/A (drive likely reports empty vendor/product strings)");
+        }
 
         var tempByModel = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         foreach (var hw in AllHardware().Where(h => h.HardwareType == HardwareType.Storage))
@@ -202,16 +210,35 @@ public sealed class LhmProvider : ISensorProvider
         foreach (var (letter, model) in _letterToModel)
         {
             // model strings may differ slightly (vendor prefix, size suffix) between the
-            // IOCTL descriptor and LHM's name — match on containment either way
+            // IOCTL descriptor and LHM's name — match on containment either way, then on
+            // the first whitespace-stripped token overlap as a last resort
             var match = tempByModel.FirstOrDefault(kv =>
                 kv.Key.Contains(model, StringComparison.OrdinalIgnoreCase) ||
                 model.Contains(kv.Key, StringComparison.OrdinalIgnoreCase));
+            if (match.Key == null)
+            {
+                string squished = model.Replace(" ", "");
+                match = tempByModel.FirstOrDefault(kv =>
+                    kv.Key.Replace(" ", "").Contains(squished, StringComparison.OrdinalIgnoreCase) ||
+                    squished.Contains(kv.Key.Replace(" ", ""), StringComparison.OrdinalIgnoreCase));
+            }
             if (match.Key != null)
+            {
                 sink.Set(MetricNames.DriveTempC(letter), match.Value);
+            }
             else
+            {
+                if (!_unmatchedLogged.Contains(letter))
+                {
+                    _unmatchedLogged.Add(letter);
+                    Log.Warn($"lhm-storage: no LHM match for {letter}: descriptor model '{model}'; LHM names: {string.Join(" | ", tempByModel.Keys)}");
+                }
                 sink.MarkStale(MetricNames.DriveTempC(letter));
+            }
         }
     }
+
+    private readonly HashSet<char> _unmatchedLogged = new();
 
     private void PollGpu(MetricSink sink)
     {

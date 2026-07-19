@@ -5,7 +5,9 @@
      exclusion for this folder (user decision). -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <!-- WinExe: no console window when the scheduled task launches it interactively.
+         Diagnostics still work via piping: & Halo.Collector.exe --dump | Out-String -->
+    <OutputType>WinExe</OutputType>
     <RootNamespace>Halo.Collector</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <InvariantGlobalization>true</InvariantGlobalization>

@@ -111,6 +111,7 @@ public sealed unsafe class App : IDisposable
             {
                 Metrics.Tick();
                 Watchdog();
+                PositionGuard();
                 now = Stopwatch.GetTimestamp();
                 foreach (var w in _windows)
                 {
@@ -161,6 +162,34 @@ public sealed unsafe class App : IDisposable
     }
 
     public void RequestDeviceRecovery() => _deviceLost = true;
+
+    private DateTime _nextPositionCheck = DateTime.MinValue;
+
+    /// <summary>
+    /// Resilience (plan §11): display-mode/DPI changes and WorkerW re-hosting can shift
+    /// desktop-parented children (observed 2026-07-19: resolution/DPI change moved half the
+    /// widgets above the screen). Desktop children don't reliably receive WM_DISPLAYCHANGE,
+    /// so every 5 s we re-derive each widget's expected screen rect from config and re-pin
+    /// on drift. Skipped while a drag is in progress (drag saves config on mouse-up anyway).
+    /// </summary>
+    private void PositionGuard()
+    {
+        if (DateTime.UtcNow < _nextPositionCheck) return;
+        _nextPositionCheck = DateTime.UtcNow.AddSeconds(5);
+        RefreshMonitors();
+        foreach (var w in _windows)
+        {
+            if (w.IsDragging) continue;
+            var (mx, my, _, _) = ResolveMonitorWorkArea(w.Config.Monitor);
+            var (ax, ay, _, _) = w.ScreenRect();
+            if (Math.Abs(ax - (mx + w.Config.X)) > 2 || Math.Abs(ay - (my + w.Config.Y)) > 2)
+            {
+                Log.Info($"position guard: re-pinning {w.Config.Id} ({ax},{ay}) -> ({mx + w.Config.X},{my + w.Config.Y})");
+                w.Reposition();
+                w.ForceRedraw();
+            }
+        }
+    }
 
     private bool? _collectorTaskExists;
 

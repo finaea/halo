@@ -46,28 +46,35 @@ public static class DriveMap
             ? sdn.DeviceNumber : null;
     }
 
+    private const int DescriptorBufSize = 1024;
+
     private static unsafe string? GetDiskModel(uint disk)
     {
         using var h = CreateFileW($"\\\\.\\PhysicalDrive{disk}", 0, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, 0, 0);
         if (h.IsInvalid) return null;
         var query = new STORAGE_PROPERTY_QUERY { PropertyId = 0 /*StorageDeviceProperty*/, QueryType = 0 };
-        byte* buf = stackalloc byte[1024];
-        if (!DeviceIoControlP(h, IOCTL_STORAGE_QUERY_PROPERTY, &query, (uint)Marshal.SizeOf<STORAGE_PROPERTY_QUERY>(), buf, 1024, out _, 0))
+        byte* buf = stackalloc byte[DescriptorBufSize];
+        if (!DeviceIoControlP(h, IOCTL_STORAGE_QUERY_PROPERTY, &query, (uint)Marshal.SizeOf<STORAGE_PROPERTY_QUERY>(), buf, DescriptorBufSize, out uint returned, 0))
             return null;
-        // STORAGE_DEVICE_DESCRIPTOR: ProductIdOffset at byte 12 from start
-        int productOffset = *(int*)(buf + 12);
-        int vendorOffset = *(int*)(buf + 8);
-        string vendor = vendorOffset > 0 ? ReadAnsi(buf + vendorOffset) : "";
-        string product = productOffset > 0 ? ReadAnsi(buf + productOffset) : "";
+        // STORAGE_DEVICE_DESCRIPTOR: Version(0) Size(4) DeviceType(8) DeviceTypeModifier(9)
+        // RemovableMedia(10) CommandQueueing(11) VendorIdOffset(12) ProductIdOffset(16) ...
+        int limit = (int)Math.Min(returned, DescriptorBufSize);
+        if (limit < 20) return null;
+        int vendorOffset = *(int*)(buf + 12);
+        int productOffset = *(int*)(buf + 16);
+        string vendor = ReadAnsi(buf, vendorOffset, limit);
+        string product = ReadAnsi(buf, productOffset, limit);
         string model = (vendor.Trim() + " " + product.Trim()).Trim();
         return model.Length > 0 ? model : null;
     }
 
-    private static unsafe string ReadAnsi(byte* p)
+    /// <summary>Bounds-checked NUL-terminated ANSI read inside the descriptor buffer.</summary>
+    private static unsafe string ReadAnsi(byte* buf, int offset, int limit)
     {
+        if (offset <= 0 || offset >= limit) return "";
         int len = 0;
-        while (len < 256 && p[len] != 0) len++;
-        return System.Text.Encoding.ASCII.GetString(p, len);
+        while (offset + len < limit && buf[offset + len] != 0) len++;
+        return System.Text.Encoding.ASCII.GetString(buf + offset, len);
     }
 
     private const uint FILE_SHARE_READ = 1, FILE_SHARE_WRITE = 2, OPEN_EXISTING = 3;
