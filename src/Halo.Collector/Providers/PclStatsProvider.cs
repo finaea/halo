@@ -45,11 +45,15 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
     private readonly Dictionary<ulong, double> _pingConsumeMs = new();  // frameId -> PC_LATENCY_PING (consume) ms
     private readonly Dictionary<ulong, double> _queueForFrame = new();  // frameId -> queue wait (post→consume)
     private double _lastInputPostMs = -1;                              // PCLStatsInput (post) ms
-    private double _renderSumMs; private int _renderCount;             // ping consume → present (FS2P)
-    private double _queueSumMs; private int _queueCount;               // input post → ping consume (I2FS, ②a)
+    // time-windowed samples (ETW-relative ms, value) — averaged over the last ~1.5 s so PC LAT
+    // tracks changes in ~1 s like the FPS headline, instead of a slow sample-count decay.
+    private readonly Queue<(double Ms, double V)> _renderWin = new(); // ping consume → present (FS2P)
+    private readonly Queue<(double Ms, double V)> _queueWin = new();  // input post → ping consume (I2FS, ②a)
+    private const double LatencyWindowMs = 1500;
     private int _simCountWindow;
     private double _windowStartMs = -1;
     private double _lastEventMs;
+    private long _lastEventWallQpc;
     private volatile int _targetPid;
     private readonly Dictionary<int, int> _markerHist = new();
     private DateTime _nextHistLog = DateTime.MinValue;
@@ -133,6 +137,7 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
         lock (_lock)
         {
             _lastEventMs = ms;
+            _lastEventWallQpc = Stopwatch.GetTimestamp();
             if (_discovery) { _markerHist.TryGetValue(marker, out int c); _markerHist[marker] = c + 1; }
             switch (marker)
             {
@@ -156,11 +161,9 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
                     if (_pingConsumeMs.Remove(frameId, out double consumeMs) && ms > consumeMs)
                     {
                         double render = ms - consumeMs;
-                        if (render is > 0 and < 500) { _renderSumMs += render; _renderCount++; }
+                        if (render is > 0 and < 500) _renderWin.Enqueue((ms, render));
                         if (_queueForFrame.Remove(frameId, out double q) && !double.IsNaN(q))
-                        {
-                            _queueSumMs += q; _queueCount++;
-                        }
+                            _queueWin.Enqueue((ms, q));
                     }
                     break;
             }
@@ -183,12 +186,14 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
         if (_etwThread is { IsAlive: false }) throw new InvalidOperationException("pclstats ETW thread died");
 
         double render = 0, queue = 0, renderHz = 0;
-        bool fresh, haveQueue;
+        bool haveRender, haveQueue, eventsFresh;
         lock (_lock)
         {
-            if (_renderCount > 0) render = _renderSumMs / _renderCount;
-            if (_queueCount > 0) queue = _queueSumMs / _queueCount;
-            haveQueue = _queueCount > 0;
+            // events flowing? (game stopped presenting → freeze/stale instead of last value)
+            eventsFresh = _lastEventWallQpc != 0 && (Stopwatch.GetTimestamp() - _lastEventWallQpc) < 2 * Stopwatch.Frequency;
+            double cutoff = _lastEventMs - LatencyWindowMs;
+            render = WinAvg(_renderWin, cutoff, out haveRender);
+            queue = WinAvg(_queueWin, cutoff, out haveQueue);
             if (_windowStartMs < 0) _windowStartMs = _lastEventMs;
             double windowMs = _lastEventMs - _windowStartMs;
             if (windowMs >= 500 && _simCountWindow > 0)
@@ -197,26 +202,33 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
                 _simCountWindow = 0;
                 _windowStartMs = _lastEventMs;
             }
-            if (_renderCount > 200) { _renderSumMs /= 2; _renderCount /= 2; } // rolling, not cumulative
-            if (_queueCount > 200) { _queueSumMs /= 2; _queueCount /= 2; }
-            fresh = _pingConsumeMs.Count > 0 || _renderCount > 0 || _simCountWindow > 0;
         }
 
-        if (render > 0) sink.Set(MetricNames.LatencyRenderMs, render);
+        if (eventsFresh && haveRender && render > 0) sink.Set(MetricNames.LatencyRenderMs, render);
         else sink.MarkStale(MetricNames.LatencyRenderMs);
-        if (haveQueue) sink.Set(MetricNames.LatencyQueueMs, queue);
+        if (eventsFresh && haveQueue) sink.Set(MetricNames.LatencyQueueMs, queue);
         else sink.MarkStale(MetricNames.LatencyQueueMs);
         if (renderHz > 0) sink.Set(MetricNames.RenderRateHz, renderHz);
-        else if (!fresh) sink.MarkStale(MetricNames.RenderRateHz);
+        else if (!eventsFresh) sink.MarkStale(MetricNames.RenderRateHz);
 
         if (_discovery && DateTime.UtcNow >= _nextHistLog)
         {
             _nextHistLog = DateTime.UtcNow.AddSeconds(3);
             string hist;
-            int qc;
-            lock (_lock) { hist = string.Join(" ", _markerHist.OrderBy(k => k.Key).Select(k => $"m{k.Key}={k.Value}")); qc = _queueCount; }
-            Log.Info($"pcl-hist: {hist} | render={render:0.0} queue={queue:0.0} qCount={qc} inputPost={(_lastInputPostMs >= 0 ? "y" : "n")}");
+            lock (_lock) hist = string.Join(" ", _markerHist.OrderBy(k => k.Key).Select(k => $"m{k.Key}={k.Value}"));
+            Log.Info($"pcl-hist: {hist} | render={render:0.0} queue={queue:0.0} renderN={_renderWin.Count} inputPost={(_lastInputPostMs >= 0 ? "y" : "n")}");
         }
+    }
+
+    /// <summary>Mean of samples newer than cutoff; trims older ones from the front. Caller holds _lock.</summary>
+    private static double WinAvg(Queue<(double Ms, double V)> q, double cutoff, out bool any)
+    {
+        while (q.Count > 0 && q.Peek().Ms < cutoff) q.Dequeue();
+        any = q.Count > 0;
+        if (!any) return 0;
+        double s = 0;
+        foreach (var e in q) s += e.V;
+        return s / q.Count;
     }
 
     private static int ReadInt(TraceEvent d, params string[] names)
