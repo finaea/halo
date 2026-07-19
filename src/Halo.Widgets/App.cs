@@ -152,14 +152,26 @@ public sealed unsafe class App : IDisposable
 
     /// <summary>The collector appended frames to the shared ring: pull frame-graph widgets'
     /// next tick forward so the graph paints now instead of at its (fallback) poll tick.
-    /// Coalesced to ~7 ms so a busy tap lane can't repaint faster than the monitor refreshes.</summary>
+    /// Coalesced to ~7 ms so a busy tap lane can't repaint faster than the monitor refreshes.
+    /// The boundary must be anchored to NOW and only advanced when a wake is granted:
+    /// advancing it per event lets a >143 Hz event stream (tap presents + drain batches)
+    /// push it further into the future than time advances, until event wakes stop beating
+    /// the widgets' fallback timers and the graphs silently degrade to 5 Hz.</summary>
     private void OnFramesReady()
     {
         long now = Stopwatch.GetTimestamp();
-        long due = Math.Max(now, _nextFrameWakeQpc);
+        long due;
+        if (now < _nextFrameWakeQpc)
+        {
+            due = _nextFrameWakeQpc; // inside the coalesce window: ride the planned wake
+        }
+        else
+        {
+            due = now;
+            _nextFrameWakeQpc = now + Stopwatch.Frequency * 7 / 1000;
+        }
         foreach (var w in _windows)
             if (w.Panel.HasFrameGraph && w.NextDueQpc > due) w.NextDueQpc = due;
-        _nextFrameWakeQpc = due + Stopwatch.Frequency * 7 / 1000;
     }
 
     /// <summary>Fire-and-forget contract: the event may not exist yet (collector starting later,
