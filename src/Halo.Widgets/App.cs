@@ -191,8 +191,11 @@ public sealed unsafe class App : IDisposable
 
     private void ApplyConfigChange()
     {
-        _configDirty = false;
+        // Keep dirty set while suppressed and retry next pass: the store has ALREADY
+        // reloaded (new WidgetInstance objects) — skipping the rebuild for good would
+        // leave windows bound to orphaned configs, and their next save writes stale data.
         if (DateTime.UtcNow < _suppressSaveReload) return;
+        _configDirty = false;
         Log.Info("config hot-reload");
         Theme = Theme.Load(ConfigStore.ConfigDir);
         BuildWindows();
@@ -234,11 +237,11 @@ public sealed unsafe class App : IDisposable
         foreach (var w in _windows)
         {
             if (w.IsDragging) continue;
-            var (mx, my, _, _) = ResolveMonitorWorkArea(w.Config.Monitor);
+            var (ex, ey) = w.TargetScreenPos();
             var (ax, ay, _, _) = w.ScreenRect();
-            if (Math.Abs(ax - (mx + w.Config.X)) > 2 || Math.Abs(ay - (my + w.Config.Y)) > 2)
+            if (Math.Abs(ax - ex) > 2 || Math.Abs(ay - ey) > 2)
             {
-                Log.Info($"position guard: re-pinning {w.Config.Id} ({ax},{ay}) -> ({mx + w.Config.X},{my + w.Config.Y})");
+                Log.Info($"position guard: re-pinning {w.Config.Id} ({ax},{ay}) -> ({ex},{ey})");
                 w.Reposition();
                 w.ForceRedraw();
             }
@@ -305,6 +308,39 @@ public sealed unsafe class App : IDisposable
         if (m.Device == null && _monitors.Count > 0) m = _monitors[0];
         if (m.Device == null) return (0, 0, 1920, 1080);
         return (m.Work.Left, m.Work.Top, m.Work.W, m.Work.H);
+    }
+
+    /// <summary>
+    /// Monitor whose work area best contains the rect (max overlap; nearest when the rect
+    /// lies in a dead zone of the virtual desktop). KeepOnScreen clamps against THIS, not
+    /// the configured monitor — a widget placed on a secondary monitor must not be yanked
+    /// back to the configured one on rebuild.
+    /// </summary>
+    public (string Device, int X, int Y, int W, int H) MonitorForRect(int x, int y, int w, int h)
+    {
+        string? dev = null; RECT work = default;
+        long bestArea = 0;
+        foreach (var (d, r) in _monitors)
+        {
+            long ix = Math.Min(x + w, r.Right) - (long)Math.Max(x, r.Left);
+            long iy = Math.Min(y + h, r.Bottom) - (long)Math.Max(y, r.Top);
+            long area = Math.Max(0, ix) * Math.Max(0, iy);
+            if (area > bestArea) { bestArea = area; dev = d; work = r; }
+        }
+        if (dev == null)
+        {
+            long best = long.MaxValue;
+            int cx = x + w / 2, cy = y + h / 2;
+            foreach (var (d, r) in _monitors)
+            {
+                long dx = cx - Math.Clamp(cx, r.Left, r.Right);
+                long dy = cy - Math.Clamp(cy, r.Top, r.Bottom);
+                long dist = dx * dx + dy * dy;
+                if (dist < best) { best = dist; dev = d; work = r; }
+            }
+        }
+        if (dev == null) return ("", 0, 0, 1920, 1080);
+        return (dev, work.Left, work.Top, work.W, work.H);
     }
 
     /// <summary>Snap to screen edges + other widget edges, 8 px threshold (plan §9.3).</summary>

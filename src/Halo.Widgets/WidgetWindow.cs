@@ -210,14 +210,27 @@ public sealed unsafe class WidgetWindow : IDisposable
     /// <summary>Resolve monitor-relative config position to screen and move there (plan §9.3).</summary>
     public void Reposition()
     {
-        var (mx, my, mw, mh) = _app.ResolveMonitorWorkArea(Config.Monitor);
+        var (x, y) = TargetScreenPos();
+        MoveWindowScreen(x, y);
+    }
+
+    /// <summary>
+    /// Final screen position for the current config. KeepOnScreen clamps within the monitor
+    /// that best contains the target rect — not the configured monitor, which for legacy
+    /// configs (monitor="") is always the first one and would drag cross-monitor widgets
+    /// back to it. The position guard must use this same math or it fights the clamp.
+    /// </summary>
+    public (int X, int Y) TargetScreenPos()
+    {
+        var (mx, my, _, _) = _app.ResolveMonitorWorkArea(Config.Monitor);
         int x = mx + Config.X, y = my + Config.Y;
         if (Config.KeepOnScreen)
         {
-            x = Math.Clamp(x, mx, Math.Max(mx, mx + mw - _pxW));
-            y = Math.Clamp(y, my, Math.Max(my, my + mh - _pxH));
+            var (_, wx, wy, ww, wh) = _app.MonitorForRect(x, y, _pxW, _pxH);
+            x = Math.Clamp(x, wx, Math.Max(wx, wx + ww - _pxW));
+            y = Math.Clamp(y, wy, Math.Max(wy, wy + wh - _pxH));
         }
-        MoveWindowScreen(x, y);
+        return (x, y);
     }
 
     private void MoveWindowScreen(int x, int y)
@@ -335,8 +348,12 @@ public sealed unsafe class WidgetWindow : IDisposable
 
     private void PersistPosition()
     {
-        var (sx, sy, _, _) = ScreenRect();
-        var (mx, my, _, _) = _app.ResolveMonitorWorkArea(Config.Monitor);
+        // Record the monitor the widget actually sits on, coords relative to it — so
+        // Reposition/KeepOnScreen resolve against the right monitor after a rebuild,
+        // and the layout survives monitor rearrangement.
+        var (sx, sy, w, h) = ScreenRect();
+        var (dev, mx, my, _, _) = _app.MonitorForRect(sx, sy, w, h);
+        Config.Monitor = dev;
         Config.X = sx - mx;
         Config.Y = sy - my;
         _app.SaveWidgetConfig();
