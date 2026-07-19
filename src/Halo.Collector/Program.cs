@@ -60,7 +60,7 @@ var settings = configStore.Settings;
 // Providers, each on its own cadence (plan §5 rate table)
 host.Add(new BuiltinProvider(settings));                    // uptime, RAM, IPs, drive space: 1 Hz
 host.Add(new CpuKernelProvider(), settings.DefaultRateHz);  // per-core/total CPU: cap 64 Hz
-host.Add(new ProcessProvider(settings));                    // top CPU/RAM lists: 1 Hz (cap 2)
+host.Add(new ProcessProvider(configStore));                 // top CPU/RAM lists: 1 Hz (cap 2)
 host.Add(new DiskIoProvider(settings));                     // per-volume IO rates: default 10 Hz
 host.Add(new NetworkProvider(settings));                    // net rates: default 10 Hz
 host.Add(new NvmlProvider(), settings.DefaultRateHz);       // GPU: cap 20 Hz

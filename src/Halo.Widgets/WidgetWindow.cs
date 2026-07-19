@@ -360,6 +360,11 @@ public sealed unsafe class WidgetWindow : IDisposable
             AppendMenuW(menu, MF_POPUP, (nuint)opMenu, "Opacity");
             AppendMenuW(menu, MF_STRING | (Config.ClickThrough ? MF_CHECKED : 0), 2, "Click through");
             AppendMenuW(menu, MF_STRING | (Config.KeepOnScreen ? MF_CHECKED : 0), 3, "Keep on screen");
+            if (Config.Type is "topcpu" or "topram")
+            {
+                bool agg = Config.Options.GetValueOrDefault("aggregate") == "true";
+                AppendMenuW(menu, MF_STRING | (agg ? MF_CHECKED : 0), 30, "Sum same-name processes");
+            }
             AppendMenuW(menu, MF_SEPARATOR, 0, null);
             AppendMenuW(menu, MF_STRING, 4, "Refresh");
             AppendMenuW(menu, MF_STRING, 5, "Reset session max (this panel)");
@@ -400,6 +405,11 @@ public sealed unsafe class WidgetWindow : IDisposable
             case 6: _app.OpenSettings(); break;
             case 7: Ctx.Settings.LockAll = !Ctx.Settings.LockAll; _app.SaveGeneralSettings(); break;
             case 9: _app.Quit(); break;
+            case 30:
+                Config.Options["aggregate"] = Config.Options.GetValueOrDefault("aggregate") == "true" ? "false" : "true";
+                _app.SaveWidgetConfig();
+                _needsFullRedraw = true;
+                break;
             case 99: _needsFullRedraw = true; _app.SaveWidgetConfig(); break;
         }
     }

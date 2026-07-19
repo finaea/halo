@@ -8,9 +8,11 @@ namespace Halo.Collector.Providers;
 /// <summary>
 /// Process snapshot via one NtQuerySystemInformation(SystemProcessInformation) call:
 /// process count + top-N by CPU and by RAM (plan §5: ~ms per snapshot, cap 2 Hz).
+/// Takes the ConfigStore (not a settings snapshot) so the aggregate toggle hot-applies.
 /// </summary>
-public sealed unsafe class ProcessProvider(GeneralSettings settings) : ISensorProvider
+public sealed unsafe class ProcessProvider(ConfigStore config) : ISensorProvider
 {
+    private GeneralSettings Settings => config.Settings;
     public string Name => "process";
     public double MaxRateHz => 2;
     public double DefaultRateHz => 1;
@@ -30,16 +32,19 @@ public sealed unsafe class ProcessProvider(GeneralSettings settings) : ISensorPr
 
     public bool Initialize(MetricSink sink)
     {
-        _topN = Math.Clamp(settings.TopProcessCount, 1, 5);
+        _topN = Math.Clamp(Settings.TopProcessCount, 1, 5);
         sink.Register(MetricNames.ProcCount, MetricType.Double, MetricUnit.Count, Name, MaxRateHz);
         for (int i = 0; i < 5; i++)
         {
-            sink.Register(MetricNames.TopCpuName(i), MetricType.String, MetricUnit.Text, Name, MaxRateHz);
-            sink.Register(MetricNames.TopCpuPct(i), MetricType.Double, MetricUnit.Percent, Name, MaxRateHz);
-            sink.Register(MetricNames.TopCpuRamB(i), MetricType.Double, MetricUnit.Bytes, Name, MaxRateHz);
-            sink.Register(MetricNames.TopRamName(i), MetricType.String, MetricUnit.Text, Name, MaxRateHz);
-            sink.Register(MetricNames.TopRamB(i), MetricType.Double, MetricUnit.Bytes, Name, MaxRateHz);
-            sink.Register(MetricNames.TopRamCpuPct(i), MetricType.Double, MetricUnit.Percent, Name, MaxRateHz);
+            foreach (bool agg in (bool[])[false, true])
+            {
+                sink.Register(MetricNames.TopCpuName(i, agg), MetricType.String, MetricUnit.Text, Name, MaxRateHz);
+                sink.Register(MetricNames.TopCpuPct(i, agg), MetricType.Double, MetricUnit.Percent, Name, MaxRateHz);
+                sink.Register(MetricNames.TopCpuRamB(i, agg), MetricType.Double, MetricUnit.Bytes, Name, MaxRateHz);
+                sink.Register(MetricNames.TopRamName(i, agg), MetricType.String, MetricUnit.Text, Name, MaxRateHz);
+                sink.Register(MetricNames.TopRamB(i, agg), MetricType.Double, MetricUnit.Bytes, Name, MaxRateHz);
+                sink.Register(MetricNames.TopRamCpuPct(i, agg), MetricType.Double, MetricUnit.Percent, Name, MaxRateHz);
+            }
         }
         _prevQpc = Stopwatch.GetTimestamp();
         Poll(sink); // prime deltas
@@ -81,7 +86,9 @@ public sealed unsafe class ProcessProvider(GeneralSettings settings) : ISensorPr
                 ulong pid = *(ulong*)(p + 0x50);
                 long user = *(long*)(p + 0x28);
                 long kernel = *(long*)(p + 0x30);
-                long ws = *(long*)(p + 0x90);
+                // private working set (parity with UsageMonitor Alias=RAM = "Working Set - Private";
+                // full working set at 0x90 double-counts shared pages)
+                long ws = *(long*)(p + 0x08);
 
                 // ImageName UNICODE_STRING at 0x38: Length(2) MaxLength(2) pad(4) Buffer(8)
                 ushort nameLen = *(ushort*)(p + 0x38);
@@ -112,31 +119,33 @@ public sealed unsafe class ProcessProvider(GeneralSettings settings) : ISensorPr
 
         sink.Set(MetricNames.ProcCount, count);
 
-        // aggregate same-name processes like UsageMonitor does? Rainmeter UsageMonitor sums
-        // per-instance; the screenshot shows single processes (svchost 1.1% is the max single
-        // instance under perf-counter naming). We aggregate by name — matches Task Manager
-        // grouping and reads better; per-instance duplicates in a top list are noise.
-        var byName = procs
+        // Publish BOTH rankings; each Top widget picks per its own "aggregate" option.
+        var aggregated = procs
             .GroupBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
             .Select(g => new Proc(g.Key, 0, g.Sum(x => x.WorkingSet), g.Sum(x => x.CpuPct)))
             .ToList();
 
-        var topCpu = byName.OrderByDescending(x => x.CpuPct).Take(5).ToList();
-        var topRam = byName.OrderByDescending(x => x.WorkingSet).Take(5).ToList();
+        PublishRanking(sink, procs, agg: false);
+        PublishRanking(sink, aggregated, agg: true);
+    }
 
+    private void PublishRanking(MetricSink sink, List<Proc> ranked, bool agg)
+    {
+        var topCpu = ranked.OrderByDescending(x => x.CpuPct).Take(5).ToList();
+        var topRam = ranked.OrderByDescending(x => x.WorkingSet).Take(5).ToList();
         for (int i = 0; i < 5; i++)
         {
             if (i < topCpu.Count)
             {
-                sink.SetString(MetricNames.TopCpuName(i), topCpu[i].Name);
-                sink.Set(MetricNames.TopCpuPct(i), topCpu[i].CpuPct);
-                sink.Set(MetricNames.TopCpuRamB(i), topCpu[i].WorkingSet);
+                sink.SetString(MetricNames.TopCpuName(i, agg), topCpu[i].Name);
+                sink.Set(MetricNames.TopCpuPct(i, agg), topCpu[i].CpuPct);
+                sink.Set(MetricNames.TopCpuRamB(i, agg), topCpu[i].WorkingSet);
             }
             if (i < topRam.Count)
             {
-                sink.SetString(MetricNames.TopRamName(i), topRam[i].Name);
-                sink.Set(MetricNames.TopRamB(i), topRam[i].WorkingSet);
-                sink.Set(MetricNames.TopRamCpuPct(i), topRam[i].CpuPct);
+                sink.SetString(MetricNames.TopRamName(i, agg), topRam[i].Name);
+                sink.Set(MetricNames.TopRamB(i, agg), topRam[i].WorkingSet);
+                sink.Set(MetricNames.TopRamCpuPct(i, agg), topRam[i].CpuPct);
             }
         }
     }

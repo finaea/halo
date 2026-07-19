@@ -60,14 +60,17 @@ public static class MetricNames
     public const string NetIpInternal = "net.ip.internal";
     public const string NetIpExternal = "net.ip.external";
 
-    // Processes
+    // Processes. Two rankings are published side by side (rank 0..4):
+    //  agg=false — each process instance is its own row (Rainformer/UsageMonitor parity)
+    //  agg=true  — same-name processes summed (Task Manager style); widgets pick per instance
     public const string ProcCount = "proc.count";
-    public static string TopCpuName(int rank) => $"proc.topcpu.{rank}.name";     // rank 0..4
-    public static string TopCpuPct(int rank) => $"proc.topcpu.{rank}.cpu.pct";
-    public static string TopCpuRamB(int rank) => $"proc.topcpu.{rank}.ram.b";
-    public static string TopRamName(int rank) => $"proc.topram.{rank}.name";
-    public static string TopRamB(int rank) => $"proc.topram.{rank}.ram.b";
-    public static string TopRamCpuPct(int rank) => $"proc.topram.{rank}.cpu.pct";
+    public static string TopCpuName(int rank, bool agg = false) => $"proc.topcpu.{Mode(agg)}{rank}.name";
+    public static string TopCpuPct(int rank, bool agg = false) => $"proc.topcpu.{Mode(agg)}{rank}.cpu.pct";
+    public static string TopCpuRamB(int rank, bool agg = false) => $"proc.topcpu.{Mode(agg)}{rank}.ram.b";
+    public static string TopRamName(int rank, bool agg = false) => $"proc.topram.{Mode(agg)}{rank}.name";
+    public static string TopRamB(int rank, bool agg = false) => $"proc.topram.{Mode(agg)}{rank}.ram.b";
+    public static string TopRamCpuPct(int rank, bool agg = false) => $"proc.topram.{Mode(agg)}{rank}.cpu.pct";
+    private static string Mode(bool agg) => agg ? "agg." : "";
 
     // FPS / frame pipeline (PresentMon)
     public const string FpsPresented = "fps.presented";
