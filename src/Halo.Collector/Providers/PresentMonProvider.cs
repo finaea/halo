@@ -38,8 +38,10 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
     private long _lastTargetFrameQpc;
     private double _clickSum, _allInputSum;
     private int _clickCount, _allInputCount;
-    private double _pclSum, _simMsSum;          // marker-based PC latency / app simulation pacing
-    private int _pclCount, _simCount;
+    private double _simMsSum;                    // app simulation pacing (FG-ratio fallback)
+    private int _simCount;
+    private double _dispLatSum;                 // present->displayed (P2D)
+    private int _dispLatCount;
     private readonly List<FrameEntry> _pendingRing = new(256);
 
     private MetricSink? _sink;
@@ -75,7 +77,9 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         sink.Register(MetricNames.FpsAppPid, MetricType.Double, MetricUnit.Count, Name, 1);
         sink.Register(MetricNames.LatencyClickMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
         sink.Register(MetricNames.LatencyAllInputMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
-        sink.Register(MetricNames.LatencyPclMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
+        // latency.pcl.ms is owned by PclStatsProvider (true marker-based). PresentMon only
+        // contributes the present->displayed (P2D) span it uniquely measures.
+        sink.Register(MetricNames.FpsDisplayLatencyMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
         sink.Register(MetricNames.DlssModel, MetricType.String, MetricUnit.Text, Name, 0.5);
         sink.Register(MetricNames.DlssSrPresent, MetricType.Double, MetricUnit.None, Name, 0.5);
         sink.Register(MetricNames.DlssFgPresent, MetricType.Double, MetricUnit.None, Name, 0.5);
@@ -205,7 +209,6 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
                     Pid = pid,
                 };
 
-                double pcl = ParseD(f, cols.Instrumented);
                 double simMs = ParseD(f, cols.SimStart);
 
                 lock (_statsLock)
@@ -215,8 +218,8 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
                     _lastTargetFrameQpc = qpc;
                     if (!double.IsNaN(click) && click > 0) { _clickSum += click; _clickCount++; }
                     if (!double.IsNaN(allInput) && allInput > 0) { _allInputSum += allInput; _allInputCount++; }
-                    if (!double.IsNaN(pcl) && pcl > 0) { _pclSum += pcl; _pclCount++; }
                     if (!double.IsNaN(simMs) && simMs > 0) { _simMsSum += simMs; _simCount++; }
+                    if (!double.IsNaN(dispLat) && dispLat is > 0 and < 200) { _dispLatSum += dispLat; _dispLatCount++; }
                 }
             }
         }
@@ -239,7 +242,7 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
 
         FrameEntry[] ring;
         FrameStats.Result r;
-        double click = 0, allInput = 0, pcl = 0, simMs = 0;
+        double click = 0, allInput = 0, simMs = 0, dispLat = 0;
         long lastFrame;
         lock (_statsLock)
         {
@@ -248,13 +251,13 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             r = Stats.Consume(Stopwatch.GetTimestamp());
             if (_clickCount > 0) { click = _clickSum / _clickCount; }
             if (_allInputCount > 0) { allInput = _allInputSum / _allInputCount; }
-            if (_pclCount > 0) { pcl = _pclSum / _pclCount; }
             if (_simCount > 0) { simMs = _simMsSum / _simCount; }
+            if (_dispLatCount > 0) { dispLat = _dispLatSum / _dispLatCount; }
             // decay accumulators slowly (rolling-ish, non-zero average)
             if (_clickCount > 200) { _clickSum /= 2; _clickCount /= 2; }
             if (_allInputCount > 200) { _allInputSum /= 2; _allInputCount /= 2; }
-            if (_pclCount > 200) { _pclSum /= 2; _pclCount /= 2; }
             if (_simCount > 200) { _simMsSum /= 2; _simCount /= 2; }
+            if (_dispLatCount > 200) { _dispLatSum /= 2; _dispLatCount /= 2; }
             lastFrame = _lastTargetFrameQpc;
         }
 
@@ -281,13 +284,15 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             sink.Set(MetricNames.FpsFgRatio, fgMult);
             if (click > 0) sink.Set(MetricNames.LatencyClickMs, click);
             if (allInput > 0) sink.Set(MetricNames.LatencyAllInputMs, allInput);
-            if (pcl > 0) sink.Set(MetricNames.LatencyPclMs, pcl);
+            if (dispLat > 0) sink.Set(MetricNames.FpsDisplayLatencyMs, dispLat);
         }
         else
         {
-            // "no 3D app" idle state (plan Â§7): stale fps metrics, widgets dim
+            // "no 3D app" idle state (plan §7): stale the fps metrics + our own latency
+            // contributions (NOT latency.pcl.ms — PclStatsProvider owns that independently)
             sink.MarkAllStale("fps.");
-            sink.MarkAllStale("latency.");
+            sink.MarkStale(MetricNames.LatencyClickMs);
+            sink.MarkStale(MetricNames.LatencyAllInputMs);
         }
     }
 
@@ -310,8 +315,8 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             {
                 Stats.Clear();
                 _pendingRing.Clear();
-                _clickSum = _allInputSum = _pclSum = _simMsSum = 0;
-                _clickCount = _allInputCount = _pclCount = _simCount = 0;
+                _clickSum = _allInputSum = _simMsSum = _dispLatSum = 0;
+                _clickCount = _allInputCount = _simCount = _dispLatCount = 0;
                 _lastTargetFrameQpc = 0;
             }
             _targetPid = pid;

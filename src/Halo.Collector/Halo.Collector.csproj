@@ -16,5 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Halo.Shared\Halo.Shared.csproj" />
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+    <!-- ETW real-time consumer for NVIDIA PCL Stats markers (true Reflex PC latency + render rate) -->
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.5" />
   </ItemGroup>
 </Project>

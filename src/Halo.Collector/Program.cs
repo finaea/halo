@@ -69,6 +69,13 @@ host.Add(new LhmProvider(LhmProvider.Part.SuperIo, settings));           // fans
 host.Add(new LhmProvider(LhmProvider.Part.Storage, settings)); // SMART temps: 1/30 s
 host.Add(new LhmProvider(LhmProvider.Part.Gpu));            // NVAPI extras: voltage, fan RPM
 host.Add(new PresentMonProvider(projectRoot, settings));    // frame data: event-driven
+// NVIDIA PCL Stats ETW consumer: true Reflex PC latency + rendered (pre-FG) rate.
+// Explicit provider GUID from NVIDIA's reference pclstats.h TRACELOGGING_DEFINE_PROVIDER
+// (NOT the name-hash — the header declares it literally). Enabling the provider is the whole
+// mechanism; the game self-pings, so no window-message broadcast from us.
+host.Add(new PclStatsProvider(
+    providerName: "PCLStatsTraceLoggingProvider",
+    providerGuidOverride: new Guid(0x0d216f06, 0x82a6, 0x4d49, 0xbc, 0x4f, 0x8f, 0x38, 0xae, 0x56, 0xef, 0xab)));
 
 writer.MarkReady();
 

@@ -29,25 +29,26 @@ public static class LatencyPanel
             Color = "title",
         });
 
-        // headline: marker-based PC Latency (only exists for Reflex/PCL-Stats games)
+        // headline: full click-to-photon latency — this is what NVIDIA's overlay PCL reports
+        // (input click → pixels on screen). Kept as a rolling average by the collector so it
+        // persists between clicks. Matches the overlay within a couple ms.
         p.Elements.Add(new TextEl { Text = _ => "PC LAT:", Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", AbsY = 30, FixedH = 11 });
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "—"
-                : c.Metrics.TryValue(MetricNames.LatencyPclMs, out double v, maxAgeS: 3) ? $"{ValueFormat.Int0(v)}ms" : "N/A",
-            ColorFn = c => !IsIdle(c) && c.Metrics.TryValue(MetricNames.LatencyPclMs, out double v, maxAgeS: 3)
-                ? CpuRamPanelImpl.WarnColor(v, 20, 35, 50, 70)
-                : "inactiveButton",
+            Text = c => IsIdle(c) || !c.Metrics.TryValue(MetricNames.LatencyClickMs, out double v, 5) ? "N/A" : $"{ValueFormat.Int0(v)}ms",
+            ColorFn = c => !IsIdle(c) && c.Metrics.TryValue(MetricNames.LatencyClickMs, out double v, 5) ? CpuRamPanelImpl.WarnColor(v, 20, 35, 50, 70) : "inactiveButton",
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
             FixedH = 11,
         });
 
-        // CLICK / INPUT photon latencies (moved from the FPS panels), on a solidLabel pill
+        // breakdown pill: render pipeline (SimStart→Present, PCL markers) + present→display (P2D).
+        // These are the ETW-visible components; their sum is frame-start-to-display, a touch
+        // under the headline which also includes the OS input-stack wait.
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "CLICK: —" : $"CLICK: {ValueFormat.Int0(c.Metrics.Value(MetricNames.LatencyClickMs))}ms",
+            Text = c => IsIdle(c) ? "RENDER: —" : $"RENDER: {ValueFormat.Fixed(c.Metrics.Value(MetricNames.LatencyPclMs), 1)}ms",
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
             Color = "text2",
@@ -59,12 +60,22 @@ public static class LatencyPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "INPUT: —" : $"INPUT: {ValueFormat.Int0(c.Metrics.Value(MetricNames.LatencyAllInputMs))}ms",
+            Text = c => IsIdle(c) ? "DISPLAY: —" : $"DISPLAY: {ValueFormat.Fixed(c.Metrics.Value(MetricNames.FpsDisplayLatencyMs), 1)}ms",
             Style = TextStyle.Text8,
             Align = TextAlign.Right,
             Color = "text2",
             SameRow = true,
             FixedH = 11,
+        });
+        // continuous input-to-photon (all input, not just clicks) — updates every frame
+        p.Elements.Add(new TextEl
+        {
+            Text = c => IsIdle(c) ? "INPUT: —" : $"INPUT: {ValueFormat.Int0(c.Metrics.Value(MetricNames.LatencyAllInputMs))}ms input-to-photon",
+            Style = TextStyle.Text8,
+            Align = TextAlign.Left,
+            Color = "text2",
+            FixedH = 11,
+            Advance = 1,
         });
 
         // DLSS: version + loaded features
@@ -116,11 +127,11 @@ public static class LatencyPanel
             {
                 if (IsIdle(c)) return "—";
                 bool fgLoaded = c.Metrics.Value(MetricNames.DlssFgPresent) > 0;
-                double ratio = c.Metrics.Value(MetricNames.FpsFgRatio);
+                double ratio = FgMult(c);
                 if (ratio > 1.15) return $"{ValueFormat.Fixed(ratio, 1)}×";
                 return fgLoaded ? "loaded · 1.0×" : "off";
             },
-            ColorFn = c => !IsIdle(c) && c.Metrics.Value(MetricNames.FpsFgRatio) > 1.15 ? "activeTitle" : "text2",
+            ColorFn = c => !IsIdle(c) && FgMult(c) > 1.15 ? "activeTitle" : "text2",
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
@@ -141,7 +152,7 @@ public static class LatencyPanel
                     Color = "histogram",
                     Ring = new HistoryRing(188),
                     FixedMax = null,
-                    Sample = c => c.Metrics.TryValue(MetricNames.LatencyPclMs, out double v, maxAgeS: 3) ? v
+                    Sample = c => c.Metrics.TryValue(MetricNames.LatencyClickMs, out double v, maxAgeS: 5) ? v
                                 : c.Metrics.Value(MetricNames.LatencyAllInputMs),
                 },
             },
@@ -151,4 +162,14 @@ public static class LatencyPanel
     }
 
     private static bool IsIdle(PanelContext c) => !c.Metrics.TryValue(MetricNames.FpsPresented, out _, maxAgeS: 3);
+
+    /// <summary>Frame-gen multiplier = displayed rate ÷ true rendered (pre-FG) rate from PCL
+    /// simulation markers; falls back to PresentMon's sim-pacing ratio when render rate absent.</summary>
+    private static double FgMult(PanelContext c)
+    {
+        double displayed = c.Metrics.Value(MetricNames.FpsDisplayed);
+        if (c.Metrics.TryValue(MetricNames.RenderRateHz, out double render, maxAgeS: 3) && render > 1 && displayed > 1)
+            return Math.Clamp(displayed / render, 0.25, 8);
+        return c.Metrics.Value(MetricNames.FpsFgRatio);
+    }
 }
