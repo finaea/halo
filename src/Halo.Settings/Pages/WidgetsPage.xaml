@@ -126,6 +126,14 @@
             </Grid>
           </GroupBox>
 
+          <GroupBox x:Name="GraphLinesGroup" Header="Graph lines" Visibility="Collapsed">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,6"
+                         Text="Untick a line to hide it from this widget's graph. Changes take effect on Save."/>
+              <StackPanel x:Name="GraphLinesPanel"/>
+            </StackPanel>
+          </GroupBox>
+
           <GroupBox Header="Panel options">
             <StackPanel>
               <TextBox x:Name="OptionsBox" Height="90" AcceptsReturn="True" AcceptsTab="False"

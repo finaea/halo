@@ -173,24 +173,35 @@ public static class DrivesPanel
             readSeries.Add(new GraphSeries { Color = "histogram", Ring = new HistoryRing(94), Sample = c => c.Metrics.Value(MetricNames.DriveReadBps(d)) });
         }
 
-        p.Elements.Add(new GraphEl
+        // Either history graph is toggleable via Options graphDriveWrite/graphDriveRead (default on).
+        // The first shown graph leads the row (Advance=4); the second shares it (SameRow).
+        bool showWrite = ctx.GraphLineVisible("graphDriveWrite");
+        bool showRead = ctx.GraphLineVisible("graphDriveRead");
+        if (showWrite)
         {
-            X = t.ContentMargin, W = 94, H = 25,     // StyleHalfLengthGraphLeft: X=7, W=(ContentWidth-2)/2=94
-            Start = GraphStart.Left,
-            BgColor = "emptyBar",
-            SampleRateHz = 1,
-            Series = writeSeries,
-            Advance = 4,                              // BottomMargin+1
-        });
-        p.Elements.Add(new GraphEl
+            p.Elements.Add(new GraphEl
+            {
+                X = t.ContentMargin, W = 94, H = 25,     // StyleHalfLengthGraphLeft: X=7, W=(ContentWidth-2)/2=94
+                Start = GraphStart.Left,
+                BgColor = "emptyBar",
+                SampleRateHz = 1,
+                Series = writeSeries,
+                Advance = 4,                              // BottomMargin+1
+            });
+        }
+        if (showRead)
         {
-            X = t.ContentMargin + 96, W = 94, H = 25, // StyleHalfLengthGraphRight: X=7+94+2=103
-            Start = GraphStart.Right,
-            BgColor = "emptyBar",
-            SampleRateHz = 1,
-            Series = readSeries,
-            SameRow = true,
-        });
+            p.Elements.Add(new GraphEl
+            {
+                X = t.ContentMargin + 96, W = 94, H = 25, // StyleHalfLengthGraphRight: X=7+94+2=103
+                Start = GraphStart.Right,
+                BgColor = "emptyBar",
+                SampleRateHz = 1,
+                Series = readSeries,
+                SameRow = showWrite,                      // share the write graph's row when both shown
+                Advance = 4,                              // else lead its own row
+            });
+        }
 
         return p;
     }

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -35,6 +36,33 @@ public partial class WidgetsPage : UserControl, ISettingsPage
     private readonly List<string> _monitorDevices = new();
     private WidgetInstance? _current;
     private bool _loading;
+    // Per-type graph-line toggle checkboxes built for the selected widget (option key + control).
+    private readonly List<(string Key, CheckBox Box)> _graphChecks = new();
+
+    /// <summary>Toggleable graph lines per widget type: option key + display label. Default is on;
+    /// only a hidden line is persisted (key="false"), matching the panel-side default.</summary>
+    private static (string Key, string Label)[] GraphLines(string type) => type switch
+    {
+        "cpu-ram" => new[]
+        {
+            ("graphCpuTemp", "CPU temperature"),
+            ("graphCpuUsage", "CPU usage"),
+            ("graphRamUsage", "RAM usage"),
+        },
+        "gpu" => new[]
+        {
+            ("graphGpuTemp", "GPU temperature"),
+            ("graphGpuUsage", "GPU usage"),
+            ("graphGpuMem", "VRAM usage"),
+            ("graphGpuFan", "Fan speed"),
+        },
+        "drives" => new[]
+        {
+            ("graphDriveWrite", "Write history"),
+            ("graphDriveRead", "Read history"),
+        },
+        _ => Array.Empty<(string, string)>(),
+    };
 
     public WidgetsPage(ConfigStore store)
     {
@@ -102,6 +130,8 @@ public partial class WidgetsPage : UserControl, ISettingsPage
         "fps" => "stream=presented — live counter fed by the present tap (RTSS-like latency).\n" +
                  "stream=displayed — what actually reached the screen, fate-resolved (frame-gen aware).",
         "topcpu" or "topram" => "aggregate=true — sum same-name processes into one row.",
+        "cpu-ram" or "gpu" or "drives" =>
+            "Use Graph lines above to choose which lines appear on the graph. Extra options: key=value, one per line.",
         _ => "This panel has no options. (Format: key=value, one per line.)",
     };
 
@@ -148,8 +178,28 @@ public partial class WidgetsPage : UserControl, ISettingsPage
         OpacitySlider.Value = Math.Clamp(w.Opacity, 0.1, 1.0);
         RateBox.Text = w.RateHz?.ToString(CultureInfo.InvariantCulture) ?? "";
 
+        // Graph-line checkboxes (owned separately from the raw options box).
+        GraphLinesPanel.Children.Clear();
+        _graphChecks.Clear();
+        var lines = GraphLines(w.Type);
+        GraphLinesGroup.Visibility = lines.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        foreach (var (key, label) in lines)
+        {
+            var cb = new CheckBox
+            {
+                Content = label,
+                Margin = new Thickness(0, 3, 0, 3),
+                IsChecked = w.Options.GetValueOrDefault(key) != "false",
+            };
+            GraphLinesPanel.Children.Add(cb);
+            _graphChecks.Add((key, cb));
+        }
+
+        // Raw options box shows everything except the graph-line keys owned by the checkboxes.
+        var graphKeys = lines.Select(l => l.Key).ToHashSet();
         var sb = new StringBuilder();
-        foreach (var kv in w.Options) sb.AppendLine($"{kv.Key}={kv.Value}");
+        foreach (var kv in w.Options)
+            if (!graphKeys.Contains(kv.Key)) sb.AppendLine($"{kv.Key}={kv.Value}");
         OptionsBox.Text = sb.ToString().TrimEnd('\r', '\n');
         OptionsHint.Text = OptionsHelp(w.Type);
 
@@ -164,6 +214,9 @@ public partial class WidgetsPage : UserControl, ISettingsPage
         _monitorDevices.Clear();
         XBox.Text = YBox.Text = RateBox.Text = "";
         OptionsBox.Text = OptionsHint.Text = "";
+        GraphLinesPanel.Children.Clear();
+        _graphChecks.Clear();
+        GraphLinesGroup.Visibility = Visibility.Collapsed;
         ClickThroughCheck.IsChecked = KeepOnScreenCheck.IsChecked = LockedCheck.IsChecked = false;
         ZModeCombo.SelectedItem = null;
         Detail.IsEnabled = false;
@@ -184,6 +237,12 @@ public partial class WidgetsPage : UserControl, ISettingsPage
         _current.RateHz = double.TryParse(RateBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double r)
             ? r : (double?)null;
         _current.Options = ParseOptions(OptionsBox.Text);
+        // Graph-line checkboxes win over any stray text key: persist only hidden lines.
+        foreach (var (key, box) in _graphChecks)
+        {
+            if (box.IsChecked == false) _current.Options[key] = "false";
+            else _current.Options.Remove(key);
+        }
     }
 
     private static Dictionary<string, string> ParseOptions(string text)

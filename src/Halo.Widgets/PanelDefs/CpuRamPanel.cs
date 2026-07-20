@@ -144,20 +144,22 @@ public static class CpuRamPanelImpl
             Advance = 1,
         });
 
-        // 3-series overlay graph (temp red / usage lavender / RAM green), 1 Hz sampling
-        p.Elements.Add(new GraphEl
+        // 3-series overlay graph (temp red / usage lavender / RAM green), 1 Hz sampling.
+        // Each line is toggleable via Options graphCpuTemp/graphCpuUsage/graphRamUsage (default on).
+        var graph = new GraphEl
         {
             Advance = 4,
             BgColor = "emptyBar",
             Start = GraphStart.Left,
             SampleRateHz = 1,
-            Series =
-            {
-                new GraphSeries { Color = "cpuTemp", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.CpuPackageTempC) },
-                new GraphSeries { Color = "cpuUsage", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.CpuTotalPct) },
-                new GraphSeries { Color = "ramUsage", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.RamPct) },
-            },
-        });
+        };
+        if (ctx.GraphLineVisible("graphCpuTemp"))
+            graph.Series.Add(new GraphSeries { Color = "cpuTemp", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.CpuPackageTempC) });
+        if (ctx.GraphLineVisible("graphCpuUsage"))
+            graph.Series.Add(new GraphSeries { Color = "cpuUsage", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.CpuTotalPct) });
+        if (ctx.GraphLineVisible("graphRamUsage"))
+            graph.Series.Add(new GraphSeries { Color = "ramUsage", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.RamPct) });
+        p.Elements.Add(graph);
 
         return p;
     }

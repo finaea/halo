@@ -130,21 +130,24 @@ public static class GpuPanel
             FixedH = 11,
         });
 
-        // 4-series overlay graph (temp red / usage lavender / VRAM% green / fan% sky-blue), 1 Hz sampling
-        p.Elements.Add(new GraphEl
+        // 4-series overlay graph (temp red / usage lavender / VRAM% green / fan% sky-blue), 1 Hz sampling.
+        // Each line is toggleable via Options graphGpuTemp/graphGpuUsage/graphGpuMem/graphGpuFan (default on).
+        var graph = new GraphEl
         {
             Advance = 4,
             BgColor = "emptyBar",
             Start = GraphStart.Left,
             SampleRateHz = 1,
-            Series =
-            {
-                new GraphSeries { Color = "gpuTemp", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.GpuTempC) },
-                new GraphSeries { Color = "gpuUsage", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.GpuUsagePct) },
-                new GraphSeries { Color = "gpuMemUsage", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.GpuVramPct) },
-                new GraphSeries { Color = "gpuFan", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.GpuFanPct) },
-            },
-        });
+        };
+        if (ctx.GraphLineVisible("graphGpuTemp"))
+            graph.Series.Add(new GraphSeries { Color = "gpuTemp", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.GpuTempC) });
+        if (ctx.GraphLineVisible("graphGpuUsage"))
+            graph.Series.Add(new GraphSeries { Color = "gpuUsage", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.GpuUsagePct) });
+        if (ctx.GraphLineVisible("graphGpuMem"))
+            graph.Series.Add(new GraphSeries { Color = "gpuMemUsage", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.GpuVramPct) });
+        if (ctx.GraphLineVisible("graphGpuFan"))
+            graph.Series.Add(new GraphSeries { Color = "gpuFan", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.GpuFanPct) });
+        p.Elements.Add(graph);
 
         return p;
     }

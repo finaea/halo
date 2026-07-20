@@ -12,6 +12,11 @@ public sealed class PanelContext
     public bool Stale;
     public DateTime Now;
     public long TickIndex;
+
+    /// <summary>Whether a toggleable graph line is shown. Default is on; an option value of
+    /// "false" hides it (e.g. Options["graphCpuTemp"]="false"). Panels build/skip the series
+    /// accordingly, so this takes effect on the rebuild-on-save path.</summary>
+    public bool GraphLineVisible(string key) => Options.GetValueOrDefault(key) != "false";
 }
 
 /// <summary>
