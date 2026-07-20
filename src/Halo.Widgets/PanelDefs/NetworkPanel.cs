@@ -153,7 +153,7 @@ public static class NetworkPanel
             H = 25,
             Start = GraphStart.Left,
             BgColor = "emptyBar",
-            SampleRateHz = 1,
+            SampleRateHz = 5,
             Advance = t.BottomMargin - 2,
             Series =
             {
@@ -168,7 +168,7 @@ public static class NetworkPanel
             H = 25,
             Start = GraphStart.Right,
             BgColor = "emptyBar",
-            SampleRateHz = 1,
+            SampleRateHz = 5,
             SameRow = true,
             Series =
             {

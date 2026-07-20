@@ -157,13 +157,13 @@ public static class LatencyPanel
             FixedH = 11,
         });
 
-        // PCL sparkline (autoscaled, 2 Hz)
+        // PCL sparkline (autoscaled, 5 Hz)
         p.Elements.Add(new GraphEl
         {
             Advance = 4,
             BgColor = "emptyBar",
             Start = GraphStart.Left,
-            SampleRateHz = 2,
+            SampleRateHz = 5,
             Series =
             {
                 new GraphSeries

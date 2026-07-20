@@ -163,7 +163,7 @@ public static class DrivesPanel
         }
 
         // ---- Bottom shared graphs: write history (left half) / read history (right half) ----
-        // One series per active drive; all "histogram" (no per-drive Theme accent token); 1 Hz, autoscale.
+        // One series per active drive; all "histogram" (no per-drive Theme accent token); 5 Hz, autoscale.
         var writeSeries = new List<GraphSeries>();
         var readSeries = new List<GraphSeries>();
         foreach (char letter in letters)
@@ -184,7 +184,7 @@ public static class DrivesPanel
                 X = t.ContentMargin, W = 94, H = 25,     // StyleHalfLengthGraphLeft: X=7, W=(ContentWidth-2)/2=94
                 Start = GraphStart.Left,
                 BgColor = "emptyBar",
-                SampleRateHz = 1,
+                SampleRateHz = 5,
                 Series = writeSeries,
                 Advance = 4,                              // BottomMargin+1
             });
@@ -196,7 +196,7 @@ public static class DrivesPanel
                 X = t.ContentMargin + 96, W = 94, H = 25, // StyleHalfLengthGraphRight: X=7+94+2=103
                 Start = GraphStart.Right,
                 BgColor = "emptyBar",
-                SampleRateHz = 1,
+                SampleRateHz = 5,
                 Series = readSeries,
                 SameRow = showWrite,                      // share the write graph's row when both shown
                 Advance = 4,                              // else lead its own row

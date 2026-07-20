@@ -144,14 +144,14 @@ public static class CpuRamPanelImpl
             Advance = 1,
         });
 
-        // 3-series overlay graph (temp red / usage lavender / RAM green), 1 Hz sampling.
+        // 3-series overlay graph (temp red / usage lavender / RAM green), 5 Hz sampling.
         // Each line is toggleable via Options graphCpuTemp/graphCpuUsage/graphRamUsage (default on).
         var graph = new GraphEl
         {
             Advance = 4,
             BgColor = "emptyBar",
             Start = GraphStart.Left,
-            SampleRateHz = 1,
+            SampleRateHz = 5,
         };
         if (ctx.GraphLineVisible("graphCpuTemp"))
             graph.Series.Add(new GraphSeries { Color = "cpuTemp", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.CpuPackageTempC) });

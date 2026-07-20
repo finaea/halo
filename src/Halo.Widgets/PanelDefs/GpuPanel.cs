@@ -130,14 +130,14 @@ public static class GpuPanel
             FixedH = 11,
         });
 
-        // 4-series overlay graph (temp red / usage lavender / VRAM% green / fan% sky-blue), 1 Hz sampling.
+        // 4-series overlay graph (temp red / usage lavender / VRAM% green / fan% sky-blue), 5 Hz sampling.
         // Each line is toggleable via Options graphGpuTemp/graphGpuUsage/graphGpuMem/graphGpuFan (default on).
         var graph = new GraphEl
         {
             Advance = 4,
             BgColor = "emptyBar",
             Start = GraphStart.Left,
-            SampleRateHz = 1,
+            SampleRateHz = 5,
         };
         if (ctx.GraphLineVisible("graphGpuTemp"))
             graph.Series.Add(new GraphSeries { Color = "gpuTemp", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.GpuTempC) });
