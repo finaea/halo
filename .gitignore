@@ -5,3 +5,10 @@ obj-*/
 logs/
 tools/nuget-cache/
 *.user
+
+# Third-party PresentMon redistributables — not vendored (see README).
+# Keep the P/Invoke header and license for reference only.
+tools/presentmon/*.exe
+tools/presentmon/*.msi
+tools/presentmon/**/*.exe
+tools/presentmon/**/*.dll

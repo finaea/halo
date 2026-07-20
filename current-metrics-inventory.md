@@ -148,7 +148,7 @@ App. Idle-dims like the FPS panels.
 | Metric | Example | Unit | Old source | Proposed replacement | Halo source (as built) | Rate |
 |---|---|---|---|---|---|---|
 | External IP | N/A | — | WebParser | keep (HTTP fetch) | Builtin — HTTP fetch (`externalIpUrl`) · **latest** | every 5 min (setting `externalIpRefreshMinutes`) + on network change |
-| Internal IP | 192.168.1.45 | — | Rainmeter `SysInfo` | keep | Builtin — poll · **latest** | 1 Hz (hard) |
+| Internal IP | 192.168.1.100 | — | Rainmeter `SysInfo` | keep | Builtin — poll · **latest** | 1 Hz (hard) |
 | Download rate (current) | 439.0 B/s | B/s | Rainmeter `NetIn` | keep / PDH | Network — octet counters Δ/dt · **interval avg** (interface pick: setting `networkInterface`) | 5 Hz (hard, cap 64) |
 | Upload rate (current) | 192.0 B/s | B/s | Rainmeter `NetOut` | keep / PDH | Network — Δ/dt · **interval avg** | 5 Hz (hard) |
 | Download peak | 56.8 MB/s | B/s | skin-side max | collector-side max | `.max` — **running max** (`reset-max` pipe) | follows base |

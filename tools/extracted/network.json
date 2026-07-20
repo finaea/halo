@@ -141,7 +141,7 @@
       "kind": "Plugin SysInfo",
       "options": {"SysInfoType": "IP_ADDRESS", "SysInfoData": "#Interface# = Best", "Substitute": "\"\":\"N/A\"", "Disabled": "(#InternalIP#=0) -> resolved FALSE (enabled)", "DynamicVariables": 1},
       "onChangeAction": "[!Log \"Internal IP address changed, refreshing external IP address\" Notice][!CommandMeasure measureExtIP \"Reset\"][!CommandMeasure measureExtIP \"Update\"][!SetOptionGroup Notifications Reload 0][!UpdateMeasure \"MeasureConnected\"][!UpdateMeasure \"measureExtIP\"]",
-      "notes": "Local/LAN IP address for the interface, e.g. 192.168.1.45 per screenshot. Empty result substituted to 'N/A'. Changing this value forces the external-IP WebParser to reset+re-fetch."
+      "notes": "Local/LAN IP address for the interface, e.g. 192.168.1.100 per screenshot. Empty result substituted to 'N/A'. Changing this value forces the external-IP WebParser to reset+re-fetch."
     },
     {
       "name": "measureExtIP",
@@ -495,7 +495,7 @@
       "group": "intIP",
       "hidden": {"expr": "(#InternalIP#=0)", "resolved": false},
       "updateDivider": {"expr": "((#ExternalIP#=0)?(-1):(1))", "resolved": 1, "notes": "NOTE: gates on #ExternalIP# not #InternalIP# -- likely a copy/paste artifact in the source skin, transcribed verbatim."},
-      "notes": "Displays e.g. '192.168.1.45' per screenshot."
+      "notes": "Displays e.g. '192.168.1.100' per screenshot."
     },
     {
       "name": "meterSSIDLabel",
