@@ -17,13 +17,13 @@ public sealed class LhmProvider : ISensorProvider
     public enum Part { Cpu, SuperIo, Storage, Gpu }
 
     private readonly Part _part;
-    private readonly GeneralSettings? _settings;
+    private readonly ConfigStore? _config;
     private Computer? _computer;
 
-    public LhmProvider(Part part, GeneralSettings? settings = null)
+    public LhmProvider(Part part, ConfigStore? config = null)
     {
         _part = part;
-        _settings = settings;
+        _config = config;
     }
 
     public string Name => $"lhm-{_part.ToString().ToLowerInvariant()}";
@@ -113,8 +113,11 @@ public sealed class LhmProvider : ISensorProvider
         }
     }
 
+    // Read live from the shared ConfigStore so drive-list hot-reloads are picked up.
     private IEnumerable<char> DriveLetters()
-        => (_settings?.DriveLetters ?? ["C"]).Select(s => char.ToUpperInvariant(s[0]));
+        => (_config?.Settings.DriveLetters ?? ["C"])
+            .Where(s => !string.IsNullOrEmpty(s))
+            .Select(s => char.ToUpperInvariant(s[0])).Distinct();
 
     public void Poll(MetricSink sink)
     {
@@ -183,14 +186,28 @@ public sealed class LhmProvider : ISensorProvider
 
     private double MaxRpmFor(int channel)
     {
-        if (_settings != null && _settings.FanMaxRpm.TryGetValue(channel.ToString(), out double v) && v > 0) return v;
+        if (_config != null && _config.Settings.FanMaxRpm.TryGetValue(channel.ToString(), out double v) && v > 0) return v;
         return 2000;
     }
 
     private Dictionary<char, string>? _letterToModel;
+    private string _storageLetters = "";
 
     private void PollStorage(MetricSink sink)
     {
+        // Hot-reload: when the configured drive set changes, register temp metrics for any
+        // newly-added volume and invalidate the letter→disk-model map so it is rebuilt to
+        // include the new drive (temps otherwise stay N/A until the collector restarts).
+        string live = string.Concat(DriveLetters().OrderBy(c => c));
+        if (live != _storageLetters)
+        {
+            foreach (char c in DriveLetters())
+                sink.Register(MetricNames.DriveTempC(c), MetricType.Double, MetricUnit.Celsius, Name, MaxRateHz);
+            _letterToModel = null;
+            _unmatchedLogged.Clear();
+            _storageLetters = live;
+        }
+
         if (_letterToModel == null)
         {
             _letterToModel = DriveMap.LetterToModel(DriveLetters());

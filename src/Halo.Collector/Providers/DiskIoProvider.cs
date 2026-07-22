@@ -10,7 +10,7 @@ namespace Halo.Collector.Providers;
 /// (english names, locale-safe). Counters tick at ~1 s kernel granularity internally,
 /// PDH computes rates between our collects.
 /// </summary>
-public sealed class DiskIoProvider(GeneralSettings settings) : ISensorProvider
+public sealed class DiskIoProvider(ConfigStore config) : ISensorProvider
 {
     public string Name => "disk-io";
     public double MaxRateHz => 64;
@@ -19,15 +19,27 @@ public sealed class DiskIoProvider(GeneralSettings settings) : ISensorProvider
     private nint _query;
     private readonly List<(char Letter, nint Read, nint Write, nint Busy)> _counters = new();
     private bool _primed;
+    private string _activeLetters = "";
 
-    public bool Initialize(MetricSink sink)
+    // Normalised, de-duplicated, order-stable view of the configured drive letters — the
+    // change-detector for hot-reload. Derived from live settings (config.Settings), so a
+    // drive added in the Settings app is seen without restarting the collector.
+    private string ActiveLetters() => string.Concat(config.Settings.DriveLetters
+        .Where(s => !string.IsNullOrEmpty(s))
+        .Select(s => char.ToUpperInvariant(s[0])).Distinct().OrderBy(c => c));
+
+    public bool Initialize(MetricSink sink) => BuildCounters(sink);
+
+    private bool BuildCounters(MetricSink sink)
     {
+        if (_query != 0) { PdhCloseQuery(_query); _query = 0; }
         if (PdhOpenQueryW(null, 0, out _query) != 0) return false;
 
         _counters.Clear();
-        foreach (string s in settings.DriveLetters)
+        foreach (char c in config.Settings.DriveLetters
+                     .Where(s => !string.IsNullOrEmpty(s))
+                     .Select(s => char.ToUpperInvariant(s[0])).Distinct())
         {
-            char c = char.ToUpperInvariant(s[0]);
             nint r = Add($"\\LogicalDisk({c}:)\\Disk Read Bytes/sec");
             nint w = Add($"\\LogicalDisk({c}:)\\Disk Write Bytes/sec");
             nint b = Add($"\\LogicalDisk({c}:)\\% Disk Time");
@@ -38,6 +50,9 @@ public sealed class DiskIoProvider(GeneralSettings settings) : ISensorProvider
             sink.Register(MetricNames.DriveActivityPct(c), MetricType.Double, MetricUnit.Percent, Name, MaxRateHz);
         }
         _primed = false;
+        // Commit the change-detector only when we actually bound counters — otherwise a letter
+        // whose volume isn't mounted yet would be recorded as "handled" and never retried.
+        if (_counters.Count > 0) _activeLetters = ActiveLetters();
         return _counters.Count > 0;
     }
 
@@ -48,6 +63,15 @@ public sealed class DiskIoProvider(GeneralSettings settings) : ISensorProvider
 
     public void Poll(MetricSink sink)
     {
+        // Hot-reload: rebuild the PDH query when the configured drive set changes so a
+        // newly-added volume starts publishing read/write/activity without a restart.
+        string live = ActiveLetters();
+        if (live != _activeLetters)
+        {
+            Log.Info($"disk-io: drive list changed ({_activeLetters} -> {live}) — rebuilding counters");
+            if (!BuildCounters(sink)) return;   // no valid counters yet; try again next poll
+        }
+
         int status = PdhCollectQueryData(_query);
         if (status != 0) throw new InvalidOperationException($"PdhCollectQueryData 0x{status:X8}");
         if (!_primed) { _primed = true; return; } // rates need two collections

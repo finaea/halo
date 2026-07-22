@@ -124,15 +124,15 @@ var host = new ProviderHost(sink);
 var settings = configStore.Settings;
 
 // Providers, each on its own cadence (plan §5 rate table)
-host.Add(new BuiltinProvider(settings));                    // uptime, RAM, IPs, drive space: 1 Hz
+host.Add(new BuiltinProvider(configStore));                 // uptime, RAM, IPs, drive space: 1 Hz
 host.Add(new CpuKernelProvider(), settings.DefaultRateHz);  // per-core/total CPU: cap 64 Hz
 host.Add(new ProcessProvider(configStore));                 // top CPU/RAM lists: 1 Hz (cap 2)
-host.Add(new DiskIoProvider(settings));                     // per-volume IO rates: default 10 Hz
+host.Add(new DiskIoProvider(configStore));                  // per-volume IO rates: default 10 Hz
 host.Add(new NetworkProvider(settings));                    // net rates: default 10 Hz
 host.Add(new NvmlProvider(), settings.DefaultRateHz);       // GPU: cap 20 Hz
 host.Add(new LhmProvider(LhmProvider.Part.Cpu), settings.DefaultRateHz); // MSR: cap 20 Hz
-host.Add(new LhmProvider(LhmProvider.Part.SuperIo, settings));           // fans/Vcore: 1 Hz (cap 2)
-host.Add(new LhmProvider(LhmProvider.Part.Storage, settings)); // SMART temps: 1/30 s
+host.Add(new LhmProvider(LhmProvider.Part.SuperIo, configStore));        // fans/Vcore: 1 Hz (cap 2)
+host.Add(new LhmProvider(LhmProvider.Part.Storage, configStore)); // SMART temps: 1/30 s
 host.Add(new LhmProvider(LhmProvider.Part.Gpu));            // NVAPI extras: voltage, fan RPM
 host.Add(new PresentMonProvider(projectRoot, settings));    // frame data: event-driven
 // NVIDIA PCL Stats ETW consumer: true Reflex PC latency + rendered (pre-FG) rate.
@@ -160,8 +160,10 @@ using var commands = new CommandServer(cmd =>
 configStore.Changed += () =>
 {
     Log.Info("config changed (hot-reload)");
-    // Providers read live values from the shared ConfigStore-provided settings object where
-    // they need to; structural changes (drive list) are picked up on their next poll.
+    // Providers hold the ConfigStore (not a settings snapshot) and read config.Settings live,
+    // so value changes take effect immediately. Structural changes (drive list) are reconciled
+    // by the drive providers on their next poll: builtin/lhm-storage register-on-demand,
+    // disk-io rebuilds its PDH query.
 };
 
 Log.Info("collector running");
