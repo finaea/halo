@@ -4,9 +4,9 @@
       "id": "clock-1",
       "type": "clock",
       "enabled": true,
-      "monitor": "",
-      "x": 5849,
-      "y": -486,
+      "monitor": "\\\\.\\DISPLAY5",
+      "x": 1569,
+      "y": 0,
       "zMode": "Desktop",
       "clickThrough": false,
       "keepOnScreen": true,
@@ -21,7 +21,7 @@
       "enabled": true,
       "monitor": "\\\\.\\DISPLAY5",
       "x": 0,
-      "y": 1207,
+      "y": 1096,
       "zMode": "Desktop",
       "clickThrough": false,
       "keepOnScreen": true,
@@ -36,7 +36,7 @@
       "enabled": true,
       "monitor": "\\\\.\\DISPLAY5",
       "x": 0,
-      "y": 1359,
+      "y": 1276,
       "zMode": "Desktop",
       "clickThrough": false,
       "keepOnScreen": true,
@@ -59,7 +59,8 @@
       "opacity": 1,
       "rateHz": null,
       "options": {
-        "title": "i5-14600K DDR5 6400MHz"
+        "title": "i5-14600K DDR5 6400MHz",
+        "graphCpuTemp": "false"
       }
     },
     {
@@ -121,7 +122,7 @@
       "opacity": 1,
       "rateHz": null,
       "options": {
-        "aggregate": "false"
+        "aggregate": "true"
       }
     },
     {
@@ -174,7 +175,10 @@
       "opacity": 1,
       "rateHz": null,
       "options": {
-        "title": "GPU RTX 5070 Ti"
+        "title": "GPU RTX 5070 Ti",
+        "graphGpuTemp": "false",
+        "graphGpuMem": "false",
+        "graphGpuFan": "false"
       }
     },
     {
@@ -183,7 +187,7 @@
       "enabled": true,
       "monitor": "\\\\.\\DISPLAY5",
       "x": 0,
-      "y": 965,
+      "y": 854,
       "zMode": "Desktop",
       "clickThrough": false,
       "keepOnScreen": true,

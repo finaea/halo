@@ -160,21 +160,108 @@ else {
 # ---------------------------------------------------------------------------
 # Start widgets for this session. This script is running elevated (required
 # for the scheduled task above), but widgets should normally run as a plain
-# user process. Try the Explorer ShellExecute COM trick to launch it
-# non-elevated; if that fails, fall back to an elevated start for tonight
-# and rely on the Run key for a properly non-elevated start at next logon.
+# user process, i.e. at MEDIUM integrity.
+#
+# Do NOT use `New-Object -ComObject Shell.Application` here. Created inside an
+# elevated process that COM object is instantiated in-process at HIGH integrity,
+# so its ShellExecute launches the child ELEVATED while still returning success -
+# the script then reports "started non-elevated via Explorer" when it did the
+# exact opposite, and the mistake is invisible. Handing the path to explorer.exe
+# instead makes the already-running (medium-integrity) shell the launcher, so
+# widgets correctly inherits medium integrity.
+#
+# The result is verified below by reading the new process's token integrity
+# level. Never trust the launch call's return value alone - that is what hid
+# this bug in the first place.
 # ---------------------------------------------------------------------------
 Write-Host "Starting Halo.Widgets for this session ..." -ForegroundColor Cyan
-$widgetsStarted = $false
-try {
-    $shellApp = New-Object -ComObject 'Shell.Application'
-    $widgetsDir = Split-Path -Parent $widgetsExe
-    $shellApp.ShellExecute($widgetsExe, '', $widgetsDir, 'open', 1)
-    Write-Host "  OK: started non-elevated via Explorer." -ForegroundColor Green
-    $widgetsStarted = $true
+
+if (-not ('HaloTokenIL' -as [type])) {
+    Add-Type -Language CSharp -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class HaloTokenIL {
+    [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint a, bool inh, int pid);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+    [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr p, uint acc, out IntPtr t);
+    [DllImport("advapi32.dll", SetLastError=true)] static extern bool GetTokenInformation(IntPtr t, int cls, IntPtr info, uint len, out uint ret);
+    [DllImport("advapi32.dll", SetLastError=true)] static extern bool ConvertSidToStringSidW(IntPtr sid, out IntPtr str);
+    // Integrity-level RID: 8192 = Medium (normal user), 12288 = High (elevated). -1 = could not read.
+    public static int Rid(int pid) {
+        IntPtr h = OpenProcess(0x1000, false, pid);                 // PROCESS_QUERY_LIMITED_INFORMATION
+        if (h == IntPtr.Zero) return -1;
+        IntPtr tok;
+        if (!OpenProcessToken(h, 0x0008, out tok)) { CloseHandle(h); return -1; }   // TOKEN_QUERY
+        uint need = 0;
+        GetTokenInformation(tok, 25, IntPtr.Zero, 0, out need);     // TokenIntegrityLevel
+        IntPtr buf = Marshal.AllocHGlobal((int)need);
+        int rid = -1;
+        if (GetTokenInformation(tok, 25, buf, need, out need)) {
+            IntPtr sidStr;
+            if (ConvertSidToStringSidW(Marshal.ReadIntPtr(buf), out sidStr)) {
+                string s = Marshal.PtrToStringUni(sidStr);
+                int i = s.LastIndexOf('-');
+                if (i >= 0) { int.TryParse(s.Substring(i + 1), out rid); }
+            }
+        }
+        Marshal.FreeHGlobal(buf); CloseHandle(tok); CloseHandle(h);
+        return rid;
+    }
 }
-catch {
+'@
+}
+
+$widgetsStarted = $false
+$preExisting = @(Get-Process -Name 'Halo.Widgets' -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+
+# Already up? Leave it alone. Launching a redundant copy of a single-instance app makes
+# the new process exit immediately, which would look like "launch failed" below and send
+# us into the elevated fallback - starting a second, wrongly-elevated widget host.
+# (Use redeploy-halo.ps1 when the goal is to restart onto a fresh build.)
+if ($preExisting.Count -gt 0) {
+    $widgetsStarted = $true
+    $rid = [HaloTokenIL]::Rid($preExisting[0])
+    $ilName = if ($rid -eq 8192) { 'Medium' } elseif ($rid -eq 12288) { 'High/ELEVATED' } else { "RID $rid" }
+    Write-Host "  Halo.Widgets already running (pid $($preExisting[0]), integrity $ilName) - left as is." -ForegroundColor DarkGray
+    if ($rid -ne 8192) {
+        Write-Host "  NOTE: that instance is not at Medium integrity; restart it from a normal shell." -ForegroundColor Yellow
+    }
+}
+
+if (-not $widgetsStarted) {
+  try {
+    # explorer.exe forwards the path to the running shell, then exits immediately.
+    Start-Process -FilePath (Join-Path $env:WINDIR 'explorer.exe') -ArgumentList "`"$widgetsExe`""
+
+    $spawned = @()
+    for ($i = 0; $i -lt 40; $i++) {                     # poll up to ~10 s
+        Start-Sleep -Milliseconds 250
+        $spawned = @(Get-Process -Name 'Halo.Widgets' -ErrorAction SilentlyContinue |
+                     Where-Object { $preExisting -notcontains $_.Id })
+        if ($spawned.Count -gt 0) { break }
+    }
+
+    if ($spawned.Count -gt 0) {
+        $widgetsStarted = $true      # a copy is up - never start a second one below
+        $wPid = $spawned[0].Id
+        $rid  = [HaloTokenIL]::Rid($wPid)
+        if ($rid -eq 8192) {
+            Write-Host "  OK: started non-elevated via Explorer (pid $wPid, integrity Medium)." -ForegroundColor Green
+        }
+        else {
+            Write-Host "  WARNING: Halo.Widgets is up (pid $wPid) but its integrity RID is $rid," -ForegroundColor Yellow
+            Write-Host "  not 8192 (Medium) - it is running elevated, which is NOT the normal mode." -ForegroundColor Yellow
+            Write-Host "  Exit it from the tray and relaunch from a normal (non-elevated) shell, or" -ForegroundColor Yellow
+            Write-Host "  just let the Run key start it correctly at the next logon." -ForegroundColor Yellow
+        }
+    }
+    else {
+        Write-Host "  Explorer did not start Halo.Widgets within 10 s." -ForegroundColor Yellow
+    }
+  }
+  catch {
     Write-Host "  Explorer non-elevated launch failed: $_" -ForegroundColor Yellow
+  }
 }
 
 if (-not $widgetsStarted) {

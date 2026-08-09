@@ -1,15 +1,33 @@
 {
   "defaultRateHz": 5,
   "lockAll": false,
-  "scale": 1.7,
   "fontFamily": "Trebuchet MS",
   "frameLowsWindowS": 60,
+  "presentMonTransport": "auto",
+  "presentMonEtwFlushMs": 10,
+  "presentedTap": "auto",
   "graphHistoryS": 600,
   "externalIpUrl": "https://api.ipify.org",
   "externalIpRefreshMinutes": 5,
-  "driveLetters": ["C", "D", "E", "F", "G", "H", "I"],
+  "driveLetters": [
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J"
+  ],
   "networkInterface": "Best",
   "topProcessCount": 5,
-  "fanNames": { "2": "BACK", "3": "FRONT" },
-  "fanMaxRpm": { "0": 1600, "2": 2000, "3": 2000 }
+  "fanNames": {
+    "2": "BACK",
+    "3": "FRONT"
+  },
+  "fanMaxRpm": {
+    "0": 1600,
+    "2": 2000,
+    "3": 2000
+  }
 }

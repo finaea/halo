@@ -6,6 +6,11 @@ logs/
 tools/nuget-cache/
 *.user
 
+# Personal / machine-specific notes. This repo is public (see README): these describe
+# this exact box - absolute user paths, hardware layout, autostart specifics - and are
+# deliberately kept local only.
+docs/private/
+
 # Third-party PresentMon redistributables — not vendored (see README).
 # Keep the P/Invoke header and license for reference only.
 tools/presentmon/*.exe

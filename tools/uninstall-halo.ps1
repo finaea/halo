@@ -67,13 +67,34 @@ foreach ($procName in $haloProcessNames) {
 
 # Bundled PresentMon console client (tools\presentmon\PresentMon-<version>-x64.exe) —
 # no service to stop, just the child process(es) the collector may have left behind.
-$pmProcs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'PresentMon-*-x64' }
-if ($pmProcs) {
-    $pmProcs | Stop-Process -Force -ErrorAction SilentlyContinue
-    Write-Host "  PresentMon child : stopped ($($pmProcs.Count) process(es))" -ForegroundColor Green
+# Match BOTH bundled binaries: the console client (PresentMon-<version>-x64.exe) and
+# the SDK service (PresentMonService.exe, tools\presentmon\sdk\). The service is spawned
+# as a child of the collector but does NOT die with it - an orphan keeps
+# tools\presentmon\sdk\ locked, which silently blocks publish, uninstall-then-delete, and
+# any attempt to move the project folder. Matching only 'PresentMon-*-x64' missed it.
+#
+# Scoped by ExecutablePath to $root so a separately installed Intel PresentMon
+# (not ours - see global-installs.md) is never touched.
+$pmAll    = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'PresentMon%'" -ErrorAction SilentlyContinue)
+$pmProcs  = @($pmAll | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) })
+$pmOpaque = @($pmAll | Where-Object { -not $_.ExecutablePath })   # path unreadable => higher integrity than this script
+
+if ($pmProcs.Count -gt 0) {
+    foreach ($pm in $pmProcs) { Stop-Process -Id $pm.ProcessId -Force -ErrorAction SilentlyContinue }
+    $names = ($pmProcs | ForEach-Object { $_.Name }) -join ', '
+    Write-Host "  PresentMon children : stopped ($($pmProcs.Count)) - $names" -ForegroundColor Green
 }
 else {
-    Write-Host "  PresentMon child : not running" -ForegroundColor DarkGray
+    Write-Host "  PresentMon children : not running" -ForegroundColor DarkGray
+}
+
+# This script self-elevates, so an unreadable path here is unexpected. Say so loudly rather
+# than reporting success: a surviving PresentMon keeps tools\presentmon\ locked, which would
+# make the "folder can now be deleted" line at the end of this script a lie.
+if ($pmOpaque.Count -gt 0) {
+    Write-Host "  WARNING: $($pmOpaque.Count) PresentMon process(es) could not be identified or stopped." -ForegroundColor Red
+    Write-Host "  They will keep tools\presentmon\ locked and block deleting the project folder." -ForegroundColor Red
+    Write-Host "  PIDs: $(($pmOpaque | ForEach-Object { $_.ProcessId }) -join ', ')" -ForegroundColor Red
 }
 Write-Host ""
 

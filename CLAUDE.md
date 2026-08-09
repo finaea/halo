@@ -1,7 +1,8 @@
 # Halo — Hardware Analytics & Live Overlay
 
 Native Windows 11 desktop widget suite replacing the Rainmeter + Rainformer + HWiNFO +
-Afterburner + RTSS + NVIDIA App stack. Design doc: [native-widget-implementation-plan.md](native-widget-implementation-plan.md).
+Afterburner + RTSS + NVIDIA App stack. Design doc: [native-widget-implementation-plan.md](docs/native-widget-implementation-plan.md).
+Docs live in `docs/`; personal/machine-specific notes in `docs/private/` (git-ignored).
 
 ## Build & run
 
@@ -17,7 +18,7 @@ Halo.Collector.exe --dump
 # autostart registration (elevates): tools\install-halo.ps1 · removal: tools\uninstall-halo.ps1
 ```
 
-Portable-first policy (global-installs.md): NuGet cache is project-local (`tools\nuget-cache`),
+Portable-first policy (docs/global-installs.md): NuGet cache is project-local (`tools\nuget-cache`),
 config in `config\`, logs in `logs\`. Only global footprints: scheduled task `\Halo\Collector`,
 HKCU Run `HaloWidgets` — both created only by `tools\install-halo.ps1`, removed by uninstall.
 

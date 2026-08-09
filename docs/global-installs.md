@@ -1,6 +1,8 @@
 # Halo — Global Installs, Dependencies & New-PC Setup
 
-**Policy:** everything for Halo lives inside this project folder (`c:\Users\final\Desktop\WIP\HALO\`).
+**Policy:** everything for Halo lives inside this project folder (`c:\Users\final\Desktop\WIP\CodeProj\HALO\`).
+**Relocating that folder:** follow [moving-the-project.md](private/moving-the-project.md) — the §3 table
+below is the complete set of absolute paths, and `tools\install-halo.ps1` rewrites all of them.
 Deleting the folder + running the uninstall script removes Halo completely. Anything that *must*
 touch the system outside this folder is listed here — nothing global gets added without a row in
 this file.

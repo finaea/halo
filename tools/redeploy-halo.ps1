@@ -67,6 +67,30 @@ try { Stop-ScheduledTask -TaskPath $taskPath -TaskName $taskName -ErrorAction St
 catch { Write-Host '    (task not running or not installed - continuing)' -ForegroundColor DarkGray }
 Get-Process Halo.Collector -ErrorAction SilentlyContinue | Stop-Process -Force
 
+# The bundled PresentMon service/console are CHILD processes of the collector but do NOT
+# die with it. An orphan keeps tools\presentmon\ locked, which blocks a later publish and
+# any attempt to move or delete the project folder.
+#
+# Attribution caveat: the service inherits the collector's elevation, so from the normal
+# (non-elevated) redeploy its ExecutablePath reads back EMPTY and it cannot be killed.
+# Never silently skip that case - filtering on path alone would make this whole block a
+# no-op in exactly the mode this script is documented to run in. Report it instead.
+$pmAll = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'PresentMon%'" -ErrorAction SilentlyContinue)
+$pmOurs    = @($pmAll | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) })
+$pmForeign = @($pmAll | Where-Object { $_.ExecutablePath -and -not $_.ExecutablePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) })
+$pmOpaque  = @($pmAll | Where-Object { -not $_.ExecutablePath })   # unreadable => higher integrity than us
+
+foreach ($pm in $pmOurs) { Stop-Process -Id $pm.ProcessId -Force -ErrorAction SilentlyContinue }
+if ($pmOurs.Count -gt 0) { Write-Host "    stopped $($pmOurs.Count) PresentMon child process(es)" -ForegroundColor DarkGray }
+if ($pmForeign.Count -gt 0) {
+    Write-Host "    left $($pmForeign.Count) PresentMon process(es) alone - outside this project (not ours)" -ForegroundColor DarkGray
+}
+if ($pmOpaque.Count -gt 0) {
+    Write-Host "    WARNING: $($pmOpaque.Count) PresentMon process(es) run elevated and cannot be stopped from here." -ForegroundColor Yellow
+    Write-Host "    They keep tools\presentmon\ locked. If publish fails on a locked file, re-run" -ForegroundColor Yellow
+    Write-Host "    this script from an elevated shell." -ForegroundColor Yellow
+}
+
 # wait for the collector image to actually be unlocked before we overwrite it
 if (-not $RestartOnly -and (Test-Path -LiteralPath $collectorExe)) {
     for ($i = 0; $i -lt 20; $i++) {
