@@ -1,7 +1,7 @@
 # Halo — Hardware Analytics & Live Overlay
 
 A native Windows 11 desktop widget suite that renders a live hardware dashboard directly on
-the wallpaper — CPU, GPU, RAM, drives, fans, power, network, latency, and a real-time FPS/
+the desktop — CPU, GPU, RAM, drives, fans, power, network, latency, and a real-time FPS/
 frametime counter. It was built to replace a stack of **Rainmeter + Rainformer + HWiNFO +
 MSI Afterburner + RTSS + the NVIDIA App** with a single, self-contained, low-overhead app.
 
@@ -105,5 +105,4 @@ tools/extracted      faithful JSON transcriptions of the original Rainmeter skin
 
 The visual design derives from the **Rainformer** Rainmeter skin: color tokens and panel geometry
 were transcribed from its resources as *values only* (no GPL code is vendored here), and three
-icon fonts are reused for personal use. This repository carries no license grant for reuse; it is
-shared for reference only.
+icon fonts are reused for personal use.
