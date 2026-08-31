@@ -39,6 +39,8 @@ internal static unsafe partial class Native
     public static readonly nint HWND_TOPMOST = -1;
     public static readonly nint HWND_NOTOPMOST = -2;
     public const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOACTIVATE = 0x0010, SWP_SHOWWINDOW = 0x0040, SWP_NOZORDER = 0x0004;
+    // the desktop-host probe runs periodically now, so never block the render loop on a hung shell
+    public const uint SMTO_ABORTIFHUNG = 0x0002;
 
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; public int W => Right - Left; public int H => Bottom - Top; }
@@ -119,6 +121,7 @@ internal static unsafe partial class Native
     [DllImport("user32")] public static extern nint SetParent(nint child, nint parent);
     [DllImport("user32")] public static extern bool ScreenToClient(nint hwnd, ref POINT pt);
     [DllImport("user32")] public static extern bool MapWindowPoints(nint from, nint to, ref POINT pt, uint count);
+    [DllImport("user32")] public static extern bool IsWindow(nint hwnd);
 
     // tray icon
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -139,6 +142,8 @@ internal static unsafe partial class Native
     }
 
     [DllImport("shell32", CharSet = CharSet.Unicode)] public static extern bool Shell_NotifyIconW(uint message, ref NOTIFYICONDATAW data);
+    // "TaskbarCreated" is broadcast to all top-level windows when Explorer restarts
+    [DllImport("user32", CharSet = CharSet.Unicode)] public static extern uint RegisterWindowMessageW(string name);
     public const uint NIM_ADD = 0, NIM_MODIFY = 1, NIM_DELETE = 2, NIF_MESSAGE = 1, NIF_ICON = 2, NIF_TIP = 4;
 
     [DllImport("user32", CharSet = CharSet.Unicode)] public static extern nint LoadImageW(nint inst, string name, uint type, int cx, int cy, uint load);

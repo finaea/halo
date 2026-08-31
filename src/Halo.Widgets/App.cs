@@ -104,6 +104,9 @@ public sealed unsafe class App : IDisposable
 
             if (_deviceLost) RecoverDevice();
             if (_configDirty) ApplyConfigChange();
+            // outside the anyDue gate on purpose: if a rebuild ever yields zero windows, nothing
+            // is ever due again and a recovery parked inside that gate could never run
+            HostGuard();
 
             long now = Stopwatch.GetTimestamp();
             bool anyDue = false;
@@ -220,6 +223,52 @@ public sealed unsafe class App : IDisposable
 
     public void RequestDeviceRecovery() => _deviceLost = true;
 
+    private DateTime _nextHostCheck = DateTime.MinValue;
+
+    /// <summary>
+    /// Explorer-restart resilience (observed 2026-08-31 09:19:38): Explorer died and took the
+    /// WorkerW/Progman desktop host with it. Win32 destroys a window's children along with it,
+    /// so every desktop-parented widget was destroyed too — while the process stayed alive and
+    /// the position guard re-pinned dead HWNDs every 5 s forever (GetWindowRect fails on a dead
+    /// handle and leaves the rect zeroed, so it read (0,0), "moved" it, and read (0,0) again).
+    /// The cached host is therefore not trustworthy for the process lifetime: re-validate it and
+    /// rebuild the windows onto whatever host exists now.
+    /// </summary>
+    private void HostGuard()
+    {
+        if (DateTime.UtcNow < _nextHostCheck) return;
+        _nextHostCheck = DateTime.UtcNow.AddSeconds(2);
+
+        bool hostDead = DesktopHost != 0 && !IsWindow(DesktopHost);
+        // WM_DESTROY leaves WidgetWindow.Hwnd set, so a dead handle still reads back as non-zero
+        bool windowsDead = _windows.Count > 0 && _windows.All(w => !IsWindow(w.Hwnd));
+
+        if (hostDead || windowsDead)
+        {
+            nint host = FindDesktopHost();
+            Log.Warn($"desktop host lost (0x{DesktopHost:X}) — rebuilding widgets on 0x{host:X}");
+            DesktopHost = host;
+            // Rebuild even when the shell isn't back yet (host == 0): ApplyZMode then falls back
+            // to an unparented bottom-of-z-order window, which is visible. Waiting for a host
+            // instead would leave the user staring at an empty desktop until Explorer settles.
+            BuildWindows();
+            long now = Stopwatch.GetTimestamp();
+            foreach (var w in _windows) w.NextDueQpc = now;
+            return;
+        }
+
+        // Rebuilt while the shell was still coming up: adopt the real host once it appears so the
+        // widgets end up desktop-parented again instead of sitting unparented until next restart.
+        if (DesktopHost == 0 && _windows.Any(w => w.Config.ZMode == ZMode.Desktop))
+        {
+            nint host = FindDesktopHost();
+            if (host == 0) return;
+            Log.Info($"desktop host adopted: 0x{host:X}");
+            DesktopHost = host;
+            foreach (var w in _windows) { w.ApplyZMode(); w.Reposition(); w.ForceRedraw(); }
+        }
+    }
+
     private DateTime _nextPositionCheck = DateTime.MinValue;
 
     /// <summary>
@@ -237,6 +286,10 @@ public sealed unsafe class App : IDisposable
         foreach (var w in _windows)
         {
             if (w.IsDragging) continue;
+            // A destroyed handle reads back as (0,0) (GetWindowRect fails without clearing the
+            // out rect), which the drift check below would treat as a real position and "fix"
+            // on every pass, forever. HostGuard owns that case — don't fight it here.
+            if (!IsWindow(w.Hwnd)) continue;
             var (ex, ey) = w.TargetScreenPos();
             var (ax, ay, _, _) = w.ScreenRect();
             if (Math.Abs(ax - ex) > 2 || Math.Abs(ay - ey) > 2)
@@ -372,14 +425,19 @@ public sealed unsafe class App : IDisposable
     {
         try
         {
+            // Progman can be absent for minutes after an Explorer restart (observed 2026-08-31:
+            // Shell_TrayWnd and WorkerW were both up while Progman was still missing), so a
+            // missing Progman must not abort the search — fall through to the WorkerW scan.
             nint progman = FindWindowW("Progman", null);
-            if (progman == 0) return 0;
-            // ask Progman to spawn the wallpaper WorkerW (harmless if already done)
-            SendMessageTimeoutW(progman, 0x052C, 0xD, 0, 0, 1000, out _);
-            SendMessageTimeoutW(progman, 0x052C, 0xD, 1, 0, 1000, out _);
+            if (progman != 0)
+            {
+                // ask Progman to spawn the wallpaper WorkerW (harmless if already done)
+                SendMessageTimeoutW(progman, 0x052C, 0xD, 0, SMTO_ABORTIFHUNG, 1000, out _);
+                SendMessageTimeoutW(progman, 0x052C, 0xD, 1, SMTO_ABORTIFHUNG, 1000, out _);
 
-            if (FindWindowExW(progman, 0, "SHELLDLL_DefView", null) != 0)
-                return progman;
+                if (FindWindowExW(progman, 0, "SHELLDLL_DefView", null) != 0)
+                    return progman;
+            }
 
             nint worker = 0;
             while ((worker = FindWindowExW(0, worker, "WorkerW", null)) != 0)
