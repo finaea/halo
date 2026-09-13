@@ -1,4 +1,4 @@
-using Halo.Shared.Metrics;
+using Halo.Metrics;
 using Halo.Widgets.Render;
 
 namespace Halo.Widgets.PanelDefs;
@@ -7,6 +7,10 @@ namespace Halo.Widgets.PanelDefs;
 /// GPU panel per tools\extracted\gpu1.json: temp row (staged warn colors), GPU usage row + bar,
 /// VRAM row + bar, FAN row + bar, CORE/MEM clock chip row, and the 4-series overlay graph
 /// (temp/usage/VRAM%/fan%).
+///
+/// Bound to one device by the "gpuIndex" option: two cards = two widgets, no code change
+/// (hardware plan H2). Rows whose metric never arrives hide themselves, which is how a card
+/// exposing only a subset (AMD/Intel through LHM) still renders cleanly.
 /// </summary>
 public static class GpuPanel
 {
@@ -15,23 +19,32 @@ public static class GpuPanel
         var p = new Panel();
         var t = ctx.Theme;
 
+        int gpu = ctx.OptionInt("gpuIndex", 0);
+        string temp = MetricNames.GpuTempC(gpu);
+        string usage = MetricNames.GpuUsagePct(gpu);
+        string vramUsed = MetricNames.GpuVramUsedMb(gpu);
+        string vramTotal = MetricNames.GpuVramTotalMb(gpu);
+        string vramPct = MetricNames.GpuVramPct(gpu);
+        string fanRpm = MetricNames.GpuFanRpm(gpu);
+        string fanPct = MetricNames.GpuFanPct(gpu);
+        string clockCore = MetricNames.GpuClockCoreMhz(gpu);
+        string clockMem = MetricNames.GpuClockMemMhz(gpu);
+
         p.TitleElements.Add(new TextEl
         {
-            Text = c => c.Options.GetValueOrDefault("title", "").Length > 0
-                ? c.Options["title"]
-                : c.Metrics.Text(MetricNames.GpuName, "GPU"),
+            Text = c => c.TitleOr(c.Metrics.Text(MetricNames.GpuName(gpu), "GPU")),
             Upper = true,
             Style = TextStyle.Bold9,
             Align = TextAlign.Center,
             Color = "title",
         });
 
-        // temp, centered at abs Y=30, staged warn colors (<45/<55/<65/<75/else)
+        // temp, centered at abs Y=30, staged warn colors
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(MetricNames.GpuTempC))}°C",
-            ColorFn = c => CpuRamPanelImpl.WarnColor(c.Metrics.Value(MetricNames.GpuTempC), 45, 55, 65, 75),
-            VisibleWhen = c => c.Metrics.TryValue(MetricNames.GpuTempC, out _),
+            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(temp))}°C",
+            ColorFn = c => CpuRamPanelImpl.WarnColor(c.Metrics.Value(temp), c.Warn("temp")),
+            VisibleWhen = c => c.Shows("temp") && c.Metrics.TryValue(temp, out _),
             Style = TextStyle.Bold8,
             Align = TextAlign.Center,
             AbsY = 30,
@@ -39,10 +52,10 @@ public static class GpuPanel
         });
 
         // GPU usage row: label left, % right, full bar under
-        p.Elements.Add(new TextEl { Text = _ => "GPU:", Style = TextStyle.Bold8, Align = TextAlign.Left, AbsY = 32, FixedH = 11 });
+        p.Elements.Add(new TextEl { Text = c => c.Label("usage", "GPU:"), Style = TextStyle.Bold8, Align = TextAlign.Left, AbsY = 32, FixedH = 11 });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(MetricNames.GpuUsagePct))}%",
+            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(usage))}%",
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
@@ -50,16 +63,16 @@ public static class GpuPanel
         });
         p.Elements.Add(new BarEl
         {
-            Value = c => c.Metrics.Value(MetricNames.GpuUsagePct) / 100,
-            FillColorFn = c => c.Metrics.Value(MetricNames.GpuUsagePct) > 75 ? "barWarn" : "gpuUsage",
+            Value = c => c.Metrics.Value(usage) / 100,
+            FillColorFn = c => CpuRamPanelImpl.Over(c.Metrics.Value(usage), c.Warn("usage")) ? "barWarn" : "gpuUsage",
             Advance = 0,
         });
 
         // VRAM row: label left, used/total center, % right, bar under
-        p.Elements.Add(new TextEl { Text = _ => "MEM:", Style = TextStyle.Bold8, Align = TextAlign.Left, FixedH = 11, Advance = 1 });
+        p.Elements.Add(new TextEl { Text = c => c.Label("vram", "MEM:"), Style = TextStyle.Bold8, Align = TextAlign.Left, FixedH = 11, Advance = 1 });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(MetricNames.GpuVramUsedMb))}MB/{ValueFormat.Int0(c.Metrics.Value(MetricNames.GpuVramTotalMb))}MB",
+            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(vramUsed))}MB/{ValueFormat.Int0(c.Metrics.Value(vramTotal))}MB",
             Style = TextStyle.Text8,
             Color = "text2",
             Align = TextAlign.Center,
@@ -68,7 +81,7 @@ public static class GpuPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(MetricNames.GpuVramPct))}%",
+            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(vramPct))}%",
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
@@ -76,16 +89,16 @@ public static class GpuPanel
         });
         p.Elements.Add(new BarEl
         {
-            Value = c => c.Metrics.Value(MetricNames.GpuVramPct) / 100,
-            FillColorFn = c => c.Metrics.Value(MetricNames.GpuVramPct) > 75 ? "barWarn" : "gpuMemUsage",
+            Value = c => c.Metrics.Value(vramPct) / 100,
+            FillColorFn = c => CpuRamPanelImpl.Over(c.Metrics.Value(vramPct), c.Warn("vram")) ? "barWarn" : "gpuMemUsage",
             Advance = 0,
         });
 
         // FAN row: label left, rpm center, % right, bar under (no gap after VRAM bar, per skin)
-        p.Elements.Add(new TextEl { Text = _ => "FAN:", Style = TextStyle.Bold8, Align = TextAlign.Left, FixedH = 11, Advance = 0 });
+        p.Elements.Add(new TextEl { Text = c => c.Label("fan", "FAN:"), Style = TextStyle.Bold8, Align = TextAlign.Left, FixedH = 11, Advance = 0 });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(MetricNames.GpuFanRpm))} rpm",
+            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(fanRpm))} rpm",
             Style = TextStyle.Text8,
             Color = "text2",
             Align = TextAlign.Center,
@@ -94,7 +107,7 @@ public static class GpuPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(MetricNames.GpuFanPct))}%",
+            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(fanPct))}%",
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
@@ -102,15 +115,15 @@ public static class GpuPanel
         });
         p.Elements.Add(new BarEl
         {
-            Value = c => c.Metrics.Value(MetricNames.GpuFanPct) / 100,
-            FillColorFn = c => c.Metrics.Value(MetricNames.GpuFanPct) > 75 ? "barWarn" : "gpuFan",
+            Value = c => c.Metrics.Value(fanPct) / 100,
+            FillColorFn = c => CpuRamPanelImpl.Over(c.Metrics.Value(fanPct), c.Warn("fan")) ? "barWarn" : "gpuFan",
             Advance = 0,
         });
 
         // CORE / MEM clock chip row
         p.Elements.Add(new TextEl
         {
-            Text = c => $"CORE: {ValueFormat.Int0(c.Metrics.Value(MetricNames.GpuClockCoreMhz))}MHz",
+            Text = c => $"{c.Label("clockCore", "CORE:")} {ValueFormat.Int0(c.Metrics.Value(clockCore))}MHz",
             Style = TextStyle.Text8,
             Color = "text2",
             Align = TextAlign.Left,
@@ -122,7 +135,7 @@ public static class GpuPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"MEM: {ValueFormat.Int0(c.Metrics.Value(MetricNames.GpuClockMemMhz))}MHz",
+            Text = c => $"{c.Label("clockMem", "MEM:")} {ValueFormat.Int0(c.Metrics.Value(clockMem))}MHz",
             Style = TextStyle.Text8,
             Color = "text2",
             Align = TextAlign.Right,
@@ -130,8 +143,7 @@ public static class GpuPanel
             FixedH = 11,
         });
 
-        // 4-series overlay graph (temp red / usage lavender / VRAM% green / fan% sky-blue), 5 Hz sampling.
-        // Each line is toggleable via Options graphGpuTemp/graphGpuUsage/graphGpuMem/graphGpuFan (default on).
+        // 4-series overlay graph (temp red / usage lavender / VRAM% green / fan% sky-blue), 5 Hz.
         var graph = new GraphEl
         {
             Advance = 4,
@@ -139,14 +151,14 @@ public static class GpuPanel
             Start = GraphStart.Left,
             SampleRateHz = 5,
         };
-        if (ctx.GraphLineVisible("graphGpuTemp"))
-            graph.Series.Add(new GraphSeries { Color = "gpuTemp", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.GpuTempC) });
-        if (ctx.GraphLineVisible("graphGpuUsage"))
-            graph.Series.Add(new GraphSeries { Color = "gpuUsage", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.GpuUsagePct) });
-        if (ctx.GraphLineVisible("graphGpuMem"))
-            graph.Series.Add(new GraphSeries { Color = "gpuMemUsage", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.GpuVramPct) });
-        if (ctx.GraphLineVisible("graphGpuFan"))
-            graph.Series.Add(new GraphSeries { Color = "gpuFan", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.GpuFanPct) });
+        if (ctx.Graphs("temp"))
+            graph.Series.Add(new GraphSeries { Color = "gpuTemp", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(temp) });
+        if (ctx.Graphs("usage"))
+            graph.Series.Add(new GraphSeries { Color = "gpuUsage", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(usage) });
+        if (ctx.Graphs("vram"))
+            graph.Series.Add(new GraphSeries { Color = "gpuMemUsage", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(vramPct) });
+        if (ctx.Graphs("fan"))
+            graph.Series.Add(new GraphSeries { Color = "gpuFan", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(fanPct) });
         p.Elements.Add(graph);
 
         return p;

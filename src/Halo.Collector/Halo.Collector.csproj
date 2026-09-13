@@ -15,9 +15,18 @@
     <ServerGarbageCollection>false</ServerGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Halo.Metrics\Halo.Metrics.csproj" />
     <ProjectReference Include="..\Halo.Shared\Halo.Shared.csproj" />
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
     <!-- ETW real-time consumer for NVIDIA PCL Stats markers (true Reflex PC latency + render rate) -->
     <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Everything the exe reads at runtime is resolved from its own folder (Halo.Shared.Paths),
+         so the build output has to be a complete, runnable layout — the same one the installer
+         ships. The PresentMon SDK binaries are gitignored today, so this glob is empty on a
+         fresh clone and the frame pipeline degrades exactly as it does without the SDK. -->
+    <Content Include="..\..\tools\presentmon\sdk\**\*.*" LinkBase="presentmon" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\halo.ico" Link="assets\halo.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

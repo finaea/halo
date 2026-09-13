@@ -12,14 +12,12 @@
     <StackPanel Grid.Row="0">
       <TextBlock Text="Theme" Style="{StaticResource PageTitle}"/>
       <TextBlock Style="{StaticResource PageSub}"
-                 Text="Colors used by every widget (saved to config\theme.json). Values are R G B A (0–255); the defaults are the extracted Rainformer palette. Widgets recolor live on Save."/>
+                 Text="Default colours for every widget (settings.json → appearance.colors). Values are R G B A (0–255); the defaults are the extracted Rainformer palette. Widgets recolour live on Save."/>
     </StackPanel>
 
     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
-      <TextBlock Text="Scale override" Margin="0,0,10,0"/>
-      <TextBox x:Name="ScaleBox" Width="90"/>
-      <TextBlock Text="Same value as 'Widget scale' on the General page (both edit theme.json)."
-                 Foreground="{StaticResource Sub}" Margin="16,0,0,0"/>
+      <TextBlock Text="A widget can override any of these on its own Appearance tab."
+                 Foreground="{StaticResource Sub}"/>
     </StackPanel>
 
     <DataGrid Grid.Row="2" x:Name="ColorGrid" CanUserAddRows="False">

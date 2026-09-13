@@ -17,9 +17,29 @@ public static class Log
     private static Thread? _thread;
     public static bool AlsoConsole;
 
+    /// <summary>Start logging into the user's data folder (<see cref="Paths.LogsDir"/>).</summary>
+    public static void Init(string processName, bool alsoConsole = false)
+    {
+        Init(Paths.LogsDir, processName, alsoConsole);
+        if (Paths.DataDirFallbackReason is { } why)
+            Warn($"data folder fallback: {why}");
+    }
+
     public static void Init(string logsDir, string processName, bool alsoConsole = false)
     {
-        Directory.CreateDirectory(logsDir);
+        try
+        {
+            Directory.CreateDirectory(logsDir);
+        }
+        catch (Exception ex)
+        {
+            // Never let logging take the process down: fall back to %TEMP% and say so on stdout,
+            // which is the only channel left at this point.
+            string fallback = Path.Combine(Path.GetTempPath(), "Halo", "logs");
+            Console.Error.WriteLine($"[halo] logs dir {logsDir} unusable ({ex.Message}); using {fallback}");
+            logsDir = fallback;
+            try { Directory.CreateDirectory(logsDir); } catch { return; }
+        }
         try
         {
             foreach (var f in Directory.EnumerateFiles(logsDir, "*.log"))

@@ -1,10 +1,10 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
-using System.Linq;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using Halo.Shared.Config;
+using Halo.Shared.Panels;
 
 namespace Halo.Settings.Pages;
 
@@ -36,33 +36,16 @@ public partial class WidgetsPage : UserControl, ISettingsPage
     private readonly List<string> _monitorDevices = new();
     private WidgetInstance? _current;
     private bool _loading;
-    // Per-type graph-line toggle checkboxes built for the selected widget (option key + control).
+    // Per-type graph toggles built for the selected widget (metric key + control).
     private readonly List<(string Key, CheckBox Box)> _graphChecks = new();
 
-    /// <summary>Toggleable graph lines per widget type: option key + display label. Default is on;
-    /// only a hidden line is persisted (key="false"), matching the panel-side default.</summary>
-    private static (string Key, string Label)[] GraphLines(string type) => type switch
-    {
-        "cpu-ram" => new[]
-        {
-            ("graphCpuTemp", "CPU temperature"),
-            ("graphCpuUsage", "CPU usage"),
-            ("graphRamUsage", "RAM usage"),
-        },
-        "gpu" => new[]
-        {
-            ("graphGpuTemp", "GPU temperature"),
-            ("graphGpuUsage", "GPU usage"),
-            ("graphGpuMem", "VRAM usage"),
-            ("graphGpuFan", "Fan speed"),
-        },
-        "drives" => new[]
-        {
-            ("graphDriveWrite", "Write history"),
-            ("graphDriveRead", "Read history"),
-        },
-        _ => Array.Empty<(string, string)>(),
-    };
+    /// <summary>Graph lines this panel type offers, straight from the catalog — no per-type
+    /// switch to keep in sync any more (settings plan S1).</summary>
+    private static (string Key, string Label)[] GraphLines(string type)
+        => PanelCatalog.Find(type)?.Metrics
+            .Where(m => m.Graphable)
+            .Select(m => (m.Key, m.DefaultLabel.TrimEnd(':')))
+            .ToArray() ?? [];
 
     public WidgetsPage(ConfigStore store)
     {
@@ -98,42 +81,49 @@ public partial class WidgetsPage : UserControl, ISettingsPage
 
     private static WidgetInstance Clone(WidgetInstance w) => new()
     {
-        Id = w.Id, Type = w.Type, Enabled = w.Enabled, Monitor = w.Monitor,
+        Id = w.Id, Type = w.Type, Enabled = w.Enabled, Title = w.Title, Monitor = w.Monitor,
         X = w.X, Y = w.Y, ZMode = w.ZMode, ClickThrough = w.ClickThrough,
         KeepOnScreen = w.KeepOnScreen, Locked = w.Locked, Opacity = w.Opacity,
-        RateHz = w.RateHz, Options = new Dictionary<string, string>(w.Options),
-    };
-
-    private static string FriendlyName(WidgetInstance w) => w.Type switch
-    {
-        "clock" => "Clock",
-        "power" => "Power draw",
-        "drives" => "Drives",
-        "cpu-ram" => "CPU & RAM",
-        "fans" => "Fans",
-        "network" => "Network",
-        "topcpu" => "Top processes — CPU",
-        "topram" => "Top processes — RAM",
-        "gpu" => "GPU",
-        "latency" => "Latency & DLSS",
-        "fps" => w.Options.GetValueOrDefault("stream", "").ToLowerInvariant() switch
+        HideOnFullscreen = w.HideOnFullscreen, RateHz = w.RateHz,
+        Options = new Dictionary<string, string>(w.Options),
+        // deep copy: a shared MetricSetting instance would make the "what changed" diff blind
+        Metrics = w.Metrics.ToDictionary(kv => kv.Key, kv => new MetricSetting
         {
-            "displayed" => "FPS counter — displayed",
-            "presented" => "FPS counter — presented",
-            _ => "FPS counter",
-        },
-        _ => w.Type,
+            Show = kv.Value.Show,
+            Label = kv.Value.Label,
+            Graph = kv.Value.Graph,
+            Color = kv.Value.Color,
+            Warn = kv.Value.Warn?.ToArray(),
+            Max = kv.Value.Max,
+        }),
     };
 
-    private static string OptionsHelp(string type) => type switch
+    private static string FriendlyName(WidgetInstance w)
     {
-        "fps" => "stream=presented — live counter fed by the present tap (RTSS-like latency).\n" +
-                 "stream=displayed — what actually reached the screen, fate-resolved (frame-gen aware).",
-        "topcpu" or "topram" => "aggregate=true — sum same-name processes into one row.",
-        "cpu-ram" or "gpu" or "drives" =>
-            "Use Graph lines above to choose which lines appear on the graph. Extra options: key=value, one per line.",
-        _ => "This panel has no options. (Format: key=value, one per line.)",
-    };
+        string baseName = PanelCatalog.Find(w.Type)?.DisplayName ?? w.Type;
+        if (w.Type != "fps") return baseName;
+        return w.Options.GetValueOrDefault("stream", "").ToLowerInvariant() switch
+        {
+            "displayed" => baseName + " — displayed",
+            "presented" => baseName + " — presented",
+            _ => baseName,
+        };
+    }
+
+    /// <summary>Help text for the raw options box: generated from the catalog's OptionSpecs.</summary>
+    private static string OptionsHelp(string type)
+    {
+        var panel = PanelCatalog.Find(type);
+        if (panel == null || panel.Options.Count == 0)
+            return "This panel has no options. (Format: key=value, one per line.)";
+        var sb = new StringBuilder();
+        foreach (var o in panel.Options)
+        {
+            string range = o.Choices is { Length: > 0 } ? string.Join(" | ", o.Choices) : o.Range ?? o.Kind.ToString().ToLowerInvariant();
+            sb.AppendLine($"{o.Key} ({range}, default \"{o.Default}\") — {o.Help.Replace("\n", " ")}");
+        }
+        return sb.ToString().TrimEnd();
+    }
 
     private void WidgetList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -150,6 +140,7 @@ public partial class WidgetsPage : UserControl, ISettingsPage
 
         NameText.Text = FriendlyName(w);
         SubText.Text = $"{w.Type} · {w.Id}";
+        TitleBox.Text = w.Title ?? "";
 
         MonitorCombo.Items.Clear();
         _monitorDevices.Clear();
@@ -176,30 +167,29 @@ public partial class WidgetsPage : UserControl, ISettingsPage
         KeepOnScreenCheck.IsChecked = w.KeepOnScreen;
         LockedCheck.IsChecked = w.Locked;
         OpacitySlider.Value = Math.Clamp(w.Opacity, 0.1, 1.0);
-        RateBox.Text = w.RateHz?.ToString(CultureInfo.InvariantCulture) ?? "";
+        RateBox.Text = w.RateHz.ToString(CultureInfo.InvariantCulture);
 
-        // Graph-line checkboxes (owned separately from the raw options box).
+        // Graph toggles now live in the per-metric settings, not in the options dictionary.
         GraphLinesPanel.Children.Clear();
         _graphChecks.Clear();
         var lines = GraphLines(w.Type);
         GraphLinesGroup.Visibility = lines.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        var panelType = PanelCatalog.Find(w.Type);
         foreach (var (key, label) in lines)
         {
             var cb = new CheckBox
             {
                 Content = label,
                 Margin = new Thickness(0, 3, 0, 3),
-                IsChecked = w.Options.GetValueOrDefault(key) != "false",
+                IsChecked = w.Metrics.GetValueOrDefault(key)?.Graph
+                            ?? panelType?.Metric(key)?.GraphDefaultOn ?? true,
             };
             GraphLinesPanel.Children.Add(cb);
             _graphChecks.Add((key, cb));
         }
 
-        // Raw options box shows everything except the graph-line keys owned by the checkboxes.
-        var graphKeys = lines.Select(l => l.Key).ToHashSet();
         var sb = new StringBuilder();
-        foreach (var kv in w.Options)
-            if (!graphKeys.Contains(kv.Key)) sb.AppendLine($"{kv.Key}={kv.Value}");
+        foreach (var kv in w.Options) sb.AppendLine($"{kv.Key}={kv.Value}");
         OptionsBox.Text = sb.ToString().TrimEnd('\r', '\n');
         OptionsHint.Text = OptionsHelp(w.Type);
 
@@ -210,6 +200,7 @@ public partial class WidgetsPage : UserControl, ISettingsPage
     {
         NameText.Text = "";
         SubText.Text = "";
+        TitleBox.Text = "";
         MonitorCombo.Items.Clear();
         _monitorDevices.Clear();
         XBox.Text = YBox.Text = RateBox.Text = "";
@@ -225,6 +216,7 @@ public partial class WidgetsPage : UserControl, ISettingsPage
     private void FlushCurrent()
     {
         if (_current == null || _loading) return;
+        _current.Title = string.IsNullOrWhiteSpace(TitleBox.Text) ? null : TitleBox.Text.Trim();
         if (MonitorCombo.SelectedIndex >= 0 && MonitorCombo.SelectedIndex < _monitorDevices.Count)
             _current.Monitor = _monitorDevices[MonitorCombo.SelectedIndex];
         if (int.TryParse(XBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out int x)) _current.X = x;
@@ -234,16 +226,34 @@ public partial class WidgetsPage : UserControl, ISettingsPage
         _current.KeepOnScreen = KeepOnScreenCheck.IsChecked == true;
         _current.Locked = LockedCheck.IsChecked == true;
         _current.Opacity = Math.Round(Math.Clamp(OpacitySlider.Value, 0.1, 1.0), 2);
-        _current.RateHz = double.TryParse(RateBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double r)
-            ? r : (double?)null;
+        if (double.TryParse(RateBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double r))
+            _current.RateHz = Math.Clamp(r, 0.5, 10);
         _current.Options = ParseOptions(OptionsBox.Text);
-        // Graph-line checkboxes win over any stray text key: persist only hidden lines.
+
+        // Only a hidden line is persisted; a line left at its catalog default stays out of the file.
+        var panelType = PanelCatalog.Find(_current.Type);
         foreach (var (key, box) in _graphChecks)
         {
-            if (box.IsChecked == false) _current.Options[key] = "false";
-            else _current.Options.Remove(key);
+            bool on = box.IsChecked == true;
+            bool def = panelType?.Metric(key)?.GraphDefaultOn ?? true;
+            if (on == def)
+            {
+                if (_current.Metrics.TryGetValue(key, out var existing))
+                {
+                    existing.Graph = null;
+                    if (IsEmpty(existing)) _current.Metrics.Remove(key);
+                }
+            }
+            else
+            {
+                if (!_current.Metrics.TryGetValue(key, out var m)) _current.Metrics[key] = m = new MetricSetting();
+                m.Graph = on;
+            }
         }
     }
+
+    private static bool IsEmpty(MetricSetting m)
+        => m.Show == null && m.Label == null && m.Graph == null && m.Color == null && m.Warn == null && m.Max == null;
 
     private static Dictionary<string, string> ParseOptions(string text)
     {
@@ -287,6 +297,7 @@ public partial class WidgetsPage : UserControl, ISettingsPage
     private static void ApplyEdits(WidgetInstance target, WidgetInstance was, WidgetInstance now)
     {
         if (now.Enabled != was.Enabled) target.Enabled = now.Enabled;
+        if (now.Title != was.Title) target.Title = now.Title;
         if (now.Monitor != was.Monitor) target.Monitor = now.Monitor;
         if (now.X != was.X) target.X = now.X;
         if (now.Y != was.Y) target.Y = now.Y;
@@ -297,6 +308,7 @@ public partial class WidgetsPage : UserControl, ISettingsPage
         if (now.Opacity != was.Opacity) target.Opacity = now.Opacity;
         if (now.RateHz != was.RateHz) target.RateHz = now.RateHz;
         if (!OptionsEqual(now.Options, was.Options)) target.Options = now.Options;
+        if (!MetricsEqual(now.Metrics, was.Metrics)) target.Metrics = now.Metrics;
     }
 
     private static bool OptionsEqual(Dictionary<string, string> a, Dictionary<string, string> b)
@@ -304,6 +316,21 @@ public partial class WidgetsPage : UserControl, ISettingsPage
         if (a.Count != b.Count) return false;
         foreach (var kv in a)
             if (!b.TryGetValue(kv.Key, out string? v) || v != kv.Value) return false;
+        return true;
+    }
+
+    private static bool MetricsEqual(Dictionary<string, MetricSetting> a, Dictionary<string, MetricSetting> b)
+    {
+        if (a.Count != b.Count) return false;
+        foreach (var kv in a)
+        {
+            if (!b.TryGetValue(kv.Key, out var other)) return false;
+            var m = kv.Value;
+            if (m.Show != other.Show || m.Label != other.Label || m.Graph != other.Graph
+                || m.Color != other.Color || m.Max != other.Max) return false;
+            if ((m.Warn == null) != (other.Warn == null)) return false;
+            if (m.Warn != null && other.Warn != null && !m.Warn.SequenceEqual(other.Warn)) return false;
+        }
         return true;
     }
 }

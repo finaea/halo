@@ -3,4 +3,9 @@
     <RootNamespace>Halo.Shared</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Halo.Shared owns paths, logging, config and the panel catalog; the metrics contract
+         lives in the dependency-free client package. The dependency only runs this way. -->
+    <ProjectReference Include="..\Halo.Metrics\Halo.Metrics.csproj" />
+  </ItemGroup>
 </Project>

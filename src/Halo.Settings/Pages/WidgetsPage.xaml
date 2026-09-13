@@ -43,6 +43,21 @@
           <TextBlock x:Name="NameText" FontSize="15" FontWeight="SemiBold"/>
           <TextBlock x:Name="SubText" Style="{StaticResource Hint}" Margin="0,2,0,10"/>
 
+          <GroupBox Header="Title">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="130"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="Title" Style="{StaticResource RowLabel}"/>
+              <TextBox   Grid.Column="1" x:Name="TitleBox" Width="320" HorizontalAlignment="Left" Margin="0,4"/>
+              <local:HelpTip Grid.Column="2"
+                             Tip="Text in this widget's title bar. Leave empty for the panel's own default, which for CPU and GPU widgets is the live device name."/>
+            </Grid>
+          </GroupBox>
+
           <GroupBox Header="Placement">
             <Grid>
               <Grid.ColumnDefinitions>
@@ -109,12 +124,12 @@
               <local:HelpTip Grid.Row="0" Grid.Column="2"
                              Tip="Overall transparency of this widget (also in its right-click menu)."/>
 
-              <TextBlock Grid.Row="1" Grid.Column="0" Text="Rate override (Hz)" Style="{StaticResource RowLabel}"/>
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="Refresh rate (Hz)" Style="{StaticResource RowLabel}"/>
               <TextBox   Grid.Row="1" Grid.Column="1" x:Name="RateBox" Width="80" HorizontalAlignment="Left" Margin="0,4"/>
               <local:HelpTip Grid.Row="1" Grid.Column="2"
-                             Tip="Repaint rate for this widget only. Leave empty to use the global Default rate (General page). FPS panels repaint on real frame events regardless."/>
+                             Tip="How often this widget repaints. Raising it past the rate its data is published at does not make the numbers fresher — the collector's cadences are fixed. FPS panels repaint on real frame events regardless."/>
               <TextBlock Grid.Row="1" Grid.Column="3" Style="{StaticResource Hint}" Margin="12,0,0,0"
-                         Text="empty = default"/>
+                         Text="0.5 – 10 · default 5"/>
 
               <CheckBox Grid.Row="2" Grid.Column="1" x:Name="ClickThroughCheck" Content="Click-through" Margin="0,6"/>
               <local:HelpTip Grid.Row="2" Grid.Column="2"

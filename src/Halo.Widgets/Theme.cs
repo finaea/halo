@@ -1,13 +1,16 @@
-using System.Text.Json;
+using Halo.Shared.Config;
+using Halo.Shared.Panels;
 using Vortice.Mathematics;
 
 namespace Halo.Widgets;
 
 /// <summary>
-/// Visual tokens extracted from the Rainformer skin (@Resources\Variables.inc, light set — the
-/// values the skins actually reference; reference copy in the user's Rainmeter Skins folder).
-/// Overridable via config\theme.json; values are facts extracted from the user's own config,
-/// no GPL code (plan §9.2).
+/// The resolved look of one widget: global appearance from settings.json merged with that
+/// widget's own overrides. Built once per widget whenever config changes — never read from a
+/// file here (theme.json is gone, settings plan S4).
+///
+/// Colour values come from <see cref="ThemeTokens"/>, extracted from the Rainformer skin's
+/// @Resources\Variables.inc (values only, no code).
 /// </summary>
 public sealed class Theme
 {
@@ -15,6 +18,7 @@ public sealed class Theme
     public string FontFamily = "Trebuchet MS";
     public double TextSizePt = 8;
     public double TitleSizePt = 9;
+    public bool ShowTitle = true;
 
     // panel geometry (logical units, pre-scale)
     public double BgOffset = 5;
@@ -35,78 +39,54 @@ public sealed class Theme
     public double CenterAlign => BgWidth / 2;                           // 103
     public double TopMarginFormula => TopMargin + BgOffset - 1;         // 32
 
-    public Dictionary<string, Color4> Colors = new()
-    {
-        ["title"] = C(0, 0, 0, 255),
-        ["activeTitle"] = C(255, 128, 0, 255),
-        ["text"] = C(0, 0, 0, 205),
-        ["text2"] = C(60, 65, 62, 205),
-        ["bar"] = C(93, 141, 172, 255),
-        ["histogram"] = C(176, 196, 222, 250),
-        ["netDown"] = C(51, 153, 255, 205),
-        ["netUp"] = C(51, 255, 0, 205),
-        ["red"] = C(204, 0, 0, 255),
-        ["redText"] = C(204, 0, 0, 205),          // colorRed with colorTextAlpha (TopCPU warn)
-        ["emptyBar"] = C(255, 255, 255, 25),
-        ["bgTop"] = C(163, 178, 230, 180),
-        ["bgBody"] = C(230, 230, 230, 180),
-        ["stroke"] = C(96, 138, 203, 100),
-        ["solidLabel"] = C(248, 248, 248, 255),
-        ["inactiveButton"] = C(120, 120, 120, 255),
-        ["barWarn"] = C(220, 20, 60, 255),
-        ["cpuTemp"] = C(204, 0, 0, 255),
-        ["cpuUsage"] = C(176, 196, 222, 255),
-        ["ramUsage"] = C(102, 204, 0, 255),
-        ["gpuTemp"] = C(204, 0, 0, 255),
-        ["gpuUsage"] = C(176, 196, 222, 255),
-        ["gpuMemUsage"] = C(102, 204, 0, 255),
-        ["gpuFan"] = C(0, 191, 255, 255),
-        ["maxValue"] = C(178, 190, 181, 205),     // MaxTempColor (Power panel gray max column)
-        ["maxLabelGray"] = C(120, 120, 120, 255), // Power panel "Max:" hardcoded gray
-        ["devWarn1"] = C(47, 186, 255, 255),
-        ["devWarn2"] = C(255, 255, 36, 255),
-        ["devWarn3"] = C(255, 143, 30, 255),
-        ["devWarn4"] = C(255, 0, 0, 255),
-        ["devWarn5"] = C(204, 0, 0, 255),
-        ["horizLine"] = C(80, 80, 80, 255),
-        ["staleBadge"] = C(255, 80, 80, 220),
-    };
+    public Dictionary<string, Color4> Colors = DefaultColors();
 
     public Color4 Color(string token) => Colors.TryGetValue(token, out var c) ? c : new Color4(1, 0, 1, 1);
-
-    private static Color4 C(byte r, byte g, byte b, byte a) => new(r / 255f, g / 255f, b / 255f, a / 255f);
 
     /// <summary>Device-independent px per pt (Rainmeter FontSize is points; px = pt·96/72).</summary>
     public float FontPx(double pt) => (float)(pt * 96.0 / 72.0);
 
-    /// <summary>Load overrides from config\theme.json if present (partial: colors/scale/font).</summary>
-    public static Theme Load(string configDir)
+    private static Dictionary<string, Color4> DefaultColors()
     {
-        var t = new Theme();
-        string path = Path.Combine(configDir, "theme.json");
-        if (!File.Exists(path)) return t;
-        try
+        var map = new Dictionary<string, Color4>(StringComparer.Ordinal);
+        foreach (var (token, hex, _) in ThemeTokens.Defaults)
+            if (ThemeTokens.TryParse(hex, out byte r, out byte g, out byte b, out byte a))
+                map[token] = C(r, g, b, a);
+        return map;
+    }
+
+    private static Color4 C(byte r, byte g, byte b, byte a) => new(r / 255f, g / 255f, b / 255f, a / 255f);
+
+    /// <summary>
+    /// Resolve a widget's theme: built-in defaults ← global appearance ← per-widget overrides.
+    /// <paramref name="autoScale"/> supplies the number for a "auto" scale (hardware plan H7);
+    /// until ticket 03 wires per-monitor DPI it is simply the reference 1.7.
+    /// </summary>
+    public static Theme Resolve(AppearanceSettings global, WidgetAppearance? widget, double autoScale)
+    {
+        var t = new Theme
         {
-            using var doc = JsonDocument.Parse(File.ReadAllText(path));
-            var root = doc.RootElement;
-            if (root.TryGetProperty("scale", out var s)) t.Scale = s.GetDouble();
-            if (root.TryGetProperty("fontFamily", out var f)) t.FontFamily = f.GetString() ?? t.FontFamily;
-            if (root.TryGetProperty("textSizePt", out var ts)) t.TextSizePt = ts.GetDouble();
-            if (root.TryGetProperty("colors", out var colors))
-            {
-                foreach (var p in colors.EnumerateObject())
-                {
-                    var arr = p.Value;
-                    if (arr.ValueKind == JsonValueKind.Array && arr.GetArrayLength() >= 3)
-                    {
-                        byte r = (byte)arr[0].GetInt32(), g = (byte)arr[1].GetInt32(), b = (byte)arr[2].GetInt32();
-                        byte a = arr.GetArrayLength() >= 4 ? (byte)arr[3].GetInt32() : (byte)255;
-                        t.Colors[p.Name] = C(r, g, b, a);
-                    }
-                }
-            }
+            FontFamily = widget?.FontFamily ?? global.FontFamily,
+            TextSizePt = global.TextSizePt,
+            CornerRadius = global.CornerRadius,
+            ShowTitle = widget?.ShowTitle ?? true,
+        };
+        t.Scale = (widget?.Scale ?? global.Scale).Or(autoScale);
+        if (widget?.Width is { } w && w > 0)
+        {
+            t.BgWidth = w;
+            t.BgShapeW = w - 2 * t.BgOffset;
         }
-        catch (Exception ex) { Halo.Shared.Log.Warn($"theme.json parse: {ex.Message}"); }
+        Apply(t, global.Colors);
+        Apply(t, widget?.Colors);
         return t;
+    }
+
+    private static void Apply(Theme t, Dictionary<string, string>? colors)
+    {
+        if (colors == null) return;
+        foreach (var (token, hex) in colors)
+            if (ThemeTokens.TryParse(hex, out byte r, out byte g, out byte b, out byte a))
+                t.Colors[token] = C(r, g, b, a);
     }
 }

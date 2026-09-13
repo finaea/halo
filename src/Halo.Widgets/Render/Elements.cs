@@ -1,22 +1,85 @@
+using System.Globalization;
+using Halo.Shared.Config;
+using Halo.Shared.Panels;
 using Vortice.Mathematics;
 
 namespace Halo.Widgets.Render;
 
-/// <summary>Live data + options passed to element callbacks each tick.</summary>
+/// <summary>
+/// Live data + this widget's settings, passed to element callbacks each tick.
+///
+/// Panels ask questions through the helpers below rather than reading the options dictionary
+/// directly: every answer is "what the user set, else what the catalog says", so a new option or
+/// a renamed label is one edit in <see cref="PanelCatalog"/> (settings plan S1).
+/// </summary>
 public sealed class PanelContext
 {
     public required MetricCache Metrics { get; init; }
     public required Theme Theme { get; init; }
-    public required Halo.Shared.Config.GeneralSettings Settings { get; init; }
-    public Dictionary<string, string> Options { get; set; } = new();
+    public required AppSettings Settings { get; init; }
+    public required WidgetInstance Widget { get; init; }
+
+    /// <summary>Catalog entry for this widget's type; null only for an unknown type.</summary>
+    public PanelType? Type { get; init; }
+
+    public Dictionary<string, string> Options => Widget.Options;
+
     public bool Stale;
     public DateTime Now;
     public long TickIndex;
 
-    /// <summary>Whether a toggleable graph line is shown. Default is on; an option value of
-    /// "false" hides it (e.g. Options["graphCpuTemp"]="false"). Panels build/skip the series
-    /// accordingly, so this takes effect on the rebuild-on-save path.</summary>
-    public bool GraphLineVisible(string key) => Options.GetValueOrDefault(key) != "false";
+    // ---- options ----
+
+    public string Option(string key)
+        => Type?.OptionValue(Options, key) ?? Options.GetValueOrDefault(key, "");
+
+    public bool OptionBool(string key)
+        => Option(key).Equals("true", StringComparison.OrdinalIgnoreCase);
+
+    public int OptionInt(string key, int fallback)
+        => int.TryParse(Option(key), NumberStyles.Integer, CultureInfo.InvariantCulture, out int v) ? v : fallback;
+
+    /// <summary>Comma-separated list option ("C,D,E" → ["C","D","E"]). Empty when unset.</summary>
+    public string[] OptionList(string key)
+        => Option(key).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>Widget title: the user's rename, else the panel's own default (often a live
+    /// metric such as the CPU or GPU name).</summary>
+    public string TitleOr(string fallback)
+        => string.IsNullOrWhiteSpace(Widget.Title) ? fallback : Widget.Title!;
+
+    // ---- per-metric settings ----
+
+    public MetricSetting? Metric(string key) => Widget.Metrics.GetValueOrDefault(key);
+
+    /// <summary>Is this metric's row shown? Default yes.</summary>
+    public bool Shows(string key) => Metric(key)?.Show ?? true;
+
+    /// <summary>Is this metric's graph line drawn? Default = the catalog's GraphDefaultOn.</summary>
+    public bool Graphs(string key)
+        => Metric(key)?.Graph ?? Type?.Metric(BaseKey(key))?.GraphDefaultOn ?? true;
+
+    /// <summary>Row label: the user's rename, else the catalog default.</summary>
+    public string Label(string key, string fallback = "")
+    {
+        string? custom = Metric(key)?.Label;
+        if (!string.IsNullOrEmpty(custom)) return custom;
+        return Type?.Metric(BaseKey(key))?.DefaultLabel ?? fallback;
+    }
+
+    /// <summary>Warn thresholds: the user's, else the catalog's defaults, else empty.</summary>
+    public double[] Warn(string key)
+        => Metric(key)?.Warn ?? Type?.Metric(BaseKey(key))?.WarnDefaults ?? [];
+
+    /// <summary>Scale ceiling for a metric (fan max RPM), or the fallback when unset.</summary>
+    public double MaxOf(string key, double fallback) => Metric(key)?.Max ?? fallback;
+
+    /// <summary>"rpm.2" → "rpm": repeated rows share one catalog spec.</summary>
+    private static string BaseKey(string key)
+    {
+        int dot = key.IndexOf('.');
+        return dot < 0 ? key : key[..dot];
+    }
 }
 
 /// <summary>
@@ -165,10 +228,10 @@ public sealed class GraphEl : Element
     /// <summary>Sampling cadence; Rainformer skins sample 1/s (Update=1000).</summary>
     public double SampleRateHz = 1;
     /// <summary>When set, samples come from the shared frame ring instead (per-frame graph).</summary>
-    public Func<Halo.Shared.Metrics.FrameEntry, double>? FrameSample;
+    public Func<Halo.Metrics.FrameEntry, double>? FrameSample;
     public bool FrameDisplayedOnly;
     /// <summary>Optional per-frame predicate — lane selection by FrameFlags (tap vs resolved).</summary>
-    public Func<PanelContext, Halo.Shared.Metrics.FrameEntry, bool>? FrameFilter;
+    public Func<PanelContext, Halo.Metrics.FrameEntry, bool>? FrameFilter;
 
     private long _lastSampleTick = -1;
     private bool _dirty = true;
@@ -182,7 +245,7 @@ public sealed class GraphEl : Element
             // the old console transport's 1 s stdout bursts is gone with the transport
             foreach (ref readonly var f in ctx.Metrics.NewFrames)
             {
-                if (FrameDisplayedOnly && (f.Flags & (uint)Halo.Shared.Metrics.FrameFlags.Displayed) == 0) continue;
+                if (FrameDisplayedOnly && (f.Flags & (uint)Halo.Metrics.FrameFlags.Displayed) == 0) continue;
                 if (FrameFilter != null && !FrameFilter(ctx, f)) continue;
                 double v = FrameSample(f);
                 foreach (var s in Series) s.Ring.Add(v);
@@ -241,7 +304,7 @@ public sealed class GraphEl : Element
 
 public sealed class HLineEl : Element
 {
-    public string Color = "horizLine";
+    public string Color = "text2";
     public override bool Update(PanelContext ctx) => false;
     public override void Measure(RenderContext rc, PanelContext ctx) => Height = 1;
     public override void Draw(RenderContext rc, PanelContext ctx)

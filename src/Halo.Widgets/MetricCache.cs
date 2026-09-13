@@ -1,113 +1,47 @@
-using Halo.Shared.Metrics;
+using Halo.Metrics;
 
 namespace Halo.Widgets;
 
 /// <summary>
-/// Widget-side data layer: attaches to shared memory, resolves metric names once, exposes
-/// values + staleness, keeps per-metric history rings for graphs (sampled at each graph's own
-/// cadence) and a frame-ring consumer for frametime graphs.
+/// Widget-side data layer. The section plumbing — attach/retry, restart invalidation, liveness,
+/// name→index caching, frame draining — lives in <see cref="CollectorSession"/> (the package any
+/// third-party widget uses); what is left here is widget policy: the staleness gate the panels
+/// read and the history rings the graphs draw.
 /// </summary>
 public sealed class MetricCache : IDisposable
 {
-    private readonly MetricsReader _reader = new();
-    private readonly Dictionary<string, int> _idx = new();
-    private ulong _frameCursor;
     public const int FrameBufferSize = 4096;
-    private readonly FrameEntry[] _frameBuf = new FrameEntry[FrameBufferSize];
-    private int _frameCount;
 
-    public bool Attached { get; private set; }
-    public double HeartbeatAge => _reader.HeartbeatAgeSeconds;
-    public int CollectorPid => _reader.CollectorPid;
+    private readonly CollectorSession _session = new(Halo.Shared.Log.Info, FrameBufferSize);
 
-    private long _attachedStartQpc;
+    public bool Attached => _session.Attached;
+    public double HeartbeatAge => _session.HeartbeatAgeSeconds;
+    public int CollectorPid => _session.CollectorPid;
+    public CollectorSession Session => _session;
 
-    /// <summary>Call once per master tick. Handles attach/detach on collector restart.</summary>
-    public void Tick()
-    {
-        if (!Attached)
-        {
-            Attached = _reader.TryAttach();
-            if (Attached)
-            {
-                _idx.Clear();
-                _attachedStartQpc = _reader.CollectorStartQpc;
-                _frameCursor = 0;
-            }
-            if (!Attached) return;
-        }
+    /// <summary>Call once per master tick.</summary>
+    public void Tick() => _session.Poll();
 
-        // A restarted collector reuses the same named section (we keep it alive via our
-        // handle) but rebuilds the registry — cached name→index mappings become WRONG,
-        // silently mixing metrics across slots (observed 2026-07-19). Detect via start QPC.
-        if (_reader.CollectorStartQpc != _attachedStartQpc)
-        {
-            Halo.Shared.Log.Warn("collector restarted — invalidating metric index cache");
-            _reader.Detach();
-            _idx.Clear();
-            _frameCursor = 0;
-            _frameCount = 0;
-            Attached = false;
-            return; // re-attach next tick
-        }
-        if (_reader.HeartbeatAgeSeconds > 30)
-        {
-            // collector very stale — if pid gone, detach so a new section can be picked up
-            try { System.Diagnostics.Process.GetProcessById(_reader.CollectorPid); }
-            catch
-            {
-                _reader.Detach();
-                Attached = false;
-                return;
-            }
-        }
-        // pull new frames
-        var (n, cursor) = _reader.ReadFrames(_frameCursor, _frameBuf);
-        _frameCount = n;
-        _frameCursor = cursor;
-    }
+    public bool Stale => _session.Stale;
 
-    public bool Stale => !Attached || HeartbeatAge > 5;
-
-    private int Index(string name)
-    {
-        if (_idx.TryGetValue(name, out int i)) return i;
-        i = _reader.ResolveIndex(name);
-        if (i >= 0) _idx[name] = i; // don't cache misses: metric may register later
-        return i;
-    }
-
-    public double Value(string name, double fallback = 0)
-        => Attached ? _reader.ReadOr(Index(name), fallback) : fallback;
+    public double Value(string name, double fallback = 0) => _session.Get(name, fallback);
 
     /// <summary>Value + validity: false if missing/never-written/stale-marked.</summary>
     public bool TryValue(string name, out double value, double maxAgeS = double.MaxValue)
-    {
-        value = 0;
-        if (!Attached) return false;
-        if (!_reader.TryRead(Index(name), out value, out double age)) return false;
-        return age <= maxAgeS;
-    }
+        => _session.TryGet(name, out value, maxAgeS);
 
-    public string Text(string name, string fallback = "")
-        => Attached && _reader.TryReadString(Index(name), out string s) ? s : fallback;
+    public string Text(string name, string fallback = "") => _session.GetText(name, fallback);
 
     /// <summary>Frames that arrived since the previous Tick() (chronological).</summary>
-    public ReadOnlySpan<FrameEntry> NewFrames => _frameBuf.AsSpan(0, _frameCount);
+    public ReadOnlySpan<FrameEntry> NewFrames => _session.NewFrames;
 
-    public IReadOnlyList<(string Name, MetricType Type, MetricUnit Unit, float RateHz)> Describe()
-    {
-        var list = new List<(string, MetricType, MetricUnit, float)>();
-        _reader.RefreshRegistry();
-        for (int i = 0; i < _reader.MetricCount; i++)
-        {
-            var d = _reader.DescribeIndex(i);
-            if (d != null) list.Add((d.Value.Name, d.Value.Type, d.Value.Unit, d.Value.RateHz));
-        }
-        return list;
-    }
+    /// <summary>Nominal publish rate of a metric, or 0 when it is not registered. This is what
+    /// bounds a widget's refresh slider honestly (rates plan R2).</summary>
+    public double NominalRateHz(string name) => _session.Describe(name)?.NominalRateHz ?? 0;
 
-    public void Dispose() => _reader.Dispose();
+    public IReadOnlyList<MetricInfo> Describe() => _session.Metrics();
+
+    public void Dispose() => _session.Dispose();
 }
 
 /// <summary>Fixed-capacity sample ring for graph series (one value per sample tick).</summary>

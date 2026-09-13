@@ -1,4 +1,4 @@
-using Halo.Shared.Metrics;
+using Halo.Metrics;
 using Halo.Widgets.Render;
 
 namespace Halo.Widgets.PanelDefs;
@@ -32,9 +32,7 @@ public static class NetworkPanel
         // title band: "NETWORK" (styleTitle → Bold9, centred, upper)
         p.TitleElements.Add(new TextEl
         {
-            Text = c => c.Options.GetValueOrDefault("title", "").Length > 0
-                ? c.Options["title"]
-                : "NETWORK",
+            Text = c => c.TitleOr("NETWORK"),
             Upper = true,
             Style = TextStyle.Bold9,
             Align = TextAlign.Center,

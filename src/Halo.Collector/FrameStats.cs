@@ -1,4 +1,4 @@
-using Halo.Shared.Metrics;
+using Halo.Metrics;
 
 namespace Halo.Collector;
 

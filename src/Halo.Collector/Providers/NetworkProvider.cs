@@ -1,7 +1,7 @@
 using System.Net.NetworkInformation;
+using Halo.Metrics;
 using Halo.Shared;
 using Halo.Shared.Config;
-using Halo.Shared.Metrics;
 
 namespace Halo.Collector.Providers;
 
@@ -15,7 +15,12 @@ namespace Halo.Collector.Providers;
 /// resolution — each published value is a real average over one poll period, and short bursts
 /// are under-reported in proportion to how long that period is.
 /// </summary>
-public sealed class NetworkProvider(GeneralSettings settings) : ISensorProvider
+/// <remarks>
+/// Takes the <see cref="ConfigStore"/>, not a settings snapshot: <c>Reload()</c> allocates a new
+/// settings object, so a captured one stops seeing edits after the first hot-reload — the UI
+/// said "live" and the adapter choice never moved (assessment §4.3).
+/// </remarks>
+public sealed class NetworkProvider(ConfigStore config) : ISensorProvider
 {
     public string Name => "network";
     public double MaxRateHz => 64;
@@ -33,10 +38,10 @@ public sealed class NetworkProvider(GeneralSettings settings) : ISensorProvider
 
     public bool Initialize(MetricSink sink)
     {
-        sink.RegisterWithMax(MetricNames.NetDownBps, MetricUnit.BytesPerSecond, Name, MaxRateHz);
-        sink.RegisterWithMax(MetricNames.NetUpBps, MetricUnit.BytesPerSecond, Name, MaxRateHz);
-        sink.Register(MetricNames.NetDownTotalB, MetricType.Double, MetricUnit.Bytes, Name, MaxRateHz);
-        sink.Register(MetricNames.NetUpTotalB, MetricType.Double, MetricUnit.Bytes, Name, MaxRateHz);
+        sink.RegisterWithMax(MetricNames.NetDownBps, MetricUnit.BytesPerSecond, Name, DefaultRateHz, MetricSemantics.IntervalAvg);
+        sink.RegisterWithMax(MetricNames.NetUpBps, MetricUnit.BytesPerSecond, Name, DefaultRateHz, MetricSemantics.IntervalAvg);
+        sink.Register(MetricNames.NetDownTotalB, MetricType.Double, MetricUnit.Bytes, Name, DefaultRateHz, MetricSemantics.Cumulative);
+        sink.Register(MetricNames.NetUpTotalB, MetricType.Double, MetricUnit.Bytes, Name, DefaultRateHz, MetricSemantics.Cumulative);
         PickNic();
         return true;
     }
@@ -48,7 +53,7 @@ public sealed class NetworkProvider(GeneralSettings settings) : ISensorProvider
         try
         {
             var all = NetworkInterface.GetAllNetworkInterfaces();
-            string prefer = settings.NetworkInterface;
+            string prefer = config.Settings.Collector.NetworkInterface;
             foreach (var ni in all)
             {
                 if (ni.OperationalStatus != OperationalStatus.Up) continue;

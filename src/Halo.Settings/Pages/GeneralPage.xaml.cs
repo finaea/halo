@@ -1,12 +1,10 @@
-using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Globalization;
-using System.IO;
 using System.Net.NetworkInformation;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using Halo.Metrics;
 using Halo.Shared;
 using Halo.Shared.Config;
 
@@ -14,11 +12,11 @@ namespace Halo.Settings.Pages;
 
 public partial class GeneralPage : UserControl, ISettingsPage
 {
+    // "console" is gone with schema v2: the capture app was never shipped and the setting was dead.
     private static readonly (string Value, string Label)[] Transports =
     {
-        ("auto", "Auto — SDK, console fallback"),
-        ("sdk", "Service + SDK (lowest latency)"),
-        ("console", "Console capture app"),
+        ("auto", "Auto — bundled PresentMon service"),
+        ("sdk", "Service + SDK only"),
     };
 
     private static readonly (string Value, string Label)[] TapModes =
@@ -28,15 +26,11 @@ public partial class GeneralPage : UserControl, ISettingsPage
     };
 
     private readonly ConfigStore _store;
-    private readonly ObservableCollection<StringPair> _fanNames = new();
-    private readonly ObservableCollection<StringPair> _fanMaxRpm = new();
 
     public GeneralPage(ConfigStore store)
     {
         _store = store;
         InitializeComponent();
-        FanNamesGrid.ItemsSource = _fanNames;
-        FanMaxRpmGrid.ItemsSource = _fanMaxRpm;
 
         foreach (var t in Transports) TransportCombo.Items.Add(t.Label);
         foreach (var t in TapModes) TapCombo.Items.Add(t.Label);
@@ -48,32 +42,33 @@ public partial class GeneralPage : UserControl, ISettingsPage
     {
         _store.Reload();
         var s = _store.Settings;
-        DefaultRateBox.Text = s.DefaultRateHz.ToString(CultureInfo.InvariantCulture);
-        ScaleSlider.Value = _loadedScale = LoadThemeScale();
-        FontCombo.Text = s.FontFamily;
+
+        AutoScaleCheck.IsChecked = s.Appearance.Scale.IsAuto;
+        ScaleSlider.Value = Math.Clamp(s.Appearance.Scale.Or(1.7), ScaleSlider.Minimum, ScaleSlider.Maximum);
+        ScaleSlider.IsEnabled = !s.Appearance.Scale.IsAuto;
+        FontCombo.Text = s.Appearance.FontFamily;
+        TextSizeBox.Text = s.Appearance.TextSizePt.ToString(CultureInfo.InvariantCulture);
+        CornerRadiusBox.Text = s.Appearance.CornerRadius.ToString(CultureInfo.InvariantCulture);
         LockAllCheck.IsChecked = s.LockAll;
-        FrameLowsBox.Text = s.FrameLowsWindowS.ToString(CultureInfo.InvariantCulture);
-        GraphHistoryBox.Text = s.GraphHistoryS.ToString(CultureInfo.InvariantCulture);
-        EtwFlushBox.Text = s.PresentMonEtwFlushMs.ToString(CultureInfo.InvariantCulture);
-        TransportCombo.SelectedIndex = IndexOf(Transports, s.PresentMonTransport);
-        TapCombo.SelectedIndex = IndexOf(TapModes, s.PresentedTap);
-        IpUrlBox.Text = s.ExternalIpUrl;
-        IpRefreshBox.Text = s.ExternalIpRefreshMinutes.ToString(CultureInfo.InvariantCulture);
-        TopProcBox.Text = s.TopProcessCount.ToString(CultureInfo.InvariantCulture);
+        SnapCheck.IsChecked = s.Snap;
 
-        LoadNetworkAdapters(s.NetworkInterface);
-        LoadDriveChecks(s.DriveLetters);
+        FrameLowsBox.Text = s.Collector.FrameLowsWindowS.ToString(CultureInfo.InvariantCulture);
+        EtwFlushBox.Text = s.Collector.PresentMonEtwFlushMs.ToString(CultureInfo.InvariantCulture);
+        TransportCombo.SelectedIndex = IndexOf(Transports, s.Collector.PresentMonTransport);
+        TapCombo.SelectedIndex = IndexOf(TapModes, s.Collector.PresentedTap);
 
-        _fanNames.Clear();
-        foreach (var kv in s.FanNames) _fanNames.Add(new StringPair { Key = kv.Key, Value = kv.Value });
-        _fanMaxRpm.Clear();
-        foreach (var kv in s.FanMaxRpm)
-            _fanMaxRpm.Add(new StringPair { Key = kv.Key, Value = kv.Value.ToString(CultureInfo.InvariantCulture) });
+        ExternalIpCheck.IsChecked = s.Collector.ExternalIp.Enabled;
+        IpUrlBox.Text = s.Collector.ExternalIp.Url;
+        IpRefreshBox.Text = s.Collector.ExternalIp.RefreshMinutes.ToString(CultureInfo.InvariantCulture);
+        LoadNetworkAdapters(s.Collector.NetworkInterface);
 
         Status.Text = "";
     }
 
     public void OnLeave() { }
+
+    private void AutoScale_Changed(object sender, RoutedEventArgs e)
+        => ScaleSlider.IsEnabled = AutoScaleCheck.IsChecked != true;
 
     private static int IndexOf((string Value, string Label)[] set, string value)
     {
@@ -98,114 +93,51 @@ public partial class GeneralPage : UserControl, ISettingsPage
         NetIfCombo.Text = string.IsNullOrWhiteSpace(current) ? "Best" : current;
     }
 
-    private void LoadDriveChecks(List<string> configured)
-    {
-        DrivesPanel.Children.Clear();
-        var present = DriveInfo.GetDrives()
-            .Where(d => d.DriveType is DriveType.Fixed or DriveType.Removable)
-            .Select(d => d.Name[..1].ToUpperInvariant());
-        var known = new SortedSet<string>(present, StringComparer.OrdinalIgnoreCase);
-        foreach (var c in configured) known.Add(c.ToUpperInvariant());
-
-        foreach (var letter in known)
-        {
-            bool absent = !Directory.Exists(letter + ":\\");
-            DrivesPanel.Children.Add(new CheckBox
-            {
-                Content = absent ? $"{letter}: (absent)" : letter + ":",
-                Tag = letter,
-                IsChecked = configured.Contains(letter, StringComparer.OrdinalIgnoreCase),
-                Margin = new Thickness(0, 3, 16, 3),
-            });
-        }
-    }
-
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         var s = _store.Settings;
-        s.DefaultRateHz = Clamp(ParseD(DefaultRateBox.Text, s.DefaultRateHz), 1, 100);
-        s.FontFamily = string.IsNullOrWhiteSpace(FontCombo.Text) ? s.FontFamily : FontCombo.Text.Trim();
+
+        s.Appearance.Scale = AutoScaleCheck.IsChecked == true
+            ? ScaleValue.Auto
+            : ScaleValue.Fixed(Math.Round(ScaleSlider.Value, 2));
+        s.Appearance.FontFamily = string.IsNullOrWhiteSpace(FontCombo.Text) ? s.Appearance.FontFamily : FontCombo.Text.Trim();
+        s.Appearance.TextSizePt = Clamp(ParseD(TextSizeBox.Text, s.Appearance.TextSizePt), 5, 24);
+        s.Appearance.CornerRadius = Clamp(ParseD(CornerRadiusBox.Text, s.Appearance.CornerRadius), 0, 20);
         s.LockAll = LockAllCheck.IsChecked == true;
-        s.FrameLowsWindowS = ParseD(FrameLowsBox.Text, s.FrameLowsWindowS);
-        s.GraphHistoryS = ParseD(GraphHistoryBox.Text, s.GraphHistoryS);
-        s.PresentMonEtwFlushMs = (int)Clamp(ParseD(EtwFlushBox.Text, s.PresentMonEtwFlushMs), 0, 1000);
-        if (TransportCombo.SelectedIndex >= 0) s.PresentMonTransport = Transports[TransportCombo.SelectedIndex].Value;
-        if (TapCombo.SelectedIndex >= 0) s.PresentedTap = TapModes[TapCombo.SelectedIndex].Value;
-        s.ExternalIpUrl = IpUrlBox.Text.Trim();
-        s.ExternalIpRefreshMinutes = ParseD(IpRefreshBox.Text, s.ExternalIpRefreshMinutes);
-        s.DriveLetters = DrivesPanel.Children.OfType<CheckBox>()
-            .Where(c => c.IsChecked == true)
-            .Select(c => (string)c.Tag)
-            .ToList();
-        s.NetworkInterface = string.IsNullOrWhiteSpace(NetIfCombo.Text) ? "Best" : NetIfCombo.Text.Trim();
-        s.TopProcessCount = (int)Clamp(ParseD(TopProcBox.Text, s.TopProcessCount), 0, 100);
+        s.Snap = SnapCheck.IsChecked == true;
 
-        var names = new Dictionary<string, string>();
-        foreach (var p in _fanNames)
-            if (!string.IsNullOrWhiteSpace(p.Key)) names[p.Key.Trim()] = (p.Value ?? "").Trim();
-        s.FanNames = names;
-
-        var maxRpm = new Dictionary<string, double>();
-        foreach (var p in _fanMaxRpm)
-            if (!string.IsNullOrWhiteSpace(p.Key) &&
-                double.TryParse(p.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out double d))
-                maxRpm[p.Key.Trim()] = d;
-        s.FanMaxRpm = maxRpm;
+        s.Collector.FrameLowsWindowS = ParseD(FrameLowsBox.Text, s.Collector.FrameLowsWindowS);
+        s.Collector.PresentMonEtwFlushMs = (int)Clamp(ParseD(EtwFlushBox.Text, s.Collector.PresentMonEtwFlushMs), 0, 1000);
+        if (TransportCombo.SelectedIndex >= 0) s.Collector.PresentMonTransport = Transports[TransportCombo.SelectedIndex].Value;
+        if (TapCombo.SelectedIndex >= 0) s.Collector.PresentedTap = TapModes[TapCombo.SelectedIndex].Value;
+        s.Collector.NetworkInterface = string.IsNullOrWhiteSpace(NetIfCombo.Text) ? "Best" : NetIfCombo.Text.Trim();
+        s.Collector.ExternalIp.Enabled = ExternalIpCheck.IsChecked == true;
+        s.Collector.ExternalIp.Url = IpUrlBox.Text.Trim();
+        s.Collector.ExternalIp.RefreshMinutes = ParseD(IpRefreshBox.Text, s.Collector.ExternalIp.RefreshMinutes);
 
         try
         {
             _store.SaveSettings();
-            double scale = Math.Round(ScaleSlider.Value, 2);
-            if (Math.Abs(scale - _loadedScale) > 0.001) { SaveThemeScale(scale); _loadedScale = scale; }
             Status.Text = $"Saved at {DateTime.Now:HH:mm:ss}. Widgets and collector pick changes up live.";
         }
         catch (Exception ex) { Status.Text = "Save failed: " + ex.Message; }
     }
 
-    // Widget scale lives in theme.json (the renderer reads Theme.Scale only); this page
-    // edits just the "scale" key and leaves the color tokens untouched.
-    private double _loadedScale = 1.7;
-
-    private static string ThemePath => Path.Combine(ProjectPaths.ConfigDir, "theme.json");
-
-    private static double LoadThemeScale()
-    {
-        try
-        {
-            if (File.Exists(ThemePath))
-            {
-                using var doc = JsonDocument.Parse(File.ReadAllText(ThemePath));
-                if (doc.RootElement.TryGetProperty("scale", out var s) && s.ValueKind == JsonValueKind.Number)
-                    return s.GetDouble();
-            }
-        }
-        catch { /* fall through to default */ }
-        return 1.7;
-    }
-
-    private static void SaveThemeScale(double scale)
-    {
-        JsonObject root;
-        try
-        {
-            root = File.Exists(ThemePath)
-                ? JsonNode.Parse(File.ReadAllText(ThemePath)) as JsonObject ?? new JsonObject()
-                : new JsonObject();
-        }
-        catch { root = new JsonObject(); }
-        root["scale"] = scale;
-        File.WriteAllText(ThemePath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-    }
-
     private void ResetMax_Click(object sender, RoutedEventArgs e)
-        => Status.Text = ControlPipe.Send("reset-max")
+        => Status.Text = ControlPipe.Send(ControlPipe.ResetMax)
             ? "Sent reset-max to collector."
             : "Collector not running (reset-max not delivered).";
 
     private void ResetNet_Click(object sender, RoutedEventArgs e)
-        => Status.Text = ControlPipe.Send("reset-net")
+        => Status.Text = ControlPipe.Send(ControlPipe.ResetNet)
             ? "Sent reset-net to collector."
             : "Collector not running (reset-net not delivered).";
+
+    private void OpenDataFolder_Click(object sender, RoutedEventArgs e)
+    {
+        try { Process.Start(new ProcessStartInfo(Paths.DataDir) { UseShellExecute = true }); }
+        catch (Exception ex) { Status.Text = "Could not open " + Paths.DataDir + ": " + ex.Message; }
+    }
 
     private static double ParseD(string t, double fallback)
         => double.TryParse(t, NumberStyles.Any, CultureInfo.InvariantCulture, out double d) ? d : fallback;

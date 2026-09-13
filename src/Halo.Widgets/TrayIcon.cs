@@ -36,7 +36,7 @@ public sealed class TrayIcon : IDisposable
         // WS_EX_TOOLWINDOW gets the broadcast while staying out of the taskbar and alt-tab.
         _hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, "HaloTray", WS_POPUP, 0, 0, 0, 0, 0, 0, wc.hInstance, 0);
 
-        string icoPath = Path.Combine(app.ProjectRoot, "assets", "halo.ico");
+        string icoPath = Halo.Shared.Paths.IconFile;
         _hIcon = File.Exists(icoPath)
             ? LoadImageW(0, icoPath, 1 /*IMAGE_ICON*/, 0, 0, 0x10 /*LR_LOADFROMFILE*/ | 0x40 /*LR_DEFAULTSIZE*/)
             : 0;

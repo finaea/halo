@@ -1,11 +1,16 @@
 using System.Collections.Concurrent;
-using Halo.Shared.Metrics;
+using Halo.Metrics;
 
 namespace Halo.Collector;
 
 /// <summary>
 /// Provider-facing facade over MetricsWriter: name-based set with cached slot indexes,
 /// automatic session-max tracking ("name.max" metrics) and reset support (plan §6).
+///
+/// Providers register each metric with its <b>nominal rate</b> — the real cadence of that
+/// number, which is not always the provider's poll rate (fps.app.name is refreshed once a
+/// second inside a 40 Hz drain; net.ip.external every few minutes). Consumers read that rate
+/// out of the section to bound their own refresh sliders honestly (rates plan R2/R3).
 /// </summary>
 public sealed class MetricSink(MetricsWriter writer)
 {
@@ -20,18 +25,22 @@ public sealed class MetricSink(MetricsWriter writer)
 
     public MetricsWriter Writer { get; } = writer;
 
-    public int Register(string name, MetricType type, MetricUnit unit, string provider, double maxRateHz)
+    public int Register(string name, MetricType type, MetricUnit unit, string provider, double nominalRateHz,
+        MetricSemantics semantics = MetricSemantics.Latest, MetricFlags flags = MetricFlags.None, int windowMs = 0)
     {
-        int idx = Writer.Register(new MetricDescriptor(name, type, unit, provider, (float)maxRateHz));
+        int idx = Writer.Register(new MetricDescriptor(name, type, unit, provider, nominalRateHz, semantics, flags, windowMs));
         _indexByName[name] = idx;
         return idx;
     }
 
     /// <summary>Register a double metric together with its ".max" session-extremum companion.</summary>
-    public void RegisterWithMax(string name, MetricUnit unit, string provider, double maxRateHz)
+    public void RegisterWithMax(string name, MetricUnit unit, string provider, double nominalRateHz,
+        MetricSemantics semantics = MetricSemantics.Latest, MetricFlags flags = MetricFlags.None, int windowMs = 0)
     {
-        Register(name, MetricType.Double, unit, provider, maxRateHz);
-        int maxIdx = Register(name + MetricNames.MaxSuffix, MetricType.Double, unit, provider, maxRateHz);
+        int idx = Register(name, MetricType.Double, unit, provider, nominalRateHz, semantics, flags | MetricFlags.HasMaxCompanion, windowMs);
+        _ = idx;
+        int maxIdx = Register(name + MetricNames.MaxSuffix, MetricType.Double, unit, provider, nominalRateHz,
+            MetricSemantics.RunningMax, flags | MetricFlags.IsMaxCompanion);
         _maxByName[name] = new MaxState { Index = maxIdx };
     }
 
@@ -63,6 +72,8 @@ public sealed class MetricSink(MetricsWriter writer)
                 Writer.MarkStale(idx);
     }
 
+    public bool IsRegistered(string name) => _indexByName.ContainsKey(name);
+
     public void SetEffectiveRate(string name, double hz)
     {
         if (_indexByName.TryGetValue(name, out int idx)) Writer.SetEffectiveRate(idx, (float)hz);
@@ -78,4 +89,14 @@ public sealed class MetricSink(MetricsWriter writer)
             Writer.MarkStale(max.Index);
         }
     }
+
+    // ---- provider health (published in the section's provider table) ----
+
+    public int RegisterProvider(string name, bool needsElevation) => Writer.RegisterProvider(name, needsElevation);
+
+    public void SetProviderState(int index, ProviderState state, double rateHz, string lastError = "")
+        => Writer.SetProviderState(index, state, rateHz, lastError);
+
+    public void SetProviderPoll(int index, long qpc, double elapsedMs)
+        => Writer.SetProviderPoll(index, qpc, elapsedMs);
 }

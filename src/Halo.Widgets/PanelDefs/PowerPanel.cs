@@ -1,4 +1,4 @@
-using Halo.Shared.Metrics;
+using Halo.Metrics;
 using Halo.Widgets.Render;
 
 namespace Halo.Widgets.PanelDefs;
@@ -10,7 +10,7 @@ namespace Halo.Widgets.PanelDefs;
 /// ("Max: …", gray, center). VCORE and CPU POWER come from elevated-only sensors (SuperIO
 /// voltage / MSR package power via LibreHardwareMonitor); when that reading isn't available the
 /// current value shows "N/A" (text2) and the max shows "Max: —" — the row itself is never
-/// hidden. GPU VOLT / GPU POWER don't need that guard.
+/// hidden. The GPU rows follow the widget's "gpuIndex" option.
 /// </summary>
 public static class PowerPanel
 {
@@ -19,19 +19,24 @@ public static class PowerPanel
         var p = new Panel();
         var t = ctx.Theme;
 
+        int gpu = ctx.OptionInt("gpuIndex", 0);
+        string gpuVolt = MetricNames.GpuVoltageV(gpu);
+        string gpuPower = MetricNames.GpuPowerW(gpu);
+        bool showMax = !ctx.Options.ContainsKey("showMax") || ctx.OptionBool("showMax");
+
         p.TitleElements.Add(new TextEl
         {
-            Text = c => c.Options.GetValueOrDefault("title", "").Length > 0 ? c.Options["title"] : "POWER",
+            Text = c => c.TitleOr("POWER"),
             Upper = true,
             Style = TextStyle.Bold9,
             Align = TextAlign.Center,
             Color = "title",
         });
 
-        // Row 1 — VCORE (elevated-only), warn thresholds 1.1 / 1.3 / 1.4 / 1.5 V
+        // Row 1 — VCORE (elevated-only)
         p.Elements.Add(new TextEl
         {
-            Text = _ => "VCORE",
+            Text = c => c.Label("vcore", "VCORE"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Left,
             Color = "text",
@@ -43,6 +48,7 @@ public static class PowerPanel
             Text = c => c.Metrics.TryValue(MetricNames.CpuVcoreV, out _)
                 ? $"Max: {ValueFormat.Fixed(c.Metrics.Value(MetricNames.CpuVcoreV + MetricNames.MaxSuffix), 3)} V"
                 : "Max: —",
+            VisibleWhen = _ => showMax,
             Style = TextStyle.Text8,
             Align = TextAlign.Center,
             Color = "maxLabelGray",
@@ -52,17 +58,17 @@ public static class PowerPanel
         p.Elements.Add(new TextEl
         {
             Text = c => c.Metrics.TryValue(MetricNames.CpuVcoreV, out double v) ? ValueFormat.Fixed(v, 3) + " V" : "N/A",
-            ColorFn = c => c.Metrics.TryValue(MetricNames.CpuVcoreV, out double v) ? CpuRamPanelImpl.WarnColor(v, 1.1, 1.3, 1.4, 1.5) : "text2",
+            ColorFn = c => c.Metrics.TryValue(MetricNames.CpuVcoreV, out double v) ? CpuRamPanelImpl.WarnColor(v, c.Warn("vcore")) : "text2",
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
             FixedH = 11,
         });
 
-        // Row 2 — GPU VOLT, warn thresholds 0.85 / 0.95 / 1.0 / 1.05 V
+        // Row 2 — GPU VOLT
         p.Elements.Add(new TextEl
         {
-            Text = _ => "GPU VOLT",
+            Text = c => c.Label("gpuVolt", "GPU VOLT"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Left,
             Color = "text",
@@ -71,7 +77,8 @@ public static class PowerPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"Max: {ValueFormat.Fixed(c.Metrics.Value(MetricNames.GpuVoltageV + MetricNames.MaxSuffix), 3)} V",
+            Text = c => $"Max: {ValueFormat.Fixed(c.Metrics.Value(gpuVolt + MetricNames.MaxSuffix), 3)} V",
+            VisibleWhen = _ => showMax,
             Style = TextStyle.Text8,
             Align = TextAlign.Center,
             Color = "maxLabelGray",
@@ -80,18 +87,18 @@ public static class PowerPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => ValueFormat.Fixed(c.Metrics.Value(MetricNames.GpuVoltageV), 3) + " V",
-            ColorFn = c => CpuRamPanelImpl.WarnColor(c.Metrics.Value(MetricNames.GpuVoltageV), 0.85, 0.95, 1.0, 1.05),
+            Text = c => ValueFormat.Fixed(c.Metrics.Value(gpuVolt), 3) + " V",
+            ColorFn = c => CpuRamPanelImpl.WarnColor(c.Metrics.Value(gpuVolt), c.Warn("gpuVolt")),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
             FixedH = 11,
         });
 
-        // Row 3 — CPU POWER (elevated-only), warn thresholds 50 / 100 / 150 / 200 W
+        // Row 3 — CPU POWER (elevated-only)
         p.Elements.Add(new TextEl
         {
-            Text = _ => "CPU POWER",
+            Text = c => c.Label("cpuPower", "CPU POWER"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Left,
             Color = "text",
@@ -103,6 +110,7 @@ public static class PowerPanel
             Text = c => c.Metrics.TryValue(MetricNames.CpuPackagePowerW, out _)
                 ? $"Max: {ValueFormat.Int0(c.Metrics.Value(MetricNames.CpuPackagePowerW + MetricNames.MaxSuffix))}W"
                 : "Max: —",
+            VisibleWhen = _ => showMax,
             Style = TextStyle.Text8,
             Align = TextAlign.Center,
             Color = "maxLabelGray",
@@ -112,17 +120,17 @@ public static class PowerPanel
         p.Elements.Add(new TextEl
         {
             Text = c => c.Metrics.TryValue(MetricNames.CpuPackagePowerW, out double v) ? ValueFormat.Int0(v) + "W" : "N/A",
-            ColorFn = c => c.Metrics.TryValue(MetricNames.CpuPackagePowerW, out double v) ? CpuRamPanelImpl.WarnColor(v, 50, 100, 150, 200) : "text2",
+            ColorFn = c => c.Metrics.TryValue(MetricNames.CpuPackagePowerW, out double v) ? CpuRamPanelImpl.WarnColor(v, c.Warn("cpuPower")) : "text2",
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
             FixedH = 11,
         });
 
-        // Row 4 — GPU POWER, warn thresholds 50 / 150 / 200 / 250 W
+        // Row 4 — GPU POWER
         p.Elements.Add(new TextEl
         {
-            Text = _ => "GPU POWER",
+            Text = c => c.Label("gpuPower", "GPU POWER"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Left,
             Color = "text",
@@ -131,7 +139,8 @@ public static class PowerPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"Max: {ValueFormat.Int0(c.Metrics.Value(MetricNames.GpuPowerW + MetricNames.MaxSuffix))}W",
+            Text = c => $"Max: {ValueFormat.Int0(c.Metrics.Value(gpuPower + MetricNames.MaxSuffix))}W",
+            VisibleWhen = _ => showMax,
             Style = TextStyle.Text8,
             Align = TextAlign.Center,
             Color = "maxLabelGray",
@@ -140,8 +149,8 @@ public static class PowerPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => ValueFormat.Int0(c.Metrics.Value(MetricNames.GpuPowerW)) + "W",
-            ColorFn = c => CpuRamPanelImpl.WarnColor(c.Metrics.Value(MetricNames.GpuPowerW), 50, 150, 200, 250),
+            Text = c => ValueFormat.Int0(c.Metrics.Value(gpuPower)) + "W",
+            ColorFn = c => CpuRamPanelImpl.WarnColor(c.Metrics.Value(gpuPower), c.Warn("gpuPower")),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,

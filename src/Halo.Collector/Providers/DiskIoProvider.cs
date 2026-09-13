@@ -1,12 +1,11 @@
 using System.Runtime.InteropServices;
+using Halo.Metrics;
 using Halo.Shared;
-using Halo.Shared.Config;
-using Halo.Shared.Metrics;
 
 namespace Halo.Collector.Providers;
 
 /// <summary>
-/// Per-volume read/write B/s + activity %, via PDH LogicalDisk counters
+/// Per-volume read/write B/s, via PDH LogicalDisk counters
 /// (english names, locale-safe). PDH computes rates between our collects, so each published
 /// value is a real average over exactly one poll period.
 ///
@@ -16,23 +15,16 @@ namespace Halo.Collector.Providers;
 /// background writes while otherwise idle). So the poll rate really does set the resolution:
 /// short bursts are averaged across the poll period and under-reported at a lower rate.
 /// </summary>
-public sealed class DiskIoProvider(ConfigStore config) : ISensorProvider
+public sealed class DiskIoProvider : ISensorProvider
 {
     public string Name => "disk-io";
     public double MaxRateHz => 64;
     public double DefaultRateHz => 5;
 
     private nint _query;
-    private readonly List<(char Letter, nint Read, nint Write, nint Busy)> _counters = new();
+    private readonly List<(char Letter, nint Read, nint Write)> _counters = new();
     private bool _primed;
     private string _activeLetters = "";
-
-    // Normalised, de-duplicated, order-stable view of the configured drive letters — the
-    // change-detector for hot-reload. Derived from live settings (config.Settings), so a
-    // drive added in the Settings app is seen without restarting the collector.
-    private string ActiveLetters() => string.Concat(config.Settings.DriveLetters
-        .Where(s => !string.IsNullOrEmpty(s))
-        .Select(s => char.ToUpperInvariant(s[0])).Distinct().OrderBy(c => c));
 
     public bool Initialize(MetricSink sink) => BuildCounters(sink);
 
@@ -42,23 +34,23 @@ public sealed class DiskIoProvider(ConfigStore config) : ISensorProvider
         if (PdhOpenQueryW(null, 0, out _query) != 0) return false;
 
         _counters.Clear();
-        foreach (char c in config.Settings.DriveLetters
-                     .Where(s => !string.IsNullOrEmpty(s))
-                     .Select(s => char.ToUpperInvariant(s[0])).Distinct())
+        foreach (char c in Volumes.Local())
         {
             nint r = Add($"\\LogicalDisk({c}:)\\Disk Read Bytes/sec");
             nint w = Add($"\\LogicalDisk({c}:)\\Disk Write Bytes/sec");
-            nint b = Add($"\\LogicalDisk({c}:)\\% Disk Time");
             if (r == 0 && w == 0) continue;
-            _counters.Add((c, r, w, b));
-            sink.Register(MetricNames.DriveReadBps(c), MetricType.Double, MetricUnit.BytesPerSecond, Name, MaxRateHz);
-            sink.Register(MetricNames.DriveWriteBps(c), MetricType.Double, MetricUnit.BytesPerSecond, Name, MaxRateHz);
-            sink.Register(MetricNames.DriveActivityPct(c), MetricType.Double, MetricUnit.Percent, Name, MaxRateHz);
+            _counters.Add((c, r, w));
+            // PDH computes the rate between our two collects, so the value is a real average
+            // over exactly one poll period — not an instantaneous reading.
+            sink.Register(MetricNames.DriveReadBps(c), MetricType.Double, MetricUnit.BytesPerSecond, Name,
+                DefaultRateHz, MetricSemantics.IntervalAvg);
+            sink.Register(MetricNames.DriveWriteBps(c), MetricType.Double, MetricUnit.BytesPerSecond, Name,
+                DefaultRateHz, MetricSemantics.IntervalAvg);
         }
         _primed = false;
-        // Commit the change-detector only when we actually bound counters — otherwise a letter
-        // whose volume isn't mounted yet would be recorded as "handled" and never retried.
-        if (_counters.Count > 0) _activeLetters = ActiveLetters();
+        // Commit the change-detector only when we actually bound counters — otherwise a volume
+        // that isn't mounted yet would be recorded as "handled" and never retried.
+        if (_counters.Count > 0) _activeLetters = Volumes.Key(_counters.Select(c => c.Letter));
         return _counters.Count > 0;
     }
 
@@ -69,12 +61,12 @@ public sealed class DiskIoProvider(ConfigStore config) : ISensorProvider
 
     public void Poll(MetricSink sink)
     {
-        // Hot-reload: rebuild the PDH query when the configured drive set changes so a
-        // newly-added volume starts publishing read/write/activity without a restart.
-        string live = ActiveLetters();
+        // Hot-plug: rebuild the PDH query when the set of volumes changes so a newly-attached
+        // drive starts publishing read/write without a restart.
+        string live = Volumes.Key(Volumes.Local());
         if (live != _activeLetters)
         {
-            Log.Info($"disk-io: drive list changed ({_activeLetters} -> {live}) — rebuilding counters");
+            Log.Info($"disk-io: volumes changed ({_activeLetters} -> {live}) — rebuilding counters");
             if (!BuildCounters(sink)) return;   // no valid counters yet; try again next poll
         }
 
@@ -82,11 +74,10 @@ public sealed class DiskIoProvider(ConfigStore config) : ISensorProvider
         if (status != 0) throw new InvalidOperationException($"PdhCollectQueryData 0x{status:X8}");
         if (!_primed) { _primed = true; return; } // rates need two collections
 
-        foreach (var (c, r, w, b) in _counters)
+        foreach (var (c, r, w) in _counters)
         {
             if (r != 0) sink.Set(MetricNames.DriveReadBps(c), Value(r));
             if (w != 0) sink.Set(MetricNames.DriveWriteBps(c), Value(w));
-            if (b != 0) sink.Set(MetricNames.DriveActivityPct(c), Math.Clamp(Value(b), 0, 100));
         }
     }
 

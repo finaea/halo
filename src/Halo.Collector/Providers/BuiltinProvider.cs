@@ -2,17 +2,18 @@ using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using Halo.Metrics;
 using Halo.Shared;
 using Halo.Shared.Config;
-using Halo.Shared.Metrics;
 
 namespace Halo.Collector.Providers;
 
 /// <summary>
-/// Builtin cheap metrics (plan §5): uptime, RAM, internal/external IP, drive space + labels.
-/// 1 Hz; external IP on network-change + every N minutes.
+/// Builtin cheap metrics (plan §5): uptime, RAM, internal/external IP, drive space + labels,
+/// and the sys.* capability metrics the System-check page reads.
+/// 1 Hz; external IP (opt-in) on network-change + every N minutes.
 /// </summary>
-public sealed class BuiltinProvider(ConfigStore config) : ISensorProvider
+public sealed class BuiltinProvider(ConfigStore config, bool elevated) : ISensorProvider
 {
     public string Name => "builtin";
     public double MaxRateHz => 4;
@@ -26,12 +27,16 @@ public sealed class BuiltinProvider(ConfigStore config) : ISensorProvider
 
     public bool Initialize(MetricSink sink)
     {
-        sink.Register(MetricNames.SysUptimeS, MetricType.Double, MetricUnit.Seconds, Name, MaxRateHz);
-        sink.Register(MetricNames.RamUsedGb, MetricType.Double, MetricUnit.Gigabytes, Name, MaxRateHz);
-        sink.Register(MetricNames.RamTotalGb, MetricType.Double, MetricUnit.Gigabytes, Name, MaxRateHz);
-        sink.Register(MetricNames.RamPct, MetricType.Double, MetricUnit.Percent, Name, MaxRateHz);
-        sink.Register(MetricNames.NetIpInternal, MetricType.String, MetricUnit.Text, Name, 1);
-        sink.Register(MetricNames.NetIpExternal, MetricType.String, MetricUnit.Text, Name, 1);
+        sink.Register(MetricNames.SysUptimeS, MetricType.Double, MetricUnit.Seconds, Name, DefaultRateHz, MetricSemantics.Cumulative);
+        sink.Register(MetricNames.RamUsedGb, MetricType.Double, MetricUnit.Gigabytes, Name, DefaultRateHz);
+        sink.Register(MetricNames.RamTotalGb, MetricType.Double, MetricUnit.Gigabytes, Name, DefaultRateHz, MetricSemantics.Static);
+        sink.Register(MetricNames.RamPct, MetricType.Double, MetricUnit.Percent, Name, DefaultRateHz);
+        sink.Register(MetricNames.NetIpInternal, MetricType.String, MetricUnit.Text, Name, DefaultRateHz);
+        // one lookup per refreshMinutes, not per poll — say so, so nobody builds a graph on it
+        sink.Register(MetricNames.NetIpExternal, MetricType.String, MetricUnit.Text, Name,
+            1.0 / Math.Max(60, config.Settings.Collector.ExternalIp.RefreshMinutes * 60));
+
+        PublishCapabilities(sink);
 
         _drives = new();
         SyncDrives(sink);
@@ -41,21 +46,50 @@ public sealed class BuiltinProvider(ConfigStore config) : ISensorProvider
     }
 
     /// <summary>
-    /// Reconcile the registered drive set with the live config (hot-reload). Registers metrics
-    /// for newly-added letters (Register is idempotent) and marks removed ones stale, so adding
-    /// a drive in the Settings app publishes its space/label without restarting the collector.
+    /// sys.* — what this machine can actually do, so the System-check page and third-party tools
+    /// can explain an empty panel without parsing logs (interface plan I5).
+    /// </summary>
+    private void PublishCapabilities(MetricSink sink)
+    {
+        sink.Register(MetricNames.SysElevated, MetricType.Double, MetricUnit.None, Name, 0, MetricSemantics.Static);
+        sink.Register(MetricNames.SysOsBuild, MetricType.Double, MetricUnit.None, Name, 0, MetricSemantics.Static);
+        sink.Register(MetricNames.SysCollectorVersion, MetricType.String, MetricUnit.Text, Name, 0, MetricSemantics.Static);
+        sink.Register(MetricNames.SysPawnIoInstalled, MetricType.Double, MetricUnit.None, Name, 0, MetricSemantics.Static);
+        sink.Register(MetricNames.SysPawnIoVersion, MetricType.String, MetricUnit.Text, Name, 0, MetricSemantics.Static);
+
+        sink.Set(MetricNames.SysElevated, elevated ? 1 : 0);
+        sink.Set(MetricNames.SysOsBuild, Environment.OSVersion.Version.Build);
+        sink.SetString(MetricNames.SysCollectorVersion, AppVersion.Current);
+
+        // LibreHardwareMonitor 0.9.6 has no WinRing0 any more: without the PawnIO driver, CPU
+        // temperature/power/Vcore and fan RPM are simply absent (assessment §2).
+        try
+        {
+            bool installed = LibreHardwareMonitor.PawnIo.PawnIo.IsInstalled;
+            sink.Set(MetricNames.SysPawnIoInstalled, installed ? 1 : 0);
+            sink.SetString(MetricNames.SysPawnIoVersion, installed ? LibreHardwareMonitor.PawnIo.PawnIo.Version?.ToString() ?? "" : "");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"PawnIO probe failed: {ex.Message}");
+            sink.Set(MetricNames.SysPawnIoInstalled, 0);
+        }
+    }
+
+    /// <summary>
+    /// Reconcile the registered drive set with the volumes present right now. Registers metrics
+    /// for newly-seen letters (Register is idempotent) and marks removed ones stale, so plugging
+    /// in a drive publishes its space/label without restarting the collector.
     /// </summary>
     private void SyncDrives(MetricSink sink)
     {
-        var current = config.Settings.DriveLetters
-            .Where(s => !string.IsNullOrEmpty(s))
-            .Select(s => char.ToUpperInvariant(s[0])).Distinct().ToList();
+        var current = Volumes.Local();
 
         foreach (char c in current.Where(c => !_drives.Contains(c)))
         {
-            sink.Register(MetricNames.DriveUsedB(c), MetricType.Double, MetricUnit.Bytes, Name, 1);
-            sink.Register(MetricNames.DriveTotalB(c), MetricType.Double, MetricUnit.Bytes, Name, 1);
-            sink.Register(MetricNames.DriveLabel(c), MetricType.String, MetricUnit.Text, Name, 1);
+            sink.Register(MetricNames.DriveUsedB(c), MetricType.Double, MetricUnit.Bytes, Name, DefaultRateHz);
+            sink.Register(MetricNames.DriveTotalB(c), MetricType.Double, MetricUnit.Bytes, Name, DefaultRateHz, MetricSemantics.Static);
+            sink.Register(MetricNames.DriveLabel(c), MetricType.String, MetricUnit.Text, Name, DefaultRateHz, MetricSemantics.Static);
         }
         foreach (char c in _drives.Where(c => !current.Contains(c)))
         {
@@ -99,20 +133,31 @@ public sealed class BuiltinProvider(ConfigStore config) : ISensorProvider
 
         sink.SetString(MetricNames.NetIpInternal, GetInternalIp());
 
-        if (_netChanged || DateTime.UtcNow >= _nextExternalIp)
+        // The only outbound request Halo ever makes, and it is off unless the user asks for it
+        // (packaging plan P9). Read live from the store so toggling it takes effect immediately.
+        var ipCfg = config.Settings.Collector.ExternalIp;
+        if (ipCfg.Enabled)
         {
-            _netChanged = false;
-            _nextExternalIp = DateTime.UtcNow.AddMinutes(Math.Max(1, config.Settings.ExternalIpRefreshMinutes));
-            _ = FetchExternalIpAsync(sink);
+            if (_netChanged || DateTime.UtcNow >= _nextExternalIp)
+            {
+                _netChanged = false;
+                _nextExternalIp = DateTime.UtcNow.AddMinutes(Math.Max(1, ipCfg.RefreshMinutes));
+                _ = FetchExternalIpAsync(sink, ipCfg.Url);
+            }
+            sink.SetString(MetricNames.NetIpExternal, _externalIp);
         }
-        sink.SetString(MetricNames.NetIpExternal, _externalIp);
+        else
+        {
+            _externalIp = "N/A";
+            sink.MarkStale(MetricNames.NetIpExternal);
+        }
     }
 
-    private async Task FetchExternalIpAsync(MetricSink sink)
+    private async Task FetchExternalIpAsync(MetricSink sink, string url)
     {
         try
         {
-            string ip = (await _http.GetStringAsync(config.Settings.ExternalIpUrl).ConfigureAwait(false)).Trim();
+            string ip = (await _http.GetStringAsync(url).ConfigureAwait(false)).Trim();
             if (ip.Length is > 6 and < 46) _externalIp = ip;
         }
         catch (Exception ex)

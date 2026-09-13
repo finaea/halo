@@ -1,4 +1,4 @@
-using Halo.Shared.Metrics;
+using Halo.Metrics;
 using Halo.Widgets.Render;
 
 namespace Halo.Widgets.PanelDefs;
@@ -21,7 +21,7 @@ public static class FpsPanel
         var p = new Panel();
         var t = ctx.Theme;
 
-        string stream = ctx.Options.GetValueOrDefault("stream", "displayed");
+        string stream = ctx.Option("stream");
         bool presented = stream == "presented";
 
         string fpsMetric = presented ? MetricNames.FpsPresented : MetricNames.FpsDisplayed;
@@ -33,7 +33,7 @@ public static class FpsPanel
         // ---- title band: centered title + right-slot status chip ----
         p.TitleElements.Add(new TextEl
         {
-            Text = c => c.Options.GetValueOrDefault("title", presented ? "FPS COUNTER (PRESENTED)" : "FPS COUNTER (DISPLAYED)"),
+            Text = c => c.TitleOr(presented ? "FPS COUNTER (PRESENTED)" : "FPS COUNTER (DISPLAYED)"),
             Upper = true,
             Style = TextStyle.Bold9,
             Align = TextAlign.Center,
@@ -53,11 +53,13 @@ public static class FpsPanel
         });
 
         // ---- "Framerate: <N>FPS … N%" row (FPS number beside the label), + 1px usage bar ----
-        p.Elements.Add(new TextEl { Text = _ => "Framerate:", Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", AbsY = 42, FixedH = 11 });
+        p.Elements.Add(new TextEl { Text = c => c.Label("fps", "Framerate:"), Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", AbsY = 42, FixedH = 11 });
         p.Elements.Add(new TextEl
         {
             Text = c => IsIdle(c) ? "—" : $"{ValueFormat.Int0(c.Metrics.Value(fpsMetric))}FPS",
-            ColorFn = c => IsIdle(c) ? "inactiveButton" : CpuRamPanelImpl.WarnColor(c.Metrics.Value(fpsMetric), 30, 60, 90, 120),
+            // same five-stage ramp as the temperature rows, but the meaning is reversed here:
+            // the "hottest" colour marks the highest framerate, not the worst reading
+            ColorFn = c => IsIdle(c) ? "inactiveButton" : CpuRamPanelImpl.WarnColor(c.Metrics.Value(fpsMetric), c.Warn("fps")),
             Style = TextStyle.Bold8,
             Align = TextAlign.Center,     // centered between "Framerate:" and the % value
             SameRow = true,
@@ -83,7 +85,7 @@ public static class FpsPanel
         // ---- lows row: "1p LOW: NFPS" (signature backing plate) | "0.1p: NFPS" ----
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "1p LOW: —" : $"1p LOW: {ValueFormat.Int0(c.Metrics.Value(low1))}FPS",
+            Text = c => IsIdle(c) ? $"{c.Label("low1", "1p LOW:")} —" : $"{c.Label("low1", "1p LOW:")} {ValueFormat.Int0(c.Metrics.Value(low1))}FPS",
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
             Color = "text2",
@@ -95,7 +97,7 @@ public static class FpsPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "0.1p: —" : $"0.1p: {ValueFormat.Int0(c.Metrics.Value(low01))}FPS",
+            Text = c => IsIdle(c) ? $"{c.Label("low01", "0.1p:")} —" : $"{c.Label("low01", "0.1p:")} {ValueFormat.Int0(c.Metrics.Value(low01))}FPS",
             Style = TextStyle.Text8,
             Align = TextAlign.Right,
             Color = "text2",

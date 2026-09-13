@@ -1,4 +1,4 @@
-using Halo.Shared.Metrics;
+using Halo.Metrics;
 using Halo.Widgets.Render;
 
 namespace Halo.Widgets.PanelDefs;
@@ -22,7 +22,7 @@ public static class LatencyPanel
 
         p.TitleElements.Add(new TextEl
         {
-            Text = c => c.Options.GetValueOrDefault("title", "").Length > 0 ? c.Options["title"] : "LATENCY / DLSS",
+            Text = c => c.TitleOr("LATENCY / DLSS"),
             Upper = true,
             Style = TextStyle.Bold9,
             Align = TextAlign.Center,
@@ -31,11 +31,11 @@ public static class LatencyPanel
 
         // ROW 1 — headline PC latency the overlay's way: continuous, ping/marker-based,
         // starting at ②a (input enters the game). = queue wait + render + display.
-        p.Elements.Add(new TextEl { Text = _ => "PC LAT:", Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", AbsY = 30, FixedH = 11 });
+        p.Elements.Add(new TextEl { Text = c => c.Label("pclat", "PC LAT:"), Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", AbsY = 30, FixedH = 11 });
         p.Elements.Add(new TextEl
         {
             Text = c => IsIdle(c) || PcLatency(c) <= 0 ? "N/A" : $"{ValueFormat.Int0(PcLatency(c))}ms",
-            ColorFn = c => !IsIdle(c) && PcLatency(c) > 0 ? CpuRamPanelImpl.WarnColor(PcLatency(c), 20, 35, 50, 70) : "inactiveButton",
+            ColorFn = c => !IsIdle(c) && PcLatency(c) > 0 ? CpuRamPanelImpl.WarnColor(PcLatency(c), c.Warn("pclat")) : "inactiveButton",
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,

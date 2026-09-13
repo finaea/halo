@@ -27,7 +27,12 @@ public sealed unsafe class WidgetWindow : IDisposable
     public WidgetInstance Config { get; }
     public Panel Panel { get; }
     public PanelContext Ctx { get; }
-    public double RateHz => Math.Clamp(Config.RateHz ?? Ctx.Settings.DefaultRateHz, 0.1, 100);
+    /// <summary>Repaint rate. The upper bound is the fastest data source in this panel, so a
+    /// slider can never promise data the collector does not produce (rates plan R2).</summary>
+    public double RateHz => Math.Clamp(Config.RateHz, MinRateHz, MaxRateHz);
+
+    public const double MinRateHz = 0.5;
+    public const double MaxRateHz = 10;
     public long NextDueQpc;
 
     private readonly Dx _dx;

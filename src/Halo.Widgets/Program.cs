@@ -1,16 +1,16 @@
 using Halo.Shared;
 using Halo.Widgets;
 
-using var singleInstance = new Mutex(true, "Local\\Halo.Widgets.SingleInstance", out bool isNew);
+using var singleInstance = new Mutex(true, "Local\\Halo.Widgets.SingleInstance.v2", out bool isNew);
 if (!isNew) return 1;
 
-string projectRoot = FindProjectRoot(AppContext.BaseDirectory);
-Log.Init(Path.Combine(projectRoot, "logs"), "widgets");
-Log.Info($"project root: {projectRoot}");
+Log.Init("widgets");
+Log.Info($"halo {AppVersion.Current} · app root: {Paths.AppRoot}");
+Log.Info($"data: {Paths.DataDir}{(Paths.IsPortable ? " (portable)" : "")}");
 
 try
 {
-    using var app = new App(projectRoot);
+    using var app = new App();
     app.Run();
 }
 catch (Exception ex)
@@ -21,14 +21,3 @@ catch (Exception ex)
 }
 Log.Flush();
 return 0;
-
-static string FindProjectRoot(string start)
-{
-    var dir = new DirectoryInfo(start);
-    while (dir != null)
-    {
-        if (File.Exists(Path.Combine(dir.FullName, "Halo.sln"))) return dir.FullName;
-        dir = dir.Parent;
-    }
-    return new DirectoryInfo(start).FullName;
-}

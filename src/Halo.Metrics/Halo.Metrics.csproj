@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Public client package for the Halo metrics section (docs\metrics-protocol.md).
+       Deliberately dependency-free and AOT-compatible: a third-party widget or tool should be
+       able to drop this DLL in and read every metric the collector publishes. Nothing in here
+       may reference Halo.Shared (config/logging) — the dependency runs the other way. -->
+  <PropertyGroup>
+    <RootNamespace>Halo.Metrics</RootNamespace>
+    <AssemblyName>Halo.Metrics</AssemblyName>
+    <IsAotCompatible>true</IsAotCompatible>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <PackageId>Halo.Metrics</PackageId>
+    <Description>Reader/writer for the Halo collector's shared-memory metrics section (v2).</Description>
+    <IncludeSymbols>true</IncludeSymbols>
+  </PropertyGroup>
+</Project>

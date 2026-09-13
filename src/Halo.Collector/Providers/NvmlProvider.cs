@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using Halo.Metrics;
 using Halo.Shared;
-using Halo.Shared.Metrics;
 
 namespace Halo.Collector.Providers;
 
@@ -9,14 +9,23 @@ namespace Halo.Collector.Providers;
 /// GPU fast path via NVML (nvml.dll ships with the driver; ~0.2–1 ms per call, cap 20 Hz).
 /// Covers temp/usage/VRAM/fan%/clocks/power. GPU voltage + fan RPM come from the LHM GPU
 /// part (NVAPI) — NVML has no public voltage API. Vendor swap = replace this module (plan §13).
+///
+/// Metrics are published per device index (<c>gpu.0.temp.c</c>, …) with <c>gpu.count</c> saying
+/// how many exist. NVML devices claim indexes first; LHM's AMD/Intel devices continue the range
+/// (hardware plan H2 — full enumeration lands with ticket 02).
 /// </summary>
 public sealed class NvmlProvider : ISensorProvider
 {
     public string Name => "nvml";
     public double MaxRateHz => 20;
     public double DefaultRateHz => 10;
+    public string? UnavailableReason => _unavailableReason;
 
+    private string? _unavailableReason = ProviderError.NoNvml;
     private nint _device;
+    /// <summary>Index this device claims in the gpu.&lt;i&gt;.* namespace. NVML devices come first,
+    /// so the single device published today is always 0 (ticket 02 enumerates the rest).</summary>
+    private readonly int _index = 0;
     private bool _nvmlInited;
     private bool _hasFanRpm;
 
@@ -41,26 +50,49 @@ public sealed class NvmlProvider : ISensorProvider
     public bool Initialize(MetricSink sink)
     {
         int r = nvmlInit_v2();
-        if (r != 0) { Log.Warn($"nvmlInit_v2 -> {r}"); return false; }
+        if (r != 0)
+        {
+            Log.Warn($"nvmlInit_v2 -> {r}");
+            _unavailableReason = ProviderError.NoNvml;
+            return false;
+        }
         _nvmlInited = true;
 
-        if (nvmlDeviceGetCount_v2(out uint count) != 0 || count == 0) return false;
-        if (nvmlDeviceGetHandleByIndex_v2(0, out _device) != 0) return false;
+        if (nvmlDeviceGetCount_v2(out uint count) != 0 || count == 0)
+        {
+            _unavailableReason = ProviderError.NoHardware;
+            return false;
+        }
+        if (nvmlDeviceGetHandleByIndex_v2(0, out _device) != 0)
+        {
+            _unavailableReason = ProviderError.NoHardware;
+            return false;
+        }
+        _unavailableReason = null;
 
         var name = new StringBuilder(96);
         if (nvmlDeviceGetName(_device, name, 96) == 0)
-            Log.Info($"nvml device 0: {name}");
+            Log.Info($"nvml device {_index}: {name}");
 
-        sink.Register(MetricNames.GpuName, MetricType.String, MetricUnit.Text, Name, 1);
-        sink.Register(MetricNames.GpuTempC, MetricType.Double, MetricUnit.Celsius, Name, MaxRateHz);
-        sink.Register(MetricNames.GpuUsagePct, MetricType.Double, MetricUnit.Percent, Name, MaxRateHz);
-        sink.Register(MetricNames.GpuVramUsedMb, MetricType.Double, MetricUnit.Megabytes, Name, MaxRateHz);
-        sink.Register(MetricNames.GpuVramTotalMb, MetricType.Double, MetricUnit.Megabytes, Name, MaxRateHz);
-        sink.Register(MetricNames.GpuVramPct, MetricType.Double, MetricUnit.Percent, Name, MaxRateHz);
-        sink.Register(MetricNames.GpuFanPct, MetricType.Double, MetricUnit.Percent, Name, MaxRateHz);
-        sink.Register(MetricNames.GpuClockCoreMhz, MetricType.Double, MetricUnit.Megahertz, Name, MaxRateHz);
-        sink.Register(MetricNames.GpuClockMemMhz, MetricType.Double, MetricUnit.Megahertz, Name, MaxRateHz);
-        sink.RegisterWithMax(MetricNames.GpuPowerW, MetricUnit.Watts, Name, MaxRateHz);
+        sink.Register(MetricNames.GpuCount, MetricType.Double, MetricUnit.Count, Name, 0, MetricSemantics.Static);
+        sink.Register(MetricNames.GpuName(_index), MetricType.String, MetricUnit.Text, Name, 0, MetricSemantics.Static);
+        sink.Register(MetricNames.GpuVendor(_index), MetricType.String, MetricUnit.Text, Name, 0, MetricSemantics.Static);
+        sink.Register(MetricNames.GpuTempC(_index), MetricType.Double, MetricUnit.Celsius, Name, DefaultRateHz);
+        // NVML computes utilisation over its own sampling window, so polling faster does not make
+        // this number fresher — the registry rate says so and the widget "?" popover repeats it.
+        sink.Register(MetricNames.GpuUsagePct(_index), MetricType.Double, MetricUnit.Percent, Name, DefaultRateHz, MetricSemantics.RollingWindow, windowMs: 1000);
+        sink.Register(MetricNames.GpuVramUsedMb(_index), MetricType.Double, MetricUnit.Megabytes, Name, DefaultRateHz);
+        sink.Register(MetricNames.GpuVramTotalMb(_index), MetricType.Double, MetricUnit.Megabytes, Name, DefaultRateHz, MetricSemantics.Static);
+        sink.Register(MetricNames.GpuVramPct(_index), MetricType.Double, MetricUnit.Percent, Name, DefaultRateHz, MetricSemantics.Calc);
+        sink.Register(MetricNames.GpuFanPct(_index), MetricType.Double, MetricUnit.Percent, Name, DefaultRateHz);
+        sink.Register(MetricNames.GpuClockCoreMhz(_index), MetricType.Double, MetricUnit.Megahertz, Name, DefaultRateHz);
+        sink.Register(MetricNames.GpuClockMemMhz(_index), MetricType.Double, MetricUnit.Megahertz, Name, DefaultRateHz);
+        sink.RegisterWithMax(MetricNames.GpuPowerW(_index), MetricUnit.Watts, Name, DefaultRateHz);
+        // Only device 0 is published today; full multi-GPU enumeration is ticket 02, so publish
+        // what actually exists in the section rather than what NVML reports.
+        if (count > 1) Log.Info($"nvml: {count} devices present, publishing device 0 only (multi-GPU lands with the collector ticket)");
+        sink.Set(MetricNames.GpuCount, 1);
+        sink.SetString(MetricNames.GpuVendor(_index), "nvidia");
 
         // Prefer the constraints' upper bound over the currently-set limit: the user can raise the
         // power slider at runtime, and re-reading the limit on every poll would be a wasted call.
@@ -76,42 +108,42 @@ public sealed class NvmlProvider : ISensorProvider
 
         // fan RPM API exists on newer drivers only
         _hasFanRpm = NativeLibrary.TryLoad("nvml.dll", out nint lib) && NativeLibrary.TryGetExport(lib, "nvmlDeviceGetFanSpeedRPM", out _);
-        if (_hasFanRpm) sink.Register(MetricNames.GpuFanRpm, MetricType.Double, MetricUnit.Rpm, Name, MaxRateHz);
+        if (_hasFanRpm) sink.Register(MetricNames.GpuFanRpm(_index), MetricType.Double, MetricUnit.Rpm, Name, DefaultRateHz);
 
-        sink.SetString(MetricNames.GpuName, name.ToString());
+        sink.SetString(MetricNames.GpuName(_index), name.ToString());
         return true;
     }
 
     public void Poll(MetricSink sink)
     {
         if (nvmlDeviceGetTemperature(_device, 0 /*GPU*/, out uint temp) == 0)
-            sink.Set(MetricNames.GpuTempC, temp);
+            sink.Set(MetricNames.GpuTempC(_index), temp);
 
         if (nvmlDeviceGetUtilizationRates(_device, out var util) == 0)
-            sink.Set(MetricNames.GpuUsagePct, util.gpu);
+            sink.Set(MetricNames.GpuUsagePct(_index), util.gpu);
 
         if (nvmlDeviceGetMemoryInfo(_device, out var mem) == 0 && mem.total > 0)
         {
             double usedMb = mem.used / 1048576.0, totalMb = mem.total / 1048576.0;
-            sink.Set(MetricNames.GpuVramUsedMb, usedMb);
-            sink.Set(MetricNames.GpuVramTotalMb, totalMb);
-            sink.Set(MetricNames.GpuVramPct, usedMb / totalMb * 100);
+            sink.Set(MetricNames.GpuVramUsedMb(_index), usedMb);
+            sink.Set(MetricNames.GpuVramTotalMb(_index), totalMb);
+            sink.Set(MetricNames.GpuVramPct(_index), usedMb / totalMb * 100);
         }
 
         if (nvmlDeviceGetFanSpeed_v2(_device, 0, out uint fanPct) == 0)
-            sink.Set(MetricNames.GpuFanPct, fanPct);
+            sink.Set(MetricNames.GpuFanPct(_index), fanPct);
 
         if (_hasFanRpm)
         {
             var info = new nvmlFanSpeedInfo { version = 0x1000000 | (uint)Marshal.SizeOf<nvmlFanSpeedInfo>(), fan = 0 };
             if (nvmlDeviceGetFanSpeedRPM(_device, ref info) == 0)
-                sink.Set(MetricNames.GpuFanRpm, info.speed);
+                sink.Set(MetricNames.GpuFanRpm(_index), info.speed);
         }
 
         if (nvmlDeviceGetClockInfo(_device, 0 /*GRAPHICS*/, out uint core) == 0)
-            sink.Set(MetricNames.GpuClockCoreMhz, core);
+            sink.Set(MetricNames.GpuClockCoreMhz(_index), core);
         if (nvmlDeviceGetClockInfo(_device, 2 /*MEM*/, out uint memclk) == 0)
-            sink.Set(MetricNames.GpuClockMemMhz, memclk);
+            sink.Set(MetricNames.GpuClockMemMhz(_index), memclk);
 
         if (nvmlDeviceGetPowerUsage(_device, out uint mw) == 0)
         {
@@ -127,7 +159,7 @@ public sealed class NvmlProvider : ISensorProvider
             }
             else
             {
-                sink.Set(MetricNames.GpuPowerW, mw / 1000.0);
+                sink.Set(MetricNames.GpuPowerW(_index), mw / 1000.0);
             }
         }
     }

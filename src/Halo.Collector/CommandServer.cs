@@ -2,17 +2,19 @@ using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
+using Halo.Metrics;
 using Halo.Shared;
 
 namespace Halo.Collector;
 
 /// <summary>
-/// Tiny line-based control channel («Halo.Control.v1» named pipe) so non-elevated widgets can
-/// ask the elevated collector for actions: "reset-max &lt;prefix&gt;", "reset-net", "ping".
+/// Tiny line-based control channel («Halo.Control.v2» named pipe) so non-elevated widgets and
+/// the Settings app can ask the elevated collector for actions: "reset-max &lt;prefix&gt;",
+/// "reset-net", "rescan", "reload-config", "ping". Commands are defined in Halo.Metrics.ControlPipe.
 /// </summary>
 public sealed class CommandServer : IDisposable
 {
-    public const string PipeName = Halo.Shared.ControlPipe.PipeName;
+    public const string PipeName = Halo.Metrics.ControlPipe.PipeName;
     private readonly CancellationTokenSource _cts = new();
     private readonly Action<string> _handler;
 
@@ -55,21 +57,6 @@ public sealed class CommandServer : IDisposable
                 Thread.Sleep(1000);
             }
         }
-    }
-
-    /// <summary>Client side (used by widgets): fire-and-forget one command line.</summary>
-    public static bool Send(string command)
-    {
-        try
-        {
-            using var client = new NamedPipeClientStream(".", PipeName, PipeDirection.Out);
-            client.Connect(500);
-            var bytes = Encoding.UTF8.GetBytes(command + "\n");
-            client.Write(bytes);
-            client.Flush();
-            return true;
-        }
-        catch { return false; }
     }
 
     public void Dispose() => _cts.Cancel();

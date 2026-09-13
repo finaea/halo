@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using Halo.Metrics;
 using Halo.Shared;
 using Halo.Shared.Config;
+using Halo.Shared.Panels;
 using Halo.Widgets.Render;
 using static Halo.Widgets.Native;
 
@@ -12,9 +14,7 @@ namespace Halo.Widgets;
 /// </summary>
 public sealed unsafe class App : IDisposable
 {
-    public string ProjectRoot { get; }
     public ConfigStore ConfigStore { get; }
-    public Theme Theme { get; private set; }
     public MetricCache Metrics { get; } = new();
     public nint DesktopHost { get; private set; }
 
@@ -32,12 +32,10 @@ public sealed unsafe class App : IDisposable
     private long _nextFrameWakeQpc;          // coalesce event-driven repaints to ~refresh rate
     private DateTime _suppressSaveReload = DateTime.MinValue;
 
-    public App(string projectRoot)
+    public App()
     {
-        ProjectRoot = projectRoot;
-        ConfigStore = new ConfigStore(Path.Combine(projectRoot, "config"));
-        Theme = Theme.Load(ConfigStore.ConfigDir);
-        _dx = new Dx(Path.Combine(projectRoot, "assets", "fonts"));
+        ConfigStore = new ConfigStore(Paths.ConfigDir);
+        _dx = new Dx(Paths.FontsDir);
         RefreshMonitors();
         DesktopHost = FindDesktopHost();
         Log.Info($"desktop host: 0x{DesktopHost:X}");
@@ -66,9 +64,11 @@ public sealed unsafe class App : IDisposable
                 var ctx = new PanelContext
                 {
                     Metrics = Metrics,
-                    Theme = Theme,
+                    // one resolved theme per widget: global appearance + this widget's overrides
+                    Theme = Theme.Resolve(ConfigStore.Settings.Appearance, inst.Appearance, ReferenceScale),
                     Settings = ConfigStore.Settings,
-                    Options = inst.Options,
+                    Widget = inst,
+                    Type = PanelCatalog.Find(inst.Type),
                 };
                 var panel = PanelDefs.PanelFactory.Create(inst.Type, ctx);
                 if (panel == null)
@@ -184,7 +184,7 @@ public sealed unsafe class App : IDisposable
     private void TryOpenFramesEvent(long now)
     {
         _nextFrameEventOpenQpc = now + 5 * Stopwatch.Frequency;
-        nint h = OpenEventW(SYNCHRONIZE, false, Halo.Shared.Metrics.SharedMemoryLayout.FramesReadyEventName);
+        nint h = OpenEventW(SYNCHRONIZE, false, SharedMemoryLayout.FramesReadyEventName);
         if (h != 0)
         {
             _framesReadyEvent = h;
@@ -200,7 +200,6 @@ public sealed unsafe class App : IDisposable
         if (DateTime.UtcNow < _suppressSaveReload) return;
         _configDirty = false;
         Log.Info("config hot-reload");
-        Theme = Theme.Load(ConfigStore.ConfigDir);
         BuildWindows();
     }
 
@@ -210,7 +209,7 @@ public sealed unsafe class App : IDisposable
         Log.Warn("recreating D3D/D2D/DComp devices");
         try
         {
-            _dx.Recreate(Path.Combine(ProjectRoot, "assets", "fonts"));
+            _dx.Recreate(Paths.FontsDir);
             foreach (var w in _windows) w.RecreateGraphics();
         }
         catch (Exception ex)
@@ -478,11 +477,10 @@ public sealed unsafe class App : IDisposable
     {
         try
         {
-            string exe = Path.Combine(ProjectRoot, "bin", "Halo.Settings", "Halo.Settings.exe");
-            if (!File.Exists(exe))
-                exe = Path.Combine(ProjectRoot, "src", "Halo.Settings", "bin", "Debug", "net9.0-windows", "win-x64", "Halo.Settings.exe");
+            // All three exes live in the same folder in every layout (packaging plan § Layout).
+            string exe = Path.Combine(Paths.AppRoot, "Halo.Settings.exe");
             if (File.Exists(exe)) Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
-            else Log.Warn("settings exe not found");
+            else Log.Warn($"settings exe not found next to the widgets exe ({exe})");
         }
         catch (Exception ex) { Log.Error("open settings", ex); }
     }
@@ -492,6 +490,11 @@ public sealed unsafe class App : IDisposable
         ConfigStore.Settings.LockAll = !ConfigStore.Settings.LockAll;
         SaveGeneralSettings();
     }
+
+    /// <summary>The scale an "auto" appearance resolves to. Per-monitor DPI and the
+    /// screen-size rule (hardware plan H5/H7) land with the widgets ticket; until then "auto"
+    /// means the reference scale the layout was designed at.</summary>
+    public const double ReferenceScale = 1.7;
 
     public void RefreshAll()
     {

@@ -3,13 +3,6 @@ using System.Windows.Media;
 
 namespace Halo.Settings;
 
-/// <summary>Editable key/value row used by the fan grids (both values stored as text).</summary>
-public sealed class StringPair
-{
-    public string Key { get; set; } = "";
-    public string Value { get; set; } = "";
-}
-
 /// <summary>One theme color token with live-updating swatch preview.</summary>
 public sealed class ColorRow : INotifyPropertyChanged
 {

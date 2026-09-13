@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net9.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <RootNamespace>Halo.Settings</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -10,6 +10,16 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
     <ApplicationIcon>..\..\assets\halo.ico</ApplicationIcon>
+    <!-- asInvoker + PerMonitorV2 + Win10/11 supportedOS, like the other two exes. Without a
+         manifest this process would silently get UAC file virtualization instead of a clean
+         failure when it writes somewhere it may not. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
-  <ItemGroup><ProjectReference Include="..\Halo.Shared\Halo.Shared.csproj" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Halo.Metrics\Halo.Metrics.csproj" />
+    <ProjectReference Include="..\Halo.Shared\Halo.Shared.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\assets\halo.ico" Link="assets\halo.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

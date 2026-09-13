@@ -6,6 +6,12 @@ using Microsoft.Win32;
 
 namespace Halo.Settings.Pages;
 
+/// <summary>
+/// Interim autostart page. The HKCU Run value below is on its way out: the settings overhaul
+/// replaces it with two scheduled tasks driven by Halo.Settings.exe --register-autostart, which
+/// the installer and the dev script call as well. Until then it at least points at the real exe
+/// instead of a hardcoded Debug build path.
+/// </summary>
 public partial class AutostartPage : UserControl, ISettingsPage
 {
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -14,10 +20,10 @@ public partial class AutostartPage : UserControl, ISettingsPage
 
     private bool _loading;
 
-    private static string WidgetsExe => Path.Combine(
-        ProjectPaths.ProjectRoot, "src", "Halo.Widgets", "bin", "Debug", "net9.0", "win-x64", "Halo.Widgets.exe");
+    // All three exes share one folder in every layout (packaging plan § Layout contract).
+    private static string WidgetsExe => Path.Combine(Halo.Shared.Paths.AppRoot, "Halo.Widgets.exe");
 
-    private static string InstallScript => Path.Combine(ProjectPaths.ProjectRoot, "tools", "install-halo.ps1");
+    private static string InstallScript => Path.Combine(Halo.Shared.Paths.AppRoot, "tools", "install-halo.ps1");
 
     public AutostartPage()
     {

@@ -1,12 +1,17 @@
 using System.Diagnostics;
+using Halo.Metrics;
 using Halo.Shared;
 
 namespace Halo.Collector;
 
 /// <summary>
-/// Runs each provider on its own thread at min(requested, provider.MaxRateHz).
+/// Runs each provider on its own thread at its fixed cadence (capped by MaxRateHz).
 /// Failed providers are retried with backoff (1/5/30/60 s). A provider crash never
 /// touches other providers (plan D2, §11).
+///
+/// Each runner also owns one row of the section's provider table: state, needs-elevation,
+/// rate, last poll timestamp and duration, and a short failure code. That table is what the
+/// Settings System-check page reads — no log parsing (interface plan I5).
 /// </summary>
 public sealed class ProviderHost : IDisposable
 {
@@ -16,9 +21,9 @@ public sealed class ProviderHost : IDisposable
 
     public ProviderHost(MetricSink sink) => _sink = sink;
 
-    public void Add(ISensorProvider provider, double? requestedRateHz = null)
+    public void Add(ISensorProvider provider)
     {
-        var r = new Runner(provider, _sink, requestedRateHz, _cts.Token);
+        var r = new Runner(provider, _sink, _cts.Token);
         _runners.Add(r);
         r.Start();
     }
@@ -33,13 +38,14 @@ public sealed class ProviderHost : IDisposable
         foreach (var r in _runners) { try { r.Provider.Dispose(); } catch { } }
     }
 
-    private sealed class Runner(ISensorProvider provider, MetricSink sink, double? requestedRateHz, CancellationToken ct)
+    private sealed class Runner(ISensorProvider provider, MetricSink sink, CancellationToken ct)
     {
         public ISensorProvider Provider { get; } = provider;
         public volatile bool Available;
-        public double RateHz => Math.Min(requestedRateHz ?? Provider.DefaultRateHz, Provider.MaxRateHz);
+        public double RateHz => Math.Min(Provider.DefaultRateHz, Provider.MaxRateHz);
         public double LastPollMs;
 
+        private readonly int _providerIndex = sink.RegisterProvider(provider.Name, provider.NeedsElevation);
         private Thread? _thread;
         private string? _lastErrorSig;
         private DateTime _nextErrorLog;
@@ -66,10 +72,13 @@ public sealed class ProviderHost : IDisposable
                 {
                     Log.Error($"{Provider.Name}: Initialize threw", ex);
                     Available = false;
+                    sink.SetProviderState(_providerIndex, ProviderState.Unavailable, RateHz, ProviderError.Failed);
                 }
 
                 if (!Available)
                 {
+                    sink.SetProviderState(_providerIndex, ProviderState.Unavailable, RateHz,
+                        Provider.UnavailableReason ?? ProviderError.Failed);
                     int delay = initFailures switch { 0 => 1000, 1 => 5000, 2 => 30000, _ => 60000 };
                     initFailures++;
                     if (initFailures <= 3) Log.Warn($"{Provider.Name}: unavailable, retry in {delay} ms");
@@ -78,6 +87,7 @@ public sealed class ProviderHost : IDisposable
                 }
 
                 initFailures = 0;
+                sink.SetProviderState(_providerIndex, ProviderState.Ok, RateHz);
                 Log.Info($"{Provider.Name}: initialised, polling at {RateHz:0.##} Hz (cap {Provider.MaxRateHz} Hz)");
 
                 // ---- poll loop ----
@@ -92,11 +102,13 @@ public sealed class ProviderHost : IDisposable
                     try
                     {
                         Provider.Poll(sink);
+                        if (consecutiveErrors > 0) sink.SetProviderState(_providerIndex, ProviderState.Ok, RateHz);
                         consecutiveErrors = 0;
                     }
                     catch (Exception ex)
                     {
                         consecutiveErrors++;
+                        sink.SetProviderState(_providerIndex, ProviderState.Degraded, RateHz, ProviderError.Failed);
                         // identical failures repeat across re-init cycles (e.g. LHM NRE
                         // streaks) — full detail on first sight, then one line per 5 min
                         // so a flaky sensor can't flood the log
@@ -120,6 +132,7 @@ public sealed class ProviderHost : IDisposable
                         }
                     }
                     LastPollMs = sw.Elapsed.TotalMilliseconds;
+                    sink.SetProviderPoll(_providerIndex, Stopwatch.GetTimestamp(), LastPollMs);
 
                     next += periodTicks;
                     long now = Stopwatch.GetTimestamp();

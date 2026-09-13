@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Halo.Shared;
-using Halo.Shared.Metrics;
+using Halo.Metrics;
 
 namespace Halo.Collector.Providers;
 
@@ -66,11 +66,12 @@ internal sealed class PresentMonSdkSource : IDisposable
     /// <param name="ownService">true (collector): kill any stray Halo service child and spawn a
     /// fresh one — a leftover child from a hard-killed collector may be data-dead and cannot be
     /// healed once attached to. false (diagnostics): attach to whatever is running, own nothing.</param>
-    public bool Start(string projectRoot, bool elevated, int etwFlushMs, bool ownService = true)
+    /// <param name="sdkDir">Folder holding PresentMonAPI2.dll + PresentMonService.exe
+    /// (Halo.Shared.Paths.PresentMonDir — next to the exe in every layout).</param>
+    public bool Start(string sdkDir, bool elevated, int etwFlushMs, bool ownService = true)
     {
         Reset();
 
-        string sdkDir = Path.Combine(projectRoot, "tools", "presentmon", "sdk");
         string dll = Path.Combine(sdkDir, "PresentMonAPI2.dll");
         string exe = Path.Combine(sdkDir, "PresentMonService.exe");
         if (!File.Exists(dll))

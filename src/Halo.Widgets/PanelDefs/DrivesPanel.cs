@@ -1,18 +1,22 @@
-using Halo.Shared.Metrics;
+using Halo.Metrics;
 using Halo.Widgets.Render;
 
 namespace Halo.Widgets.PanelDefs;
 
 /// <summary>
-/// DRIVES panel per tools\extracted\drives.json. Iterates the active drive letters
-/// (ctx.Settings.DriveLetters) and stacks one 5-sub-row block per drive at a 37-unit pitch:
+/// DRIVES panel per tools\extracted\drives.json. Iterates the widget's selected volumes and
+/// stacks one 5-sub-row block per drive at a 37-unit pitch:
 ///   row1  label "(C:) &lt;vol&gt;" (center) + temp "NN°C" (right, staged warn colors)
-///   row2  "Used: &lt;auto&gt;B" (left) + "Total: &lt;auto&gt;B" (right)   — drive E is Free-mode
+///   row2  "Used: &lt;auto&gt;B" (left) + "Total: &lt;auto&gt;B" (right)   — "freeMode" volumes show Free
 ///   row3  usage bar (used fraction, warn &gt;=75%)
 ///   row4  write/read arrow glyphs (ElegantIcons, left/right, red when active)
 ///   row5  write/read rate text (AutoScale, inset within the arrow row)
 /// Then two shared half-width history graphs: write (left half) / read (right half),
-/// one series per active drive, 1 Hz, autoscale.
+/// one series per drive, autoscale.
+///
+/// Which volumes appear is a per-widget choice (option "volumes"); the collector publishes every
+/// local volume it finds (hardware plan H1). With no selection the panel shows everything the
+/// collector published, so a fresh install is not an empty box.
 /// </summary>
 public static class DrivesPanel
 {
@@ -24,22 +28,22 @@ public static class DrivesPanel
         // Title band: "DRIVES" (styleTitle — Bold 9pt, centered, upper, colorTitle).
         p.TitleElements.Add(new TextEl
         {
-            Text = c => c.Options.GetValueOrDefault("title", "").Length > 0 ? c.Options["title"] : "DRIVES",
+            Text = c => c.TitleOr("DRIVES"),
             Upper = true,
             Style = TextStyle.Bold9,
             Align = TextAlign.Center,
             Color = "title",
         });
 
-        // Active drive letters (config default: C,D,E,F,G,H,I).
-        var letters = new List<char>();
-        foreach (var s in ctx.Settings.DriveLetters)
-            if (!string.IsNullOrEmpty(s)) letters.Add(char.ToUpperInvariant(s[0]));
+        var letters = SelectedVolumes(ctx);
+        var freeMode = new HashSet<char>(ctx.OptionList("freeMode")
+            .Where(s => s.Length > 0)
+            .Select(s => char.ToUpperInvariant(s[0])));
 
         foreach (char letter in letters)
         {
             char d = letter;                 // capture per-iteration
-            bool freeMode = d == 'E';        // per-config: only E shows "Free:" (spaceInUseDrive5=0)
+            bool free = freeMode.Contains(d);
 
             // ---- Row 1: label (center) + temp (right) ----
             // Note: accent-tinting of the "(X:)" prefix (per-drive colorDrive) is omitted — the
@@ -62,7 +66,7 @@ public static class DrivesPanel
                     ? $"{ValueFormat.Int0(tv)}°C"
                     : "--°C",
                 ColorFn = c => c.Metrics.TryValue(MetricNames.DriveTempC(d), out double tv)
-                    ? CpuRamPanelImpl.WarnColor(tv, 35, 45, 55, 65)
+                    ? CpuRamPanelImpl.WarnColor(tv, c.Warn("temp"))
                     : "text2",
                 Style = TextStyle.Text8,
                 Align = TextAlign.Right,
@@ -77,7 +81,7 @@ public static class DrivesPanel
                 {
                     double used = c.Metrics.Value(MetricNames.DriveUsedB(d));
                     double total = c.Metrics.Value(MetricNames.DriveTotalB(d));
-                    return freeMode
+                    return free
                         ? $"Free: {ValueFormat.AutoScale(total - used)}B"
                         : $"Used: {ValueFormat.AutoScale(used)}B";
                 },
@@ -98,7 +102,7 @@ public static class DrivesPanel
             });
 
             // ---- Row 3: usage bar (used fraction; warn >=75%) ----
-            // Free-mode (E) draws the identical "used portion from the left" visual & warn point.
+            // Free-mode draws the identical "used portion from the left" visual & warn point.
             p.Elements.Add(new BarEl
             {
                 Value = c =>
@@ -110,7 +114,8 @@ public static class DrivesPanel
                 {
                     double total = c.Metrics.Value(MetricNames.DriveTotalB(d));
                     double pct = total > 0 ? c.Metrics.Value(MetricNames.DriveUsedB(d)) * 100 / total : 0;
-                    return pct >= 75 ? "barWarn" : "bar";
+                    var warn = c.Warn("used");
+                    return warn.Length > 0 && pct >= warn[^1] ? "barWarn" : "bar";
                 },
                 Advance = 0,
             });
@@ -163,7 +168,7 @@ public static class DrivesPanel
         }
 
         // ---- Bottom shared graphs: write history (left half) / read history (right half) ----
-        // One series per active drive; all "histogram" (no per-drive Theme accent token); 5 Hz, autoscale.
+        // One series per drive; all "histogram" (no per-drive Theme accent token); 5 Hz, autoscale.
         var writeSeries = new List<GraphSeries>();
         var readSeries = new List<GraphSeries>();
         foreach (char letter in letters)
@@ -173,10 +178,10 @@ public static class DrivesPanel
             readSeries.Add(new GraphSeries { Color = "histogram", Ring = new HistoryRing(94), Sample = c => c.Metrics.Value(MetricNames.DriveReadBps(d)) });
         }
 
-        // Either history graph is toggleable via Options graphDriveWrite/graphDriveRead (default on).
+        // Either history graph is toggled by its metric setting (metrics.write.graph / read.graph).
         // The first shown graph leads the row (Advance=4); the second shares it (SameRow).
-        bool showWrite = ctx.GraphLineVisible("graphDriveWrite");
-        bool showRead = ctx.GraphLineVisible("graphDriveRead");
+        bool showWrite = ctx.Graphs("write");
+        bool showRead = ctx.Graphs("read");
         if (showWrite)
         {
             p.Elements.Add(new GraphEl
@@ -204,5 +209,27 @@ public static class DrivesPanel
         }
 
         return p;
+    }
+
+    /// <summary>The widget's volume list, or every volume the collector published.</summary>
+    private static List<char> SelectedVolumes(PanelContext ctx)
+    {
+        var configured = ctx.OptionList("volumes")
+            .Where(s => s.Length > 0)
+            .Select(s => char.ToUpperInvariant(s[0]))
+            .Distinct()
+            .ToList();
+        if (configured.Count > 0) return configured;
+
+        // Discover from the registry: drive.<x>.total.b exists for every published volume.
+        var found = new List<char>();
+        foreach (var m in ctx.Metrics.Describe())
+        {
+            if (!m.Name.StartsWith("drive.", StringComparison.Ordinal) || !m.Name.EndsWith(".total.b", StringComparison.Ordinal)) continue;
+            var parts = m.Name.Split('.');
+            if (parts.Length >= 2 && parts[1].Length == 1) found.Add(char.ToUpperInvariant(parts[1][0]));
+        }
+        found.Sort();
+        return found;
     }
 }

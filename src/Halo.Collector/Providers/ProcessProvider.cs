@@ -1,27 +1,31 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Halo.Metrics;
 using Halo.Shared.Config;
-using Halo.Shared.Metrics;
 
 namespace Halo.Collector.Providers;
 
 /// <summary>
 /// Process snapshot via one NtQuerySystemInformation(SystemProcessInformation) call:
 /// process count + top-N by CPU and by RAM (plan §5: ~ms per snapshot, cap 2 Hz).
-/// Takes the ConfigStore (not a settings snapshot) so the aggregate toggle hot-applies.
+/// Both rankings (per instance and same-name aggregated) are always published; each Top widget
+/// picks one, so its toggle costs nothing here.
 /// </summary>
-public sealed unsafe class ProcessProvider(ConfigStore config) : ISensorProvider
+public sealed unsafe class ProcessProvider : ISensorProvider
 {
-    private GeneralSettings Settings => config.Settings;
     public string Name => "process";
     public double MaxRateHz => 2;
     public double DefaultRateHz => 1;
+
+    /// <summary>Ranks published per ranking. Widgets show between 1 and this many rows; the
+    /// collector always publishes the full set so changing a widget's row count is instant
+    /// and costs the collector nothing (v1 published 5 and had a config key that nothing read).</summary>
+    private const int Ranks = 10;
 
     private byte[] _buffer = new byte[1 << 20];
     private readonly Dictionary<ulong, long> _prevCpuTime = new();
     private readonly Dictionary<ulong, long> _currCpuTime = new();
     private long _prevQpc;
-    private int _topN;
 
     // perf-counter style display names for a few special processes
     private static readonly Dictionary<string, string> Renames = new(StringComparer.OrdinalIgnoreCase)
@@ -32,18 +36,18 @@ public sealed unsafe class ProcessProvider(ConfigStore config) : ISensorProvider
 
     public bool Initialize(MetricSink sink)
     {
-        _topN = Math.Clamp(Settings.TopProcessCount, 1, 5);
-        sink.Register(MetricNames.ProcCount, MetricType.Double, MetricUnit.Count, Name, MaxRateHz);
-        for (int i = 0; i < 5; i++)
+        sink.Register(MetricNames.ProcCount, MetricType.Double, MetricUnit.Count, Name, DefaultRateHz);
+        for (int i = 0; i < Ranks; i++)
         {
             foreach (bool agg in (bool[])[false, true])
             {
-                sink.Register(MetricNames.TopCpuName(i, agg), MetricType.String, MetricUnit.Text, Name, MaxRateHz);
-                sink.Register(MetricNames.TopCpuPct(i, agg), MetricType.Double, MetricUnit.Percent, Name, MaxRateHz);
-                sink.Register(MetricNames.TopCpuRamB(i, agg), MetricType.Double, MetricUnit.Bytes, Name, MaxRateHz);
-                sink.Register(MetricNames.TopRamName(i, agg), MetricType.String, MetricUnit.Text, Name, MaxRateHz);
-                sink.Register(MetricNames.TopRamB(i, agg), MetricType.Double, MetricUnit.Bytes, Name, MaxRateHz);
-                sink.Register(MetricNames.TopRamCpuPct(i, agg), MetricType.Double, MetricUnit.Percent, Name, MaxRateHz);
+                sink.Register(MetricNames.TopCpuName(i, agg), MetricType.String, MetricUnit.Text, Name, DefaultRateHz);
+                // CPU% is the process's share of the interval between two snapshots.
+                sink.Register(MetricNames.TopCpuPct(i, agg), MetricType.Double, MetricUnit.Percent, Name, DefaultRateHz, MetricSemantics.IntervalAvg);
+                sink.Register(MetricNames.TopCpuRamB(i, agg), MetricType.Double, MetricUnit.Bytes, Name, DefaultRateHz);
+                sink.Register(MetricNames.TopRamName(i, agg), MetricType.String, MetricUnit.Text, Name, DefaultRateHz);
+                sink.Register(MetricNames.TopRamB(i, agg), MetricType.Double, MetricUnit.Bytes, Name, DefaultRateHz);
+                sink.Register(MetricNames.TopRamCpuPct(i, agg), MetricType.Double, MetricUnit.Percent, Name, DefaultRateHz, MetricSemantics.IntervalAvg);
             }
         }
         _prevQpc = Stopwatch.GetTimestamp();
@@ -131,9 +135,9 @@ public sealed unsafe class ProcessProvider(ConfigStore config) : ISensorProvider
 
     private void PublishRanking(MetricSink sink, List<Proc> ranked, bool agg)
     {
-        var topCpu = ranked.OrderByDescending(x => x.CpuPct).Take(5).ToList();
-        var topRam = ranked.OrderByDescending(x => x.WorkingSet).Take(5).ToList();
-        for (int i = 0; i < 5; i++)
+        var topCpu = ranked.OrderByDescending(x => x.CpuPct).Take(Ranks).ToList();
+        var topRam = ranked.OrderByDescending(x => x.WorkingSet).Take(Ranks).ToList();
+        for (int i = 0; i < Ranks; i++)
         {
             if (i < topCpu.Count)
             {

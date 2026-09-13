@@ -3,14 +3,18 @@ using System.Text.Json;
 namespace Halo.Shared.Config;
 
 /// <summary>
-/// Loads settings.json / widgets.json from the project-local config folder and hot-reloads
-/// on change (debounced FileSystemWatcher). Writers (Settings app, widget drag) save through
-/// this class too; a save suppresses the immediate self-notification.
+/// Loads settings.json / widgets.json from the user's data folder and hot-reloads on change
+/// (debounced FileSystemWatcher). Writers (Settings app, widget drag) save through this class
+/// too; a save suppresses the immediate self-notification.
+///
+/// Consumers must read <see cref="Settings"/> through this object every time they need a value:
+/// <see cref="Reload"/> replaces the instance, so a cached snapshot stops seeing edits (that was
+/// a real bug in v1 — the network and PresentMon providers held the first object forever).
 /// </summary>
 public sealed class ConfigStore : IDisposable
 {
     public string ConfigDir { get; }
-    public GeneralSettings Settings { get; private set; } = new();
+    public AppSettings Settings { get; private set; } = new();
     public WidgetsConfig Widgets { get; private set; } = new();
 
     /// <summary>Fired on any config change (debounced, on a threadpool thread).</summary>
@@ -23,7 +27,28 @@ public sealed class ConfigStore : IDisposable
     public ConfigStore(string configDir, bool watch = true)
     {
         ConfigDir = configDir;
-        Directory.CreateDirectory(configDir);
+        try
+        {
+            Directory.CreateDirectory(configDir);
+        }
+        catch (Exception ex)
+        {
+            // Paths already falls back to %TEMP% when the data root is unusable, so getting here
+            // means something is badly wrong — say so instead of failing silently later.
+            Log.Error($"config directory {configDir} could not be created", ex);
+        }
+
+        // A v1 install upgrading in place: convert before the first load so nothing sees v1 shapes.
+        if (ConfigMigrator.IsLegacy(configDir))
+        {
+            try
+            {
+                var r = ConfigMigrator.Migrate(configDir, configDir, Log.Info);
+                if (r.Migrated) Log.Info($"config: {r.Detail} (originals kept as *.v1.bak)");
+            }
+            catch (Exception ex) { Log.Error("config migration failed — loading defaults", ex); }
+        }
+
         _debounce = new System.Threading.Timer(_ => { Reload(); Changed?.Invoke(); });
         Reload();
         if (watch)
@@ -47,7 +72,7 @@ public sealed class ConfigStore : IDisposable
 
     public void Reload()
     {
-        Settings = Load("settings.json", ConfigJsonContext.Default.GeneralSettings) ?? new GeneralSettings();
+        Settings = Load("settings.json", ConfigJsonContext.Default.AppSettings) ?? new AppSettings();
         Widgets = Load("widgets.json", ConfigJsonContext.Default.WidgetsConfig) ?? new WidgetsConfig();
     }
 
@@ -68,7 +93,7 @@ public sealed class ConfigStore : IDisposable
         return null;
     }
 
-    public void SaveSettings() => Save("settings.json", Settings, ConfigJsonContext.Default.GeneralSettings);
+    public void SaveSettings() => Save("settings.json", Settings, ConfigJsonContext.Default.AppSettings);
     public void SaveWidgets() => Save("widgets.json", Widgets, ConfigJsonContext.Default.WidgetsConfig);
 
     private void Save<T>(string file, T value, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> ti)

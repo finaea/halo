@@ -1,8 +1,8 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Halo.Shared;
 using Halo.Shared.Config;
-using Halo.Shared.Metrics;
+using Halo.Metrics;
 
 namespace Halo.Collector.Providers;
 
@@ -11,10 +11,10 @@ namespace Halo.Collector.Providers;
 /// 3D app; per-frame events land in the shared-memory frame ring, windowed stats (1%/0.1% lows,
 /// worst frametime, FG ratio, Click-to-Photon) are published at poll rate.
 ///
-/// Two transports behind one seam (settings.PresentMonTransport: auto | sdk | console):
+/// Two transports behind one seam (collector.presentMonTransport: auto | sdk):
 ///  - **sdk** (plan D7, preferred): PresentMon 2 service + PresentMonAPI2.dll. Frames are pulled
 ///    from the service's shared-memory ring each Poll with true PRESENT_START_QPC timestamps;
-///    ETW flush cadence is tuned via pmSetEtwFlushPeriod (settings.PresentMonEtwFlushMs), so
+///    ETW flush cadence is tuned via pmSetEtwFlushPeriod (collector.presentMonEtwFlushMs), so
 ///    frame data is ~flush+poll fresh instead of ~1 s (console ETW batching + 4 KB stdout pipe).
 ///    See PresentMonSdkSource for the service lifecycle (no SCM registration needed).
 ///  - **console**: the capture app as a child process with CSV over stdout ("--stop_existing_session";
@@ -23,8 +23,12 @@ namespace Halo.Collector.Providers;
 /// Both need elevation to own an ETW session; attaching to an already-installed running
 /// PresentMon service works unelevated.
 /// </summary>
-public sealed class PresentMonProvider(string projectRoot, GeneralSettings settings) : ISensorProvider
+public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
 {
+    /// <summary>Collector knobs, read live: ConfigStore.Reload allocates a new settings object,
+    /// so holding a snapshot means never seeing an edit (assessment §4.3).</summary>
+    private CollectorSettings Settings => config.Settings.Collector;
+
     public string Name => "presentmon";
     public double MaxRateHz => 120;    // frame drain + stats publish; lows cached at 2 Hz inside FrameStats
     public double DefaultRateHz => 40; // frames reach the ring in ≤25 ms batches; stats publish per poll
@@ -91,7 +95,6 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         sink.Register(MetricNames.FpsFgRatio, MetricType.Double, MetricUnit.None, Name, MaxRateHz);
         sink.Register(MetricNames.FpsRefreshHz, MetricType.Double, MetricUnit.Hertz, Name, 1);
         sink.Register(MetricNames.FpsAppName, MetricType.String, MetricUnit.Text, Name, 1);
-        sink.Register(MetricNames.FpsAppPid, MetricType.Double, MetricUnit.Count, Name, 1);
         sink.Register(MetricNames.LatencyClickMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
         sink.Register(MetricNames.LatencyAllInputMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
         // latency.pcl.ms is owned by PclStatsProvider (true marker-based). PresentMon only
@@ -103,15 +106,15 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         sink.Register(MetricNames.DlssRrPresent, MetricType.Double, MetricUnit.None, Name, 0.5);
         sink.Register(MetricNames.DlssVersion, MetricType.String, MetricUnit.Text, Name, 0.5);
 
-        Stats.SetWindow(settings.FrameLowsWindowS);
+        Stats.SetWindow(Settings.FrameLowsWindowS);
 
-        bool elevated = IsElevated();
-        string transport = settings.PresentMonTransport.Trim().ToLowerInvariant();
+        bool elevated = Elevation.IsElevated;
+        string transport = Settings.PresentMonTransport.Trim().ToLowerInvariant();
 
         if (transport is "auto" or "sdk")
         {
             var sdk = new PresentMonSdkSource();
-            if (sdk.Start(projectRoot, elevated, settings.PresentMonEtwFlushMs))
+            if (sdk.Start(Paths.PresentMonDir, elevated, Settings.PresentMonEtwFlushMs))
             {
                 _sdk = sdk;
                 Log.Info($"presentmon transport: sdk ({sdk.Detail})");
@@ -127,7 +130,9 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             return false; // console transport needs admin (ETW); host retries with backoff
         }
 
-        string? exe = Directory.EnumerateFiles(Path.Combine(projectRoot, "tools", "presentmon"), "PresentMon-*-x64.exe").FirstOrDefault();
+        string? exe = Directory.Exists(Paths.PresentMonDir)
+            ? Directory.EnumerateFiles(Paths.PresentMonDir, "PresentMon-*-x64.exe").FirstOrDefault()
+            : null;
         if (exe == null)
         {
             Log.Warn("presentmon: binary not found under tools\\presentmon");
@@ -153,13 +158,13 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         return started;
     }
 
-    /// <summary>Door-1 tap for the presented stream (settings.PresentedTap). Independent of the
+    /// <summary>Door-1 tap for the presented stream (collector.presentedTap). Independent of the
     /// resolved transport; failure just leaves the presented panel on the resolved lane.</summary>
     private void StartTap(MetricSink sink, bool elevated)
     {
-        if (!elevated || !settings.PresentedTap.Trim().Equals("auto", StringComparison.OrdinalIgnoreCase)) return;
+        if (!elevated || !Settings.PresentedTap.Trim().Equals("auto", StringComparison.OrdinalIgnoreCase)) return;
         var tap = new PresentTap();
-        if (tap.Start(sink, settings.FrameLowsWindowS, settings.PresentMonEtwFlushMs))
+        if (tap.Start(sink, Settings.FrameLowsWindowS, Settings.PresentMonEtwFlushMs))
         {
             _tap = tap;
             if (_targetPid != 0) tap.SetTarget(_targetPid);
@@ -410,7 +415,7 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         }
         else
         {
-            _sdk?.SetFlushPeriod(settings.PresentMonEtwFlushMs);
+            _sdk?.SetFlushPeriod(Settings.PresentMonEtwFlushMs);
             _tap?.SetIdle(false);
             Log.Info("fps pipeline active: full flush cadence restored");
         }
@@ -472,7 +477,7 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
             _targetPid = pid;
             _targetName = name;
             _nextNgxScan = DateTime.MinValue; // rescan DLSS on app switch
-            _nextSlowPublishQpc = 0;          // republish name/pid/refresh immediately
+            _nextSlowPublishQpc = 0;          // republish name/refresh immediately
             Log.Info($"presentmon target: {(pid == 0 ? "none" : $"{name} ({pid})")}");
         }
 
@@ -481,7 +486,6 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
         {
             _nextSlowPublishQpc = qnow + Stopwatch.Frequency;
             sink.SetString(MetricNames.FpsAppName, _targetName);
-            sink.Set(MetricNames.FpsAppPid, _targetPid);
 
             // monitor refresh of the window's monitor (req: read actual refresh, not hardcoded 144)
             double hz = GetRefreshHz(hwnd);
@@ -567,12 +571,6 @@ public sealed class PresentMonProvider(string projectRoot, GeneralSettings setti
     }
 
     private static string Truncate(string s, int n) => s.Length <= n ? s : s[..n];
-
-    private static bool IsElevated()
-    {
-        using var id = System.Security.Principal.WindowsIdentity.GetCurrent();
-        return new System.Security.Principal.WindowsPrincipal(id).IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
-    }
 
     public void Dispose()
     {

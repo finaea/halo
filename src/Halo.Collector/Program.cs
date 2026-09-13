@@ -1,37 +1,48 @@
 using Halo.Collector;
 using Halo.Collector.Providers;
+using Halo.Metrics;
 using Halo.Shared;
 using Halo.Shared.Config;
-using Halo.Shared.Metrics;
 
-// --dump: attach as a reader and print all metrics once (diagnostics; works while another
-// collector instance is running)
+// --dump [--json]: attach as a reader and print every metric once (diagnostics; works while
+// another collector instance is running, and is the reference implementation of the reader rules)
 if (args.Contains("--dump"))
 {
-    using var reader = new MetricsReader();
-    if (!reader.TryAttach())
+    using var session = new CollectorSession();
+    session.Poll();
+    if (!session.Attached)
     {
-        Console.WriteLine("no Halo.Metrics.v1 section (collector not running?)");
+        Console.WriteLine($"no {SharedMemoryLayout.SectionName} section (collector not running?)");
         return 2;
     }
-    Console.WriteLine($"collector pid={reader.CollectorPid} heartbeatAge={reader.HeartbeatAgeSeconds:0.00}s metrics={reader.MetricCount} frames={reader.FrameCursor}");
-    for (int i = 0; i < reader.MetricCount; i++)
-    {
-        var d = reader.DescribeIndex(i);
-        if (d == null) continue;
-        var (type, unit, rate, name) = d.Value;
-        if (type == MetricType.String)
-        {
-            reader.TryReadString(i, out string sv);
-            Console.WriteLine($"{name,-32} \"{sv}\" ({unit}, {rate:0.##}Hz)");
-        }
-        else
-        {
-            bool ok = reader.TryRead(i, out double v, out double age);
-            Console.WriteLine($"{name,-32} {(ok ? v.ToString("0.###") : "N/A"),12}  age={(ok ? age.ToString("0.00") : "-")}s ({unit}, {rate:0.##}Hz)");
-        }
-    }
+    if (args.Contains("--json")) Dump.Json(session);
+    else Dump.Table(session);
     return 0;
+}
+
+// --migrate-config [<dir>] [--to <dir>]: convert a v1 config folder into schema v2. Default
+// source and target are this machine's data folder; the collector also migrates in place on
+// startup when it finds v1 files there.
+if (args.Contains("--migrate-config"))
+{
+    int i = Array.IndexOf(args, "--migrate-config");
+    string source = i + 1 < args.Length && !args[i + 1].StartsWith('-') ? args[i + 1] : Paths.ConfigDir;
+    int t = Array.IndexOf(args, "--to");
+    string target = t >= 0 && t + 1 < args.Length ? args[t + 1] : Paths.ConfigDir;
+    Log.Init("migrate", alsoConsole: true);
+    try
+    {
+        var r = ConfigMigrator.Migrate(source, target, Log.Info);
+        Console.WriteLine(r.Detail);
+        Log.Flush();
+        return r.Migrated ? 0 : 1;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"migration failed: {ex.Message}");
+        Log.Flush();
+        return 1;
+    }
 }
 
 // --pm-smoketest [pid]: verify the PresentMon SDK transport end-to-end (needs admin unless a
@@ -40,13 +51,12 @@ if (args.Contains("--dump"))
 // a collector instance is up — it attaches to the same service.
 if (args.Contains("--pm-smoketest"))
 {
-    string pmRoot = FindProjectRoot(AppContext.BaseDirectory);
-    Log.Init(Path.Combine(pmRoot, "logs"), "pm-smoketest", alsoConsole: true);
+    Log.Init("pm-smoketest", alsoConsole: true);
     int pid = args.Where(a => int.TryParse(a, out _)).Select(int.Parse).FirstOrDefault();
     if (pid == 0) pid = System.Diagnostics.Process.GetProcessesByName("dwm").FirstOrDefault()?.Id ?? 0;
     if (pid == 0) { Console.WriteLine("no target pid"); return 3; }
     using var sdk = new PresentMonSdkSource();
-    if (!sdk.Start(pmRoot, IsElevated(), 0, ownService: false)) { Console.WriteLine("sdk transport unavailable (see log above)"); return 3; }
+    if (!sdk.Start(Paths.PresentMonDir, Elevation.IsElevated, 0, ownService: false)) { Console.WriteLine("sdk transport unavailable (see log above)"); return 3; }
     Console.WriteLine($"sdk up ({sdk.Detail}), tracking pid {pid}");
     sdk.OnTargetChanged(0, pid);
     if (!sdk.Tracking) { Console.WriteLine("tracking failed"); return 3; }
@@ -73,9 +83,8 @@ if (args.Contains("--pm-smoketest"))
 // presents/second and the age of the newest one for a DXGI or D3D9 app.
 if (args.Contains("--tap-smoketest"))
 {
-    string tapRoot = FindProjectRoot(AppContext.BaseDirectory);
-    Log.Init(Path.Combine(tapRoot, "logs"), "tap-smoketest", alsoConsole: true);
-    if (!IsElevated()) { Console.WriteLine("needs admin (owns an ETW session)"); return 3; }
+    Log.Init("tap-smoketest", alsoConsole: true);
+    if (!Elevation.IsElevated) { Console.WriteLine("needs admin (owns an ETW session)"); return 3; }
     int tapPid = args.Where(a => int.TryParse(a, out _)).Select(int.Parse).FirstOrDefault();
     if (tapPid == 0) { Console.WriteLine("usage: Halo.Collector.exe --tap-smoketest <pid of a presenting app>"); return 3; }
     using var tap = new PresentTap();
@@ -101,40 +110,39 @@ if (args.Contains("--tap-smoketest"))
 }
 
 // Halo.Collector — elevated data process (plan §4). Single instance.
-using var singleInstance = new Mutex(true, "Local\\Halo.Collector.SingleInstance", out bool isNew);
+// Versioned with the section: a v1 and a v2 collector write different sections and can coexist
+// while a machine is being upgraded, but only one of each may run.
+using var singleInstance = new Mutex(true, "Local\\Halo.Collector.SingleInstance.v2", out bool isNew);
 if (!isNew)
 {
     Console.WriteLine("Halo.Collector already running.");
     return 1;
 }
 
-string root = AppContext.BaseDirectory;
-// project root = …\bin\Halo.Collector\ → two up; fall back to CWD for `dotnet run`
-string projectRoot = FindProjectRoot(root);
-Log.Init(Path.Combine(projectRoot, "logs"), "collector", alsoConsole: args.Contains("--console"));
-Log.Info($"project root: {projectRoot}");
-bool elevated = IsElevated();
+Log.Init("collector", alsoConsole: args.Contains("--console"));
+Log.Info($"halo {AppVersion.Current} · app root: {Paths.AppRoot}");
+Log.Info($"data: {Paths.DataDir}{(Paths.IsPortable ? " (portable)" : "")}");
+bool elevated = Elevation.IsElevated;
 Log.Info($"elevated: {elevated}");
 
-var configStore = new ConfigStore(Path.Combine(projectRoot, "config"));
-using var writer = new MetricsWriter();
+var configStore = new ConfigStore(Paths.ConfigDir);
+using var writer = new MetricsWriter(AppVersion.Current, Log.Warn);
 var sink = new MetricSink(writer);
 
 var host = new ProviderHost(sink);
-var settings = configStore.Settings;
 
-// Providers, each on its own cadence (plan §5 rate table)
-host.Add(new BuiltinProvider(configStore));                 // uptime, RAM, IPs, drive space: 1 Hz
-host.Add(new CpuKernelProvider(), settings.DefaultRateHz);  // per-core/total CPU: cap 64 Hz
-host.Add(new ProcessProvider(configStore));                 // top CPU/RAM lists: 1 Hz (cap 2)
-host.Add(new DiskIoProvider(configStore));                  // per-volume IO rates: default 10 Hz
-host.Add(new NetworkProvider(settings));                    // net rates: default 10 Hz
-host.Add(new NvmlProvider(), settings.DefaultRateHz);       // GPU: cap 20 Hz
-host.Add(new LhmProvider(LhmProvider.Part.Cpu), settings.DefaultRateHz); // MSR: cap 20 Hz
-host.Add(new LhmProvider(LhmProvider.Part.SuperIo, configStore));        // fans/Vcore: 1 Hz (cap 2)
-host.Add(new LhmProvider(LhmProvider.Part.Storage, configStore)); // SMART temps: 1/30 s
-host.Add(new LhmProvider(LhmProvider.Part.Gpu));            // NVAPI extras: voltage, fan RPM
-host.Add(new PresentMonProvider(projectRoot, settings));    // frame data: event-driven
+// Providers, each on its own fixed cadence (rates plan R1: engineering constants, not settings)
+host.Add(new BuiltinProvider(configStore, elevated)); // uptime, RAM, IPs, drive space, sys.*: 1 Hz
+host.Add(new CpuKernelProvider());                    // per-core/total CPU: cap 64 Hz
+host.Add(new ProcessProvider());                      // top CPU/RAM lists: 1 Hz (cap 2)
+host.Add(new DiskIoProvider());                       // per-volume IO rates
+host.Add(new NetworkProvider(configStore));           // net rates
+host.Add(new NvmlProvider());                         // GPU: cap 20 Hz
+host.Add(new LhmProvider(LhmProvider.Part.Cpu));      // MSR: 5 Hz
+host.Add(new LhmProvider(LhmProvider.Part.SuperIo));  // fans/Vcore: 1 Hz (cap 2)
+host.Add(new LhmProvider(LhmProvider.Part.Storage));  // SMART temps: 1/30 s
+host.Add(new LhmProvider(LhmProvider.Part.Gpu));      // NVAPI extras: voltage, fan RPM
+host.Add(new PresentMonProvider(configStore));        // frame data: event-driven
 // NVIDIA PCL Stats ETW consumer: true Reflex PC latency + rendered (pre-FG) rate.
 // Explicit provider GUID from NVIDIA's reference pclstats.h TRACELOGGING_DEFINE_PROVIDER
 // (NOT the name-hash — the header declares it literally). Enabling the provider is the whole
@@ -150,9 +158,15 @@ using var commands = new CommandServer(cmd =>
     var parts = cmd.Split(' ', 2, StringSplitOptions.TrimEntries);
     switch (parts[0])
     {
-        case "reset-max": sink.ResetMax(parts.Length > 1 ? parts[1] : ""); break;
-        case "reset-net": NetworkProvider.RequestTotalsReset(); break;
-        case "ping": break;
+        case ControlPipe.ResetMax: sink.ResetMax(parts.Length > 1 ? parts[1] : ""); break;
+        case ControlPipe.ResetNet: NetworkProvider.RequestTotalsReset(); break;
+        case ControlPipe.ReloadConfig: configStore.Reload(); Log.Info("config reloaded on request"); break;
+        case ControlPipe.Rescan:
+            // Hardware sets are reconciled by each provider on its own poll, so this only means
+            // "don't wait for the slow ones". Forcing a re-enumeration lands with ticket 02.
+            Log.Info("rescan requested");
+            break;
+        case ControlPipe.Ping: break;
         default: Log.Warn($"unknown command: {cmd}"); break;
     }
 });
@@ -161,9 +175,8 @@ configStore.Changed += () =>
 {
     Log.Info("config changed (hot-reload)");
     // Providers hold the ConfigStore (not a settings snapshot) and read config.Settings live,
-    // so value changes take effect immediately. Structural changes (drive list) are reconciled
-    // by the drive providers on their next poll: builtin/lhm-storage register-on-demand,
-    // disk-io rebuilds its PDH query.
+    // so value changes take effect immediately. Hardware sets are discovered, not configured,
+    // and are reconciled by each provider on its next poll.
 };
 
 Log.Info("collector running");
@@ -187,21 +200,3 @@ Log.Info("collector shutting down");
 host.Dispose();
 Log.Flush();
 return 0;
-
-static string FindProjectRoot(string start)
-{
-    var dir = new DirectoryInfo(start);
-    while (dir != null)
-    {
-        if (File.Exists(Path.Combine(dir.FullName, "Halo.sln"))) return dir.FullName;
-        dir = dir.Parent;
-    }
-    return new DirectoryInfo(start).FullName;
-}
-
-static bool IsElevated()
-{
-    using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
-    return new System.Security.Principal.WindowsPrincipal(identity)
-        .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
-}

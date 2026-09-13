@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Halo.Shared.Metrics;
+namespace Halo.Metrics;
 
 /// <summary>
 /// Minimal named-section wrapper. We roll our own instead of MemoryMappedFile because the
@@ -25,6 +25,7 @@ public sealed unsafe class NativeSection : IDisposable
     {
         // D: DACL; A;;GR;;;WD = allow generic-read to Everyone; BA = builtin admins; SY = system.
         // S:(ML;;NW;;;ME) = medium mandatory label / no-write-up so medium-IL readers are fine.
+        // This exact SDDL is what lets a medium-IL widget read a high-IL collector — keep verbatim.
         const string sddl = "D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GR;;;WD)S:(ML;;NW;;;ME)";
         nint sd = 0;
         if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, out sd, out _))

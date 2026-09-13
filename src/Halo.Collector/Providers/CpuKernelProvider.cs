@@ -1,5 +1,5 @@
 using System.Runtime.InteropServices;
-using Halo.Shared.Metrics;
+using Halo.Metrics;
 
 namespace Halo.Collector.Providers;
 
@@ -24,9 +24,12 @@ public sealed unsafe class CpuKernelProvider : ISensorProvider
         _prevIdle = new long[_coreCount];
         _prevBusy = new long[_coreCount];
 
-        sink.Register(MetricNames.CpuTotalPct, MetricType.Double, MetricUnit.Percent, Name, MaxRateHz);
+        // Usage is the busy fraction between two reads, i.e. an average over the poll period.
+        sink.Register(MetricNames.CpuTotalPct, MetricType.Double, MetricUnit.Percent, Name, DefaultRateHz, MetricSemantics.IntervalAvg);
+        sink.Register(MetricNames.CpuLogicalCount, MetricType.Double, MetricUnit.Count, Name, 0, MetricSemantics.Static);
         for (int i = 0; i < _coreCount; i++)
-            sink.Register(MetricNames.CpuCorePct(i), MetricType.Double, MetricUnit.Percent, Name, MaxRateHz);
+            sink.Register(MetricNames.CpuCorePct(i), MetricType.Double, MetricUnit.Percent, Name, DefaultRateHz, MetricSemantics.IntervalAvg);
+        sink.Set(MetricNames.CpuLogicalCount, _coreCount);
 
         Poll(sink); // prime deltas
         return true;

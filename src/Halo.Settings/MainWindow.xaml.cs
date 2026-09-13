@@ -15,8 +15,8 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         // Settings app never watches; the collector/widgets own hot-reload. We just read + write.
-        _store = new ConfigStore(ProjectPaths.ConfigDir, watch: false);
-        ConfigPathText.Text = ProjectPaths.ConfigDir;
+        _store = new ConfigStore(Halo.Shared.Paths.ConfigDir, watch: false);
+        ConfigPathText.Text = Halo.Shared.Paths.ConfigDir;
         Nav.SelectedIndex = 0; // triggers first navigation
     }
 
@@ -33,7 +33,7 @@ public partial class MainWindow : Window
             {
                 0 => new GeneralPage(_store),
                 1 => new WidgetsPage(_store),
-                2 => new ThemePage(),
+                2 => new ThemePage(_store),
                 3 => new MetricsPage(),
                 4 => new AutostartPage(),
                 _ => new GeneralPage(_store),

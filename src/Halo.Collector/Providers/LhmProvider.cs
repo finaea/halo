@@ -1,7 +1,6 @@
 using LibreHardwareMonitor.Hardware;
+using Halo.Metrics;
 using Halo.Shared;
-using Halo.Shared.Config;
-using Halo.Shared.Metrics;
 
 namespace Halo.Collector.Providers;
 
@@ -17,16 +16,17 @@ public sealed class LhmProvider : ISensorProvider
     public enum Part { Cpu, SuperIo, Storage, Gpu }
 
     private readonly Part _part;
-    private readonly ConfigStore? _config;
     private Computer? _computer;
+    private string? _unavailableReason;
 
-    public LhmProvider(Part part, ConfigStore? config = null)
-    {
-        _part = part;
-        _config = config;
-    }
+    public LhmProvider(Part part) => _part = part;
 
     public string Name => $"lhm-{_part.ToString().ToLowerInvariant()}";
+
+    /// <summary>Everything except the GPU part reads MSRs / port I/O / SMART through PawnIO.</summary>
+    public bool NeedsElevation => _part != Part.Gpu;
+
+    public string? UnavailableReason => _unavailableReason;
 
     public double MaxRateHz => _part switch
     {
@@ -39,7 +39,9 @@ public sealed class LhmProvider : ISensorProvider
 
     public double DefaultRateHz => _part switch
     {
-        Part.Cpu => 10,
+        // 5 Hz, not 10: at 10 Hz the MSR sweep overruns its period on 2.78 % of polls
+        // (docs\current-metrics-inventory.md § Provider cost measurement, rates plan R1).
+        Part.Cpu => 5,
         Part.SuperIo => 1,
         Part.Storage => 1.0 / 30,
         Part.Gpu => 1,
@@ -66,36 +68,44 @@ public sealed class LhmProvider : ISensorProvider
         }
         if (!any)
         {
-            Log.Warn($"{Name}: no hardware found (needs elevation / PawnIO?)");
+            // Distinguish "this PC has no such hardware" from "we cannot reach it": the System
+            // check turns these codes into a sentence the user can act on.
+            _unavailableReason = NeedsElevation && !Elevation.IsElevated ? ProviderError.Unelevated
+                : NeedsElevation && !PawnIoInstalled() ? ProviderError.NoDriver
+                : ProviderError.NoHardware;
+            Log.Warn($"{Name}: no hardware found ({_unavailableReason})");
             _computer.Close();
             _computer = null;
             return false;
         }
+        _unavailableReason = null;
 
         switch (_part)
         {
             case Part.Cpu:
-                sink.Register(MetricNames.CpuName, MetricType.String, MetricUnit.Text, Name, 1);
-                sink.Register(MetricNames.CpuPackageTempC, MetricType.Double, MetricUnit.Celsius, Name, MaxRateHz);
-                sink.RegisterWithMax(MetricNames.CpuPackagePowerW, MetricUnit.Watts, Name, MaxRateHz);
-                sink.Register(MetricNames.CpuClockMhz, MetricType.Double, MetricUnit.Megahertz, Name, MaxRateHz);
+                sink.Register(MetricNames.CpuName, MetricType.String, MetricUnit.Text, Name, 0, MetricSemantics.Static);
+                sink.Register(MetricNames.CpuPackageTempC, MetricType.Double, MetricUnit.Celsius, Name, DefaultRateHz,
+                    flags: MetricFlags.NeedsElevation);
+                sink.RegisterWithMax(MetricNames.CpuPackagePowerW, MetricUnit.Watts, Name, DefaultRateHz,
+                    flags: MetricFlags.NeedsElevation);
+                sink.Register(MetricNames.CpuClockMhz, MetricType.Double, MetricUnit.Megahertz, Name, DefaultRateHz,
+                    flags: MetricFlags.NeedsElevation);
                 break;
             case Part.SuperIo:
-                sink.RegisterWithMax(MetricNames.CpuVcoreV, MetricUnit.Volts, Name, MaxRateHz);
-                for (int i = 0; i < 8; i++)
-                {
-                    sink.Register(MetricNames.FanRpm(i), MetricType.Double, MetricUnit.Rpm, Name, MaxRateHz);
-                    sink.Register(MetricNames.FanPct(i), MetricType.Double, MetricUnit.Percent, Name, MaxRateHz);
-                    sink.Register(MetricNames.FanName(i), MetricType.String, MetricUnit.Text, Name, 1);
-                }
+                sink.RegisterWithMax(MetricNames.CpuVcoreV, MetricUnit.Volts, Name, DefaultRateHz,
+                    flags: MetricFlags.NeedsElevation);
+                sink.Register(MetricNames.FanCount, MetricType.Double, MetricUnit.Count, Name, 0, MetricSemantics.Static);
+                // Channels are registered as they are discovered in the first poll — the count
+                // is a property of the board, not a constant (hardware plan H1).
                 break;
             case Part.Storage:
-                foreach (char c in DriveLetters())
-                    sink.Register(MetricNames.DriveTempC(c), MetricType.Double, MetricUnit.Celsius, Name, MaxRateHz);
+                foreach (char c in Volumes.Local())
+                    sink.Register(MetricNames.DriveTempC(c), MetricType.Double, MetricUnit.Celsius, Name, DefaultRateHz,
+                        flags: MetricFlags.NeedsElevation);
                 break;
             case Part.Gpu:
-                sink.RegisterWithMax(MetricNames.GpuVoltageV, MetricUnit.Volts, Name, MaxRateHz);
-                sink.Register(MetricNames.GpuFanRpm, MetricType.Double, MetricUnit.Rpm, Name, MaxRateHz);
+                sink.RegisterWithMax(MetricNames.GpuVoltageV(0), MetricUnit.Volts, Name, DefaultRateHz);
+                sink.Register(MetricNames.GpuFanRpm(0), MetricType.Double, MetricUnit.Rpm, Name, DefaultRateHz);
                 break;
         }
 
@@ -113,11 +123,11 @@ public sealed class LhmProvider : ISensorProvider
         }
     }
 
-    // Read live from the shared ConfigStore so drive-list hot-reloads are picked up.
-    private IEnumerable<char> DriveLetters()
-        => (_config?.Settings.DriveLetters ?? ["C"])
-            .Where(s => !string.IsNullOrEmpty(s))
-            .Select(s => char.ToUpperInvariant(s[0])).Distinct();
+    private static bool PawnIoInstalled()
+    {
+        try { return LibreHardwareMonitor.PawnIo.PawnIo.IsInstalled; }
+        catch { return false; }
+    }
 
     public void Poll(MetricSink sink)
     {
@@ -161,19 +171,49 @@ public sealed class LhmProvider : ISensorProvider
         }
     }
 
+    /// <summary>
+    /// Publishes every fan channel the board exposes (v1 stopped at 8 and needed a config list).
+    /// A fan's percentage is no longer computed here: the duty cycle the chip itself reports
+    /// (<c>fan.&lt;n&gt;.control.pct</c>) is published when a paired Control sensor exists, and
+    /// widgets fall back to rpm ÷ max otherwise — no board-specific max table in the collector
+    /// (hardware plan H4).
+    /// </summary>
     private void PollSuperIo(MetricSink sink)
     {
         foreach (var hw in AllHardware().Where(h => h.HardwareType == HardwareType.SuperIO))
         {
+            // LHM names them "Fan #N" / "Fan Control #N"; pair on the trailing number, else by order.
+            var controls = hw.Sensors.Where(s => s.SensorType == SensorType.Control)
+                                     .OrderBy(s => s.Identifier.ToString()).ToList();
+
             int fanIdx = 0;
             foreach (var s in hw.Sensors.Where(s => s.SensorType == SensorType.Fan).OrderBy(s => s.Identifier.ToString()))
             {
-                if (fanIdx >= 8) break;
+                if (fanIdx >= MaxFanChannels) break;
+                if (!_registeredFans.Contains(fanIdx))
+                {
+                    sink.RegisterWithMax(MetricNames.FanRpm(fanIdx), MetricUnit.Rpm, Name, DefaultRateHz,
+                        flags: MetricFlags.NeedsElevation);
+                    sink.Register(MetricNames.FanName(fanIdx), MetricType.String, MetricUnit.Text, Name, 0, MetricSemantics.Static);
+                    _registeredFans.Add(fanIdx);
+                    sink.Set(MetricNames.FanCount, _registeredFans.Count);
+                }
+
                 double rpm = s.Value is { } v && !float.IsNaN((float)v) ? v : 0;
                 sink.Set(MetricNames.FanRpm(fanIdx), rpm);
                 sink.SetString(MetricNames.FanName(fanIdx), s.Name);
-                double maxRpm = MaxRpmFor(fanIdx);
-                sink.Set(MetricNames.FanPct(fanIdx), maxRpm > 0 ? Math.Clamp(rpm / maxRpm * 100, 0, 100) : 0);
+
+                var control = MatchControl(controls, s, fanIdx);
+                if (control?.Value is { } duty && !float.IsNaN((float)duty))
+                {
+                    if (!_registeredControls.Contains(fanIdx))
+                    {
+                        sink.Register(MetricNames.FanControlPct(fanIdx), MetricType.Double, MetricUnit.Percent, Name,
+                            DefaultRateHz, flags: MetricFlags.NeedsElevation);
+                        _registeredControls.Add(fanIdx);
+                    }
+                    sink.Set(MetricNames.FanControlPct(fanIdx), Math.Clamp(duty, 0, 100));
+                }
                 fanIdx++;
             }
 
@@ -184,10 +224,30 @@ public sealed class LhmProvider : ISensorProvider
         }
     }
 
-    private double MaxRpmFor(int channel)
+    private const int MaxFanChannels = 16;
+    private readonly HashSet<int> _registeredFans = new();
+    private readonly HashSet<int> _registeredControls = new();
+
+    private static ISensor? MatchControl(List<ISensor> controls, ISensor fan, int fanIdx)
     {
-        if (_config != null && _config.Settings.FanMaxRpm.TryGetValue(channel.ToString(), out double v) && v > 0) return v;
-        return 2000;
+        int? fanNumber = TrailingNumber(fan.Name) ?? TrailingNumber(fan.Identifier.ToString());
+        if (fanNumber is { } n)
+        {
+            var byNumber = controls.FirstOrDefault(c =>
+                (TrailingNumber(c.Name) ?? TrailingNumber(c.Identifier.ToString())) == n);
+            if (byNumber != null) return byNumber;
+        }
+        return fanIdx < controls.Count ? controls[fanIdx] : null;
+    }
+
+    private static int? TrailingNumber(string s)
+    {
+        int end = s.Length;
+        while (end > 0 && !char.IsDigit(s[end - 1])) end--;
+        if (end == 0) return null;
+        int start = end;
+        while (start > 0 && char.IsDigit(s[start - 1])) start--;
+        return int.TryParse(s.AsSpan(start, end - start), out int n) ? n : null;
     }
 
     private Dictionary<char, string>? _letterToModel;
@@ -195,14 +255,16 @@ public sealed class LhmProvider : ISensorProvider
 
     private void PollStorage(MetricSink sink)
     {
-        // Hot-reload: when the configured drive set changes, register temp metrics for any
-        // newly-added volume and invalidate the letter→disk-model map so it is rebuilt to
-        // include the new drive (temps otherwise stay N/A until the collector restarts).
-        string live = string.Concat(DriveLetters().OrderBy(c => c));
+        // Hot-plug: when the set of volumes changes, register temp metrics for any newly-seen
+        // volume and invalidate the letter→disk-model map so it is rebuilt to include the new
+        // drive (temps otherwise stay N/A until the collector restarts).
+        var volumes = Volumes.Local();
+        string live = Volumes.Key(volumes);
         if (live != _storageLetters)
         {
-            foreach (char c in DriveLetters())
-                sink.Register(MetricNames.DriveTempC(c), MetricType.Double, MetricUnit.Celsius, Name, MaxRateHz);
+            foreach (char c in volumes)
+                sink.Register(MetricNames.DriveTempC(c), MetricType.Double, MetricUnit.Celsius, Name, DefaultRateHz,
+                    flags: MetricFlags.NeedsElevation);
             _letterToModel = null;
             _unmatchedLogged.Clear();
             _storageLetters = live;
@@ -210,8 +272,8 @@ public sealed class LhmProvider : ISensorProvider
 
         if (_letterToModel == null)
         {
-            _letterToModel = DriveMap.LetterToModel(DriveLetters());
-            var missing = DriveLetters().Where(l => !_letterToModel.ContainsKey(l)).ToList();
+            _letterToModel = DriveMap.LetterToModel(volumes);
+            var missing = volumes.Where(l => !_letterToModel.ContainsKey(l)).ToList();
             if (missing.Count > 0)
                 Log.Warn($"lhm-storage: no disk-model descriptor for volume(s) {string.Join(",", missing)} — temps will read N/A (drive likely reports empty vendor/product strings)");
         }
@@ -263,11 +325,11 @@ public sealed class LhmProvider : ISensorProvider
         {
             var volt = hw.Sensors.FirstOrDefault(s => s.SensorType == SensorType.Voltage);
             if (volt?.Value is { } v && !float.IsNaN((float)v))
-                sink.Set(MetricNames.GpuVoltageV, v);
+                sink.Set(MetricNames.GpuVoltageV(0), v);
 
             var fan = hw.Sensors.FirstOrDefault(s => s.SensorType == SensorType.Fan);
             if (fan?.Value is { } f && !float.IsNaN((float)f))
-                sink.Set(MetricNames.GpuFanRpm, f);
+                sink.Set(MetricNames.GpuFanRpm(0), f);
         }
     }
 
