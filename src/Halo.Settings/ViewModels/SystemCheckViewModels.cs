@@ -302,7 +302,10 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
     public LayoutPlan CreateLayoutPlan()
     {
         bool connected = !Offline;
-        List<WidgetInstance> widgets = connected ? CreateDetectedLayout() : CreateBasicLayout();
+        List<WidgetInstance> widgets = DefaultLayout.Generate(
+            name => _session.Get(name),
+            name => _session.GetText(name),
+            connected);
         if (!connected)
         {
             const string offline = "Collector not running — creating Clock, CPU/RAM and Network only. Open System check again once the collector is up to add GPU, drive and fan widgets.";
@@ -312,17 +315,29 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
             ? $"GPU {widget.Options.GetValueOrDefault("gpuIndex", "0")}" : PanelCatalog.Find(widget.Type)?.DisplayName ?? widget.Type));
         string action = HasExistingLayout ? "replace your current widgets with" : "create";
         return new(widgets,
-            $"Halo will {action} {widgets.Count} widgets on the primary monitor: {names}. FPS is omitted until a game supplies frame data.", false);
+            $"Halo will {action} {widgets.Count} widgets on the primary monitor: {names}. The FPS widget will show data when a game supplies frames.", false);
     }
 
     public async Task SaveLayoutAsync(LayoutPlan plan)
     {
         List<WidgetInstance> saved = plan.Widgets.Select(CloneWidget).ToList();
-        _config.QueueWidgets("$", config => config.Widgets = saved.Select(CloneWidget).ToList(), flushImmediately: true);
+        _config.QueueWidgets("$", config =>
+        {
+            config.Widgets = saved.Select(CloneWidget).ToList();
+            config.Arrange = WidgetsConfig.ArrangePending;
+        }, flushImmediately: true);
         await _config.FlushAllAsync();
         HasExistingLayout = true;
         IsFirstRun = false;
-        ActionStatus = $"Created {saved.Count} widgets.";
+        ActionStatus = $"Created {saved.Count} widgets. Halo Widgets will arrange them on the primary monitor.";
+    }
+
+    public async Task ArrangeWidgetsAsync()
+    {
+        if (!HasExistingLayout) return;
+        _config.QueueWidgets("arrange", config => config.Arrange = WidgetsConfig.ArrangePending, flushImmediately: true);
+        await _config.FlushAllAsync();
+        ActionStatus = "Arrange requested. Halo Widgets will pack the current layout on the primary monitor.";
     }
 
     public string BuildHardwareReport()
@@ -550,79 +565,6 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
         };
         return _providerInfos.Any(info => likely.Contains(info.Name, StringComparer.Ordinal) && info.LastError == ProviderError.Unelevated);
     }
-
-    private List<WidgetInstance> CreateBasicLayout()
-        => Arrange([CreateWidget("clock", "clock"), CreateWidget("cpu-ram", "cpu-ram"), CreateWidget("network", "network")]);
-
-    private List<WidgetInstance> CreateDetectedLayout()
-    {
-        var widgets = new List<WidgetInstance>
-        {
-            CreateWidget("clock", "clock"), CreateWidget("cpu-ram", "cpu-ram"), CreateWidget("network", "network"),
-        };
-        int gpuCount = Math.Clamp((int)Math.Round(_session.Get(MetricNames.GpuCount, 0)), 0, 32);
-        for (int index = 0; index < gpuCount; index++)
-        {
-            WidgetInstance gpu = CreateWidget($"gpu-{index}", "gpu");
-            gpu.Options["gpuIndex"] = index.ToString(CultureInfo.InvariantCulture);
-            widgets.Add(gpu);
-        }
-        string[] volumes = DiscoverVolumes(_metrics).ToArray();
-        if (volumes.Length > 0)
-        {
-            WidgetInstance drives = CreateWidget("drives", "drives");
-            drives.Options["volumes"] = string.Join(',', volumes.Select(value => value.ToUpperInvariant()));
-            widgets.Add(drives);
-        }
-        int fanCount = Math.Clamp((int)Math.Round(_session.Get(MetricNames.FanCount, 0)), 0, 256);
-        int[] spinning = Enumerable.Range(0, fanCount).Where(index => _session.Get(MetricNames.FanRpm(index), 0) > 0).ToArray();
-        if (spinning.Length > 0)
-        {
-            WidgetInstance fans = CreateWidget("fans", "fans");
-            fans.Options["channels"] = string.Join(',', spinning);
-            widgets.Add(fans);
-        }
-        if (_session.TryGet(MetricNames.CpuPackagePowerW, out _) || Enumerable.Range(0, gpuCount).Any(index => _session.TryGet(MetricNames.GpuPowerW(index), out _)))
-            widgets.Add(CreateWidget("power", "power"));
-        if (_session.TryGet(MetricNames.LatencyPcMs, out _) || _session.TryGet(MetricNames.LatencyRenderMs, out _))
-            widgets.Add(CreateWidget("latency", "latency"));
-        if (_metrics.Any(metric => metric.Name.StartsWith("proc.topcpu.", StringComparison.Ordinal))) widgets.Add(CreateWidget("topcpu", "topcpu"));
-        if (_metrics.Any(metric => metric.Name.StartsWith("proc.topram.", StringComparison.Ordinal))) widgets.Add(CreateWidget("topram", "topram"));
-        return Arrange(widgets);
-    }
-
-    private static WidgetInstance CreateWidget(string id, string type)
-    {
-        PanelType panel = PanelCatalog.Find(type) ?? throw new InvalidOperationException($"Unknown panel type {type}");
-        var widget = new WidgetInstance { Id = id, Type = type, Enabled = true, RateHz = panel.EventDriven ? 5 : panel.DefaultRateHz };
-        foreach (OptionSpec option in panel.Options)
-            if (option.Default.Length > 0) widget.Options[option.Key] = option.Default;
-        return widget;
-    }
-
-    private static List<WidgetInstance> Arrange(List<WidgetInstance> widgets)
-    {
-        MonitorList.Entry? primary = MonitorList.Get().FirstOrDefault(monitor => monitor.Primary) ?? MonitorList.Get().FirstOrDefault();
-        int width = Math.Max(900, primary?.W ?? 1920);
-        int columns = Math.Clamp((width - 20) / 330, 2, 6);
-        int[] y = Enumerable.Repeat(20, columns).ToArray();
-        foreach (WidgetInstance widget in widgets.OrderByDescending(widget => EstimatedHeight(widget.Type)))
-        {
-            int column = Array.IndexOf(y, y.Min());
-            widget.Monitor = primary?.Device ?? "";
-            widget.X = 20 + column * 325;
-            widget.Y = y[column];
-            y[column] += EstimatedHeight(widget.Type) + 18;
-        }
-        return widgets;
-    }
-
-    private static int EstimatedHeight(string type) => type switch
-    {
-        "cpu-ram" => 520, "gpu" => 330, "drives" => 300, "latency" => 300,
-        "network" => 260, "topcpu" or "topram" => 240, "power" => 210,
-        "fans" => 180, _ => 120,
-    };
 
     private static IEnumerable<string> DiscoverVolumes(IEnumerable<MetricInfo> metrics)
         => metrics.Select(metric => Regex.Match(metric.Name, @"^drive\.([a-z])\.total\.b$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))

@@ -57,6 +57,7 @@ public partial class SystemCheckPage : UserControl, ISettingsPage, ISearchableSe
     private async void InstallPawnIo_Click(object sender, RoutedEventArgs e) => await _viewModel.InstallPawnIoAsync();
     private async void RepairAutostart_Click(object sender, RoutedEventArgs e) => await _viewModel.RepairAutostartAsync();
     private async void Rescan_Click(object sender, RoutedEventArgs e) => await _viewModel.RescanAsync();
+    private async void ArrangeWidgets_Click(object sender, RoutedEventArgs e) => await _viewModel.ArrangeWidgetsAsync();
 
     private void CopyReport_Click(object sender, RoutedEventArgs e)
     {

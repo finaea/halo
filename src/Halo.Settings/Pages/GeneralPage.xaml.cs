@@ -258,6 +258,7 @@ public partial class GeneralPage : UserControl, ISettingsPage, ISearchableSettin
     {
         target.SchemaVersion = source.SchemaVersion;
         target.Widgets = source.Widgets;
+        target.Arrange = source.Arrange;
     }
 
     public void Dispose()

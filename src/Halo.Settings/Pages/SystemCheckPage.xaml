@@ -61,7 +61,7 @@
         </ItemsControl>
 
         <Border x:Name="ActionsSection" Style="{StaticResource SettingsCard}"
-                Tag="actions install pawnio driver repair autostart scheduled tasks rescan hardware copy report generate default layout">
+                Tag="actions install pawnio driver repair autostart scheduled tasks rescan hardware copy report generate default layout arrange widgets primary monitor repack">
           <StackPanel>
             <TextBlock Text="Fixes and setup" Style="{StaticResource SectionHeading}" />
             <WrapPanel>
@@ -73,6 +73,9 @@
                       ToolTip="Re-enumerates GPUs, fans and volumes. Available once every 10 seconds."
                       Padding="12,6" Margin="0,0,8,8" Click="Rescan_Click" />
               <Button Content="Copy hardware report" Padding="12,6" Margin="0,0,8,8" Click="CopyReport_Click" />
+              <Button Content="Arrange widgets on primary monitor" IsEnabled="{Binding HasExistingLayout}"
+                      ToolTip="Asks Halo Widgets to repack the current layout using each panel's real size and scale."
+                      Padding="12,6" Margin="0,0,8,8" Click="ArrangeWidgets_Click" />
               <Button Content="{Binding LayoutButtonText}" Padding="12,6" Margin="0,0,0,8" Click="GenerateLayout_Click" />
             </WrapPanel>
             <TextBlock Text="{Binding ActionStatus}" Style="{StaticResource Hint}" Margin="0,2,0,0" />
