@@ -102,7 +102,10 @@ move or grow regions, and a reader that trusts the header keeps working.
 
 `nominalRateHz` is not always the provider's poll rate: `fps.app.name` is refreshed once a second
 inside a 40 Hz drain, `net.ip.external` every few minutes. Use it to bound your own refresh rate —
-polling a 1 Hz metric at 10 Hz just burns CPU.
+polling a 1 Hz metric at 10 Hz just burns CPU. **`nominalRateHz == 0` means the metric has no
+cadence at all**: it is written once when the hardware is discovered (semantics 6, `static`) and
+again only if that hardware is re-enumerated — re-reading it is pointless, and its age is expected
+to grow without bound. Everything the collector re-reads on each poll carries a non-zero rate.
 
 ### Value entry (16 B)
 
@@ -157,6 +160,7 @@ revised, so never mix provisional and resolved entries in one graph).
 
 Entries are written, then `frameCursor` is published. Read `[yourCursor, frameCursor)`; if you fell
 behind by more than the capacity, the oldest frames are gone — start from `frameCursor - capacity`.
+The entries themselves carry no lock, so a slow copy can be overtaken mid-read — see reader rule 5.
 
 ## Enums
 
@@ -180,7 +184,7 @@ flags:     1 has-max-companion (a "<name>.max" metric exists)
            8 derived (computed by the collector, not read from hardware)
 ```
 
-## The four reader rules
+## The five reader rules
 
 1. **Check magic and major version.** A different major means a different layout. Refuse; do not
    guess.
@@ -192,6 +196,11 @@ flags:     1 has-max-companion (a "<name>.max" metric exists)
    real value, which may simply be stale. Compute the age as
    `(QueryPerformanceCounter() - timestampQpc) / qpcFrequency` and decide for yourself.
 4. **Strings need the seqlock retry** above.
+5. **Re-check `frameCursor` after copying frames.** The ring has no per-entry lock: bounding the
+   read to the capacity *before* the copy is not enough, because the writer can lap you during it.
+   Snapshot `frameCursor` again afterwards and discard everything below `frameCursor₂ - capacity` —
+   those slots now hold newer frames, not the ones you asked for. Without this a reader that stalls
+   mid-copy (or just reads a full ring at 40 Hz+) hands its caller a silently reordered timeline.
 
 Plus one for liveness: the collector is gone if `heartbeatQpc` has not moved for several seconds
 *and* `collectorPid` no longer exists. Heartbeat alone can lag on a busy machine.

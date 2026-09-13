@@ -28,6 +28,10 @@ public sealed class MetricSink(MetricsWriter writer)
     public int Register(string name, MetricType type, MetricUnit unit, string provider, double nominalRateHz,
         MetricSemantics semantics = MetricSemantics.Latest, MetricFlags flags = MetricFlags.None, int windowMs = 0)
     {
+        // One rule for Static across every provider: a metric written once at discovery has no
+        // cadence, so its nominal rate is 0 and a consumer's refresh slider ignores it. Anything
+        // re-read on every poll is Latest (or IntervalAvg/RollingWindow) at the real poll rate.
+        if (semantics == MetricSemantics.Static) nominalRateHz = 0;
         int idx = Writer.Register(new MetricDescriptor(name, type, unit, provider, nominalRateHz, semantics, flags, windowMs));
         _indexByName[name] = idx;
         return idx;

@@ -82,7 +82,7 @@ public sealed class NvmlProvider : ISensorProvider
         // this number fresher — the registry rate says so and the widget "?" popover repeats it.
         sink.Register(MetricNames.GpuUsagePct(_index), MetricType.Double, MetricUnit.Percent, Name, DefaultRateHz, MetricSemantics.RollingWindow, windowMs: 1000);
         sink.Register(MetricNames.GpuVramUsedMb(_index), MetricType.Double, MetricUnit.Megabytes, Name, DefaultRateHz);
-        sink.Register(MetricNames.GpuVramTotalMb(_index), MetricType.Double, MetricUnit.Megabytes, Name, DefaultRateHz, MetricSemantics.Static);
+        sink.Register(MetricNames.GpuVramTotalMb(_index), MetricType.Double, MetricUnit.Megabytes, Name, 0, MetricSemantics.Static);
         sink.Register(MetricNames.GpuVramPct(_index), MetricType.Double, MetricUnit.Percent, Name, DefaultRateHz, MetricSemantics.Calc);
         sink.Register(MetricNames.GpuFanPct(_index), MetricType.Double, MetricUnit.Percent, Name, DefaultRateHz);
         sink.Register(MetricNames.GpuClockCoreMhz(_index), MetricType.Double, MetricUnit.Megahertz, Name, DefaultRateHz);
@@ -111,6 +111,9 @@ public sealed class NvmlProvider : ISensorProvider
         if (_hasFanRpm) sink.Register(MetricNames.GpuFanRpm(_index), MetricType.Double, MetricUnit.Rpm, Name, DefaultRateHz);
 
         sink.SetString(MetricNames.GpuName(_index), name.ToString());
+        // VRAM size is a property of the board: Static, published at discovery, not per poll.
+        if (nvmlDeviceGetMemoryInfo(_device, out var vram) == 0 && vram.total > 0)
+            sink.Set(MetricNames.GpuVramTotalMb(_index), vram.total / 1048576.0);
         return true;
     }
 
@@ -126,7 +129,6 @@ public sealed class NvmlProvider : ISensorProvider
         {
             double usedMb = mem.used / 1048576.0, totalMb = mem.total / 1048576.0;
             sink.Set(MetricNames.GpuVramUsedMb(_index), usedMb);
-            sink.Set(MetricNames.GpuVramTotalMb(_index), totalMb);
             sink.Set(MetricNames.GpuVramPct(_index), usedMb / totalMb * 100);
         }
 

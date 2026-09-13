@@ -113,13 +113,23 @@ public sealed unsafe class MetricsWriter : IDisposable
     /// Register a metric (idempotent on the name hash). Returns the slot index used in Set* calls.
     /// Two providers may legitimately register the same name (e.g. NVML and LHM both feeding
     /// gpu.0.fan.rpm): the first registration owns the descriptor, later ones are no-ops.
+    /// A hash hit on a *different* name is a 64-bit FNV-1a collision and throws — aliasing two
+    /// metrics onto one slot would publish one sensor's value under the other's name.
     /// </summary>
     public int Register(in MetricDescriptor d)
     {
         ulong id = d.Id;
         lock (_registryLock)
         {
-            if (_indexById.TryGetValue(id, out int existing)) return existing;
+            if (_indexById.TryGetValue(id, out int existing))
+            {
+                byte* prev = B + SharedMemoryLayout.RegistryOffset + existing * SharedMemoryLayout.RegistryEntrySize;
+                string prevName = ReadFixedUtf8(prev + SharedMemoryLayout.RegOffName, SharedMemoryLayout.NameBytes);
+                if (!string.Equals(prevName, d.Name, StringComparison.Ordinal))
+                    throw new InvalidOperationException(
+                        $"metric id collision: '{d.Name}' hashes to the same 64-bit id as the already-registered '{prevName}'. Rename one of them.");
+                return existing;
+            }
 
             int count = *(int*)(B + SharedMemoryLayout.OffRegistryCount);
             if (count >= SharedMemoryLayout.MaxMetrics) throw new InvalidOperationException("Metric registry full");
@@ -226,6 +236,13 @@ public sealed unsafe class MetricsWriter : IDisposable
             Volatile.Write(ref *(ulong*)(B + SharedMemoryLayout.OffFrameCursor), cursor);
         }
         _framesReady.Set(); // fire-and-forget wake for frame-graph widgets; no waiter = no cost
+    }
+
+    private static string ReadFixedUtf8(byte* p, int capacity)
+    {
+        var span = new ReadOnlySpan<byte>(p, capacity);
+        int nul = span.IndexOf((byte)0);
+        return Encoding.UTF8.GetString(nul >= 0 ? span[..nul] : span);
     }
 
     private static void WriteFixedUtf8(byte* dst, int capacity, string value)

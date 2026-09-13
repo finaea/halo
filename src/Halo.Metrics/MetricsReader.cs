@@ -6,13 +6,15 @@ namespace Halo.Metrics;
 /// <summary>
 /// Consumer-side lock-free reader for the Halo.Metrics.v2 section.
 ///
-/// Four rules every consumer must follow (docs\metrics-protocol.md):
+/// Five rules every consumer must follow (docs\metrics-protocol.md):
 ///  1. check magic and major version — this class refuses to attach otherwise;
 ///  2. drop cached name→index mappings when CollectorStartQpc changes (a restarted collector
 ///     rebuilds the registry, so stale indexes silently read the wrong metric);
 ///  3. timestamp 0 means N/A — a value with a timestamp is real but may be old (check the age);
-///  4. string reads retry on the per-slot seqlock.
-/// <see cref="CollectorSession"/> implements 1–4 for you; use it unless you need raw access.
+///  4. string reads retry on the per-slot seqlock;
+///  5. re-read the frame cursor after copying frames and discard entries the writer has
+///     since overwritten (the ring has no per-entry lock).
+/// <see cref="CollectorSession"/> implements 1–5 for you; use it unless you need raw access.
 /// </summary>
 public sealed unsafe class MetricsReader : IDisposable
 {
@@ -171,6 +173,10 @@ public sealed unsafe class MetricsReader : IDisposable
             uint len = *(uint*)(s + 4);
             if (len > _stringValueBytes) { Thread.SpinWait(20); continue; }
             new ReadOnlySpan<byte>(s + 8, (int)len).CopyTo(buf);
+            // The payload copy must not be reordered past the second sequence read, or a torn
+            // read compares two identical versions. x64 would not reorder it; the .NET memory
+            // model permits it, so make the ordering explicit.
+            Interlocked.MemoryBarrier();
             uint v2 = Volatile.Read(ref *(uint*)s);
             if (v1 == v2)
             {
@@ -234,6 +240,8 @@ public sealed unsafe class MetricsReader : IDisposable
     /// <summary>
     /// Copy frames [from, cursor) into dst (newest last). Returns count copied and the new cursor.
     /// If the reader fell behind more than the ring capacity, older frames are lost (skipped).
+    /// Reader rule 5: the ring has no per-entry lock, so the cursor is re-read after the copy and
+    /// any entry the writer overwrote meanwhile is dropped rather than handed back as garbage.
     /// </summary>
     public (int Count, ulong NewCursor) ReadFrames(ulong from, Span<FrameEntry> dst)
     {
@@ -242,10 +250,7 @@ public sealed unsafe class MetricsReader : IDisposable
         if (cursor <= from) return (0, cursor);
         ulong available = cursor - from;
         if (available > (ulong)_frameRingCapacity)
-        {
-            from = cursor - (ulong)_frameRingCapacity;
             available = (ulong)_frameRingCapacity;
-        }
         int n = (int)Math.Min(available, (ulong)dst.Length);
         // read the newest n frames ending at cursor
         ulong start = cursor - (ulong)n;
@@ -253,6 +258,20 @@ public sealed unsafe class MetricsReader : IDisposable
         {
             byte* e = B + _frameRingOffset + (int)((start + (ulong)i) % (ulong)_frameRingCapacity) * _frameEntrySize;
             dst[i] = *(FrameEntry*)e;
+        }
+
+        // The writer may have lapped us during the copy: everything below cursor2 - capacity has
+        // been overwritten by newer frames. Shift those out and report only what is still sound.
+        ulong cursor2 = FrameCursor;
+        if (cursor2 - start > (ulong)_frameRingCapacity)
+        {
+            ulong oldestIntact = cursor2 - (ulong)_frameRingCapacity;
+            int drop = (int)Math.Min((ulong)n, oldestIntact - start);
+            if (drop > 0)
+            {
+                dst[drop..n].CopyTo(dst[..(n - drop)]);   // overlapping-safe (memmove)
+                n -= drop;
+            }
         }
         return (n, cursor);
     }
