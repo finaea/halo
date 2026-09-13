@@ -3,7 +3,7 @@
 ; Built by tools\build.ps1 -Installer, which passes the version and the staged payload
 ; folder in. Compiling by hand works too; it falls back to the defaults below.
 ;
-;   ISCC.exe /DHaloVersion=0.1.0 /DHaloAppDir=..\dist\app /O..\dist installer\halo.iss
+;   ISCC.exe /DHaloVersion=1.0.0 /DHaloAppDir=..\dist\app /O..\dist installer\halo.iss
 ;
 ; Everything the installer does beyond copying files is delegated to Halo.Settings.exe's
 ; CLI verbs (--install-pawnio, --register-autostart, --unregister-autostart) so the
@@ -18,7 +18,7 @@
 #endif
 
 #define HaloName "Halo"
-#define HaloPublisher "Halo contributors"
+#define HaloPublisher "finaea"
 
 [Setup]
 ; Never change AppId — it is what makes "install over the top" an upgrade instead of a

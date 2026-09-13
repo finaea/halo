@@ -237,7 +237,7 @@ The JSON shape:
 ```jsonc
 {
   "header":  { "versionMajor": 2, "versionMinor": 0, "section": "Local\\Halo.Metrics.v2",
-               "collectorVersion": "0.1.0", "collectorPid": 1234, "heartbeatAgeS": 0.13,
+               "collectorVersion": "1.0.0", "collectorPid": 1234, "heartbeatAgeS": 0.13,
                "qpcFrequency": 10000000, "metricCount": 246, "totalSize": 364800 },
   "providers": [ { "index": 0, "name": "builtin", "state": "ok", "needsElevation": false,
                    "rateHz": 1, "lastPollMs": 1.98, "lastError": "" } ],

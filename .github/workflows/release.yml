@@ -3,7 +3,7 @@ name: Release
 # Tag a commit v<version> and push the tag; this builds the same two artefacts
 # tools\build.ps1 builds locally and attaches them to a GitHub release.
 #
-#   git tag v0.1.0 && git push origin v0.1.0
+#   git tag v1.0.0 && git push origin v1.0.0
 #
 # The tag has to match <Version> in Directory.Build.props - the job checks and fails
 # loudly rather than shipping a setup exe whose file name lies about its contents.
