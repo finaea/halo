@@ -251,10 +251,12 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
-    StopHaloTasks;
+    { Processes are stopped by image path. The scheduled tasks are NOT ended here by name:
+      a task called \Halo\Collector may belong to a different Halo (a source build registered
+      with install-dev.ps1, or an older install) — ending it killed exactly that during the
+      2026-09-13 test. The [UninstallRun] entry's --unregister-autostart stops and deletes
+      only the tasks whose action points into {app}, while Halo.Settings.exe still exists. }
     StopHaloProcesses(ExpandConstant('{app}'));
-    { The [UninstallRun] entry removes the two scheduled tasks next, while
-      Halo.Settings.exe still exists. }
   end
   else if CurUninstallStep = usPostUninstall then
   begin
