@@ -6,6 +6,42 @@
              xmlns:picker="clr-namespace:ColorPicker;assembly=ColorPicker">
   <UserControl.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    <SolidColorBrush x:Key="HaloDropIndicator" Color="#0067C0" />
+    <!-- Why every NumberBox on this page used to render blank. WPF-UI's template lays the control
+         out as [icon][text *][buttons], and its chrome costs a fixed 78px: 2px border + 20px
+         TextControlThemePadding + two 24px inline spin buttons with 4px margins. The widths this
+         page asked for (72–100) are at or under that, so the star text column collapsed to ≤8px
+         and the value — which was always correctly bound — had nowhere to paint. Buy the space
+         back: drop the clear button, trim the horizontal padding, and floor the width.
+         BasedOn names WPF-UI's own style rather than {x:Type ui:NumberBox}, which would be a
+         self-reference to the implicit style being declared here. -->
+    <Style TargetType="{x:Type ui:NumberBox}" BasedOn="{StaticResource DefaultUiNumberBoxStyle}">
+      <Setter Property="MinWidth" Value="116" />
+      <Setter Property="Padding" Value="8,8,4,7" />
+      <Setter Property="ClearButtonEnabled" Value="False" />
+    </Style>
+    <!-- A disabled widget used to look exactly like an enabled one apart from the switch, which
+         has no on/off caption. Dim the row and say "Off" in words. -->
+    <Style x:Key="RowText" TargetType="StackPanel">
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding Enabled}" Value="False">
+          <Setter Property="Opacity" Value="0.45" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+    <Style x:Key="RowOffLabel" TargetType="TextBlock">
+      <Setter Property="Text" Value="Off" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="0,0,6,0" />
+      <Setter Property="Foreground" Value="{StaticResource HaloSubtleText}" />
+      <Setter Property="Visibility" Value="Collapsed" />
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding Enabled}" Value="False">
+          <Setter Property="Visibility" Value="Visible" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
     <Style x:Key="EditorRow" TargetType="Grid">
       <Setter Property="MinHeight" Value="48" />
       <Setter Property="Margin" Value="0,2" />
@@ -49,18 +85,28 @@
 
     <Grid Grid.Row="2">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="236" />
+        <!-- Width is restored in the constructor and remembered for the session. -->
+        <ColumnDefinition x:Name="ListColumn" Width="236" MinWidth="180" />
         <ColumnDefinition Width="12" />
-        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="*" MinWidth="420" />
       </Grid.ColumnDefinitions>
+
+      <GridSplitter Grid.Column="1" Width="12" HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                    Background="Transparent" ResizeBehavior="PreviousAndNext" ShowsPreview="False"
+                    Cursor="SizeWE" DragCompleted="ListSplitter_DragCompleted"
+                    AutomationProperties.Name="Resize the widget list" />
 
       <Border Grid.Column="0" Style="{StaticResource SettingsCard}" Padding="7" Margin="0">
         <Grid>
           <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+          <!-- Without this the rows size to their untrimmed text, the list scrolls sideways and the
+               enable toggle sits off the right edge where nobody finds it. -->
           <ListBox x:Name="WidgetList" ItemsSource="{Binding Widgets}" SelectedItem="{Binding SelectedWidget, Mode=TwoWay}"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                    BorderThickness="0" Background="Transparent" AllowDrop="True"
                    PreviewMouseLeftButtonDown="WidgetList_PreviewMouseLeftButtonDown"
                    PreviewMouseMove="WidgetList_PreviewMouseMove" Drop="WidgetList_Drop"
+                   DragOver="WidgetList_DragOver" DragLeave="WidgetList_DragLeave"
                    PreviewKeyDown="WidgetList_PreviewKeyDown">
             <ListBox.ItemContainerStyle>
               <Style TargetType="ListBoxItem">
@@ -72,18 +118,25 @@
             <ListBox.ItemTemplate>
               <DataTemplate>
                 <Grid>
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="18" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="18" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                   <TextBlock Text="⋮⋮" Foreground="{StaticResource HaloSubtleText}" VerticalAlignment="Center" ToolTip="Drag to reorder" />
-                  <StackPanel Grid.Column="1" Margin="5,0,8,0">
+                  <StackPanel Grid.Column="1" Margin="5,0,8,0" Style="{StaticResource RowText}">
                     <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Text="{Binding Subtitle}" Style="{StaticResource Hint}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Subtitle}" Style="{StaticResource Hint}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
                   </StackPanel>
-                  <ui:ToggleSwitch Grid.Column="2" IsChecked="{Binding Enabled, Mode=TwoWay}"
+                  <TextBlock Grid.Column="2" Text="Off" Style="{StaticResource RowOffLabel}" />
+                  <ui:ToggleSwitch Grid.Column="3" IsChecked="{Binding Enabled, Mode=TwoWay}"
                                    OnContent="" OffContent="" AutomationProperties.Name="Enable widget" />
                 </Grid>
               </DataTemplate>
             </ListBox.ItemTemplate>
           </ListBox>
+          <!-- Sits in the ListBox's own cell so a y measured against WidgetList is a y here. -->
+          <Canvas IsHitTestVisible="False" ClipToBounds="True">
+            <Border x:Name="DropLine" Height="2" CornerRadius="1" Visibility="Collapsed"
+                    Background="{StaticResource HaloDropIndicator}"
+                    Width="{Binding ActualWidth, ElementName=WidgetList}" />
+          </Canvas>
           <StackPanel Grid.Row="1">
             <Separator Margin="2,4" />
             <UniformGrid Columns="2">
@@ -116,9 +169,9 @@
                   <Border Style="{StaticResource SettingsCard}" Visibility="{Binding HasRateSlider, Converter={StaticResource BoolToVisibility}}">
                     <StackPanel>
                       <Grid Style="{StaticResource EditorRow}">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="78" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                         <StackPanel VerticalAlignment="Center"><TextBlock Text="Refresh rate" /><TextBlock Text="{Binding RateRangeText}" Style="{StaticResource Hint}" /></StackPanel>
-                        <Slider Grid.Column="1" Minimum="0.5" Maximum="{Binding RateMaximum}" TickFrequency="0.5" IsSnapToTickEnabled="True" Value="{Binding RateHz, Mode=TwoWay}" Margin="8,0" />
+                        <Slider Grid.Column="1" Minimum="0.5" Maximum="{Binding RateMaximum}" TickFrequency="0.5" IsSnapToTickEnabled="True" IsMoveToPointEnabled="True" SmallChange="0.5" LargeChange="1" Value="{Binding RateHz, Mode=TwoWay}" Margin="8,0" />
                         <ui:NumberBox Grid.Column="2" Minimum="0.5" Maximum="{Binding RateMaximum}" SmallChange="0.5" MaxDecimalPlaces="1" Value="{Binding RateHz, Mode=TwoWay}" />
                         <local:HelpTip Grid.Column="3" Tip="{Binding RateHelp}" />
                       </Grid>
@@ -172,9 +225,9 @@
                               <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                               <Grid.ColumnDefinitions><ColumnDefinition Width="72" /><ColumnDefinition Width="52" /><ColumnDefinition Width="100" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                               <TextBlock Text="Colour" VerticalAlignment="Center" />
-                              <Grid Grid.Column="1"><Button Width="44" Height="30" Padding="3" Click="ColorButton_Click"><Border Background="{Binding Swatch}" BorderBrush="#55000000" BorderThickness="1" CornerRadius="4" /></Button><Popup IsOpen="{Binding IsPickerOpen, Mode=TwoWay}" StaysOpen="False" Placement="Right"><Border Background="White" BorderBrush="#55000000" BorderThickness="1" CornerRadius="8" Padding="10"><picker:PortableColorPicker Width="320" SelectedColor="{Binding Color, Mode=TwoWay}" ShowAlpha="True" /></Border></Popup></Grid>
+                              <Grid Grid.Column="1"><Button Width="44" Height="30" Padding="3" Click="ColorButton_Click" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"><Border Background="{Binding Swatch}" BorderBrush="#55000000" BorderThickness="1" CornerRadius="4" /></Button><Popup IsOpen="{Binding IsPickerOpen, Mode=TwoWay}" StaysOpen="False" Placement="Right"><Border Background="White" BorderBrush="#55000000" BorderThickness="1" CornerRadius="8" Padding="10"><Border.Resources><!-- The picker draws its own chrome in hard-coded pixels: Width="50" Height="20" on the HSV/HSL     combo, Width="70" on the hex box, Width="40" Height="18" on the H/S/V/A fields and four     Height="20" slider rows, all sized for stock WPF at a small font. Halo's ambient chrome     overflows every one of them, which is the single cause behind all three defects: combo     clipped, hex box tight, alpha row sliced off the bottom.     Two halves are needed. Pinning FontSize on the picker is not enough on its own, because an     implicit style beats inheritance - so every control type the picker uses has to have     WPF-UI's style taken off it first, or the font never reaches it. The H/S/V/A and Hex     captions are TextBlocks and the tab strip is a TabItem; neither is an input control, and     resetting only TextBox/ComboBox leaves both at the app font. The tab strip is what slices     the alpha row: ColorSliders gives its TabControl 20px of margin, 20px of grid margin and     four 20px rows, so the header has to stay small for the fourth row to survive. --><Style TargetType="TextBlock" /><Style TargetType="TabControl" /><Style TargetType="Slider" /><Style TargetType="Button" /><Style TargetType="ToggleButton" /><Style TargetType="ComboBoxItem" /><Style TargetType="TextBox"><Setter Property="Padding" Value="1,0" /><Setter Property="MinHeight" Value="0" /><Setter Property="VerticalContentAlignment" Value="Center" /></Style><Style TargetType="ComboBox"><Setter Property="Padding" Value="3,0" /><Setter Property="MinHeight" Value="0" /><Setter Property="VerticalContentAlignment" Value="Center" /></Style><Style TargetType="Label"><Setter Property="Padding" Value="0,0,5,0" /><Setter Property="VerticalAlignment" Value="Center" /></Style><Style TargetType="TabItem"><Setter Property="Padding" Value="7,1" /><Setter Property="MinHeight" Value="0" /></Style></Border.Resources><picker:StandardColorPicker Width="320" Height="430" FontSize="11" ShowFractionalPart="False" SelectedColor="{Binding Color, Mode=TwoWay}" ShowAlpha="True" HexRepresentation="RGBA" /></Border></Popup></Grid>
                               <TextBox Grid.Column="2" Text="{Binding Hex, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" VerticalAlignment="Center" />
-                              <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right"><ItemsControl ItemsSource="{Binding WarningValues}" Visibility="{Binding HasWarnings, Converter={StaticResource BoolToVisibility}}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ui:NumberBox Width="72" Margin="6,0,0,0" Value="{Binding Value, Mode=TwoWay}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl><StackPanel Orientation="Horizontal" Margin="8,0,0,0" Visibility="{Binding HasMax, Converter={StaticResource BoolToVisibility}}"><TextBlock Text="Max" VerticalAlignment="Center" Margin="0,0,5,0" /><ui:NumberBox Width="78" Minimum="100" Maximum="10000" SmallChange="100" Value="{Binding Max, Mode=TwoWay}" /></StackPanel><TextBlock Text="{Binding Unit}" VerticalAlignment="Center" Margin="6,0,0,0" /></StackPanel>
+                              <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right"><ItemsControl ItemsSource="{Binding WarningValues}" Visibility="{Binding HasWarnings, Converter={StaticResource BoolToVisibility}}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ui:NumberBox Width="72" Margin="6,0,0,0" Value="{Binding Value, Mode=TwoWay}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl><StackPanel Orientation="Horizontal" Margin="8,0,0,0" Visibility="{Binding HasMax, Converter={StaticResource BoolToVisibility}}"><TextBlock Text="Max" VerticalAlignment="Center" Margin="0,0,5,0" /><ui:NumberBox Width="78" Minimum="100" Maximum="10000" SmallChange="100" Value="{Binding Max, Mode=TwoWay}" /></StackPanel><TextBlock Text="{Binding Unit}" VerticalAlignment="Center" Margin="6,0,0,0" /></StackPanel>
                               <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3"
                                          Text="Colours the graph line. Text on rows with warning thresholds follows the warning colours."
                                          Style="{StaticResource Hint}" Margin="0,5,0,0" />
@@ -210,7 +263,7 @@
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
                         <Border Style="{StaticResource SettingsCard}">
-                          <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="52" /><ColumnDefinition Width="105" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Label}" VerticalAlignment="Center" /><Grid Grid.Column="1"><Button Width="44" Height="30" Padding="3" Click="ColorButton_Click" IsEnabled="{Binding IsEnabled}"><Border Background="{Binding Swatch}" BorderBrush="#55000000" BorderThickness="1" CornerRadius="4" /></Button><Popup IsOpen="{Binding IsPickerOpen, Mode=TwoWay}" StaysOpen="False" Placement="Right"><Border Background="White" BorderBrush="#55000000" BorderThickness="1" CornerRadius="8" Padding="10"><picker:PortableColorPicker Width="320" SelectedColor="{Binding Color, Mode=TwoWay}" ShowAlpha="True" /></Border></Popup></Grid><TextBox Grid.Column="2" Text="{Binding Hex, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding IsEnabled}" /><CheckBox Grid.Column="3" Content="Use global" IsChecked="{Binding UseGlobal, Mode=TwoWay}" HorizontalAlignment="Right" VerticalAlignment="Center" /></Grid>
+                          <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="52" /><ColumnDefinition Width="105" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Label}" VerticalAlignment="Center" /><Grid Grid.Column="1"><Button Width="44" Height="30" Padding="3" Click="ColorButton_Click" IsEnabled="{Binding IsEnabled}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"><Border Background="{Binding Swatch}" BorderBrush="#55000000" BorderThickness="1" CornerRadius="4" /></Button><Popup IsOpen="{Binding IsPickerOpen, Mode=TwoWay}" StaysOpen="False" Placement="Right"><Border Background="White" BorderBrush="#55000000" BorderThickness="1" CornerRadius="8" Padding="10"><Border.Resources><!-- The picker draws its own chrome in hard-coded pixels: Width="50" Height="20" on the HSV/HSL     combo, Width="70" on the hex box, Width="40" Height="18" on the H/S/V/A fields and four     Height="20" slider rows, all sized for stock WPF at a small font. Halo's ambient chrome     overflows every one of them, which is the single cause behind all three defects: combo     clipped, hex box tight, alpha row sliced off the bottom.     Two halves are needed. Pinning FontSize on the picker is not enough on its own, because an     implicit style beats inheritance - so every control type the picker uses has to have     WPF-UI's style taken off it first, or the font never reaches it. The H/S/V/A and Hex     captions are TextBlocks and the tab strip is a TabItem; neither is an input control, and     resetting only TextBox/ComboBox leaves both at the app font. The tab strip is what slices     the alpha row: ColorSliders gives its TabControl 20px of margin, 20px of grid margin and     four 20px rows, so the header has to stay small for the fourth row to survive. --><Style TargetType="TextBlock" /><Style TargetType="TabControl" /><Style TargetType="Slider" /><Style TargetType="Button" /><Style TargetType="ToggleButton" /><Style TargetType="ComboBoxItem" /><Style TargetType="TextBox"><Setter Property="Padding" Value="1,0" /><Setter Property="MinHeight" Value="0" /><Setter Property="VerticalContentAlignment" Value="Center" /></Style><Style TargetType="ComboBox"><Setter Property="Padding" Value="3,0" /><Setter Property="MinHeight" Value="0" /><Setter Property="VerticalContentAlignment" Value="Center" /></Style><Style TargetType="Label"><Setter Property="Padding" Value="0,0,5,0" /><Setter Property="VerticalAlignment" Value="Center" /></Style><Style TargetType="TabItem"><Setter Property="Padding" Value="7,1" /><Setter Property="MinHeight" Value="0" /></Style></Border.Resources><picker:StandardColorPicker Width="320" Height="430" FontSize="11" ShowFractionalPart="False" SelectedColor="{Binding Color, Mode=TwoWay}" ShowAlpha="True" HexRepresentation="RGBA" /></Border></Popup></Grid><TextBox Grid.Column="2" Text="{Binding Hex, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding IsEnabled}" /><CheckBox Grid.Column="3" Content="Use global" IsChecked="{Binding UseGlobal, Mode=TwoWay}" HorizontalAlignment="Right" VerticalAlignment="Center" /></Grid>
                         </Border>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
@@ -231,7 +284,7 @@
                       <Separator />
                       <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Z-order" Style="{StaticResource EditorLabel}" /><ComboBox Grid.Column="1" ItemsSource="{Binding ZModes}" SelectedItem="{Binding ZMode, Mode=TwoWay}" /><local:HelpTip Grid.Column="2" Tip="On desktop stays above the wallpaper and below ordinary windows. Normal behaves like an app window. Always on top floats over other windows." /></Grid>
                       <Separator />
-                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="70" /></Grid.ColumnDefinitions><TextBlock Text="Opacity" Style="{StaticResource EditorLabel}" /><Slider Grid.Column="1" Minimum="0.1" Maximum="1" TickFrequency="0.05" IsSnapToTickEnabled="True" Value="{Binding Opacity, Mode=TwoWay}" Margin="0,0,10,0" /><TextBlock Grid.Column="2" Text="{Binding Opacity, StringFormat={}{0:P0}}" VerticalAlignment="Center" /></Grid>
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="70" /></Grid.ColumnDefinitions><TextBlock Text="Opacity" Style="{StaticResource EditorLabel}" /><Slider Grid.Column="1" Minimum="0.1" Maximum="1" TickFrequency="0.05" IsSnapToTickEnabled="True" IsMoveToPointEnabled="True" SmallChange="0.05" LargeChange="0.1" Value="{Binding Opacity, Mode=TwoWay}" Margin="0,0,10,0" /><TextBlock Grid.Column="2" Text="{Binding Opacity, StringFormat={}{0:P0}}" VerticalAlignment="Center" /></Grid>
                       <Separator />
                       <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Click-through" /><TextBlock Text="Mouse clicks pass to whatever is underneath." Style="{StaticResource Hint}" /></StackPanel><ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding ClickThrough, Mode=TwoWay}" OnContent="On" OffContent="Off" /></Grid>
                       <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Keep on screen" /><TextBlock Text="Clamps the widget inside its monitor." Style="{StaticResource Hint}" /></StackPanel><ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding KeepOnScreen, Mode=TwoWay}" OnContent="On" OffContent="Off" /></Grid>
@@ -248,10 +301,10 @@
               <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,12">
                 <StackPanel>
                   <Border Style="{StaticResource SettingsCard}" Visibility="{Binding HasNetworkDataSource, Converter={StaticResource BoolToVisibility}}">
-                    <StackPanel><TextBlock Text="Network data" Style="{StaticResource SectionHeading}" /><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Network adapter" Style="{StaticResource EditorLabel}" /><TextBox Grid.Column="1" Text="{Binding NetworkInterface, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" /></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="External IP" /><TextBlock Text="Off by default. Halo's only outbound web request." Style="{StaticResource Hint}" /></StackPanel><ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding ExternalIpEnabled, Mode=TwoWay}" OnContent="On" OffContent="Off" /></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Service URL" Style="{StaticResource EditorLabel}" /><TextBox Grid.Column="1" Text="{Binding ExternalIpUrl, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding ExternalIpEnabled}" /></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Refresh interval" Style="{StaticResource EditorLabel}" /><StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="90" Minimum="1" Maximum="1440" Value="{Binding ExternalIpRefresh, Mode=TwoWay}" IsEnabled="{Binding ExternalIpEnabled}" /><TextBlock Text="minutes" Margin="6,0,0,0" VerticalAlignment="Center" /></StackPanel></Grid></StackPanel>
+                    <StackPanel><TextBlock Text="Network data" Style="{StaticResource SectionHeading}" /><TextBlock Text="Shared by every Network widget — these are collector settings, not this widget's." Style="{StaticResource Hint}" Margin="0,0,0,6" /><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Network adapter" Style="{StaticResource EditorLabel}" /><ComboBox Grid.Column="1" ItemsSource="{Binding NetworkAdapterChoices}" IsEditable="True" Text="{Binding NetworkInterface, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" /></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="External IP" /><TextBlock Text="Off by default. Halo's only outbound web request." Style="{StaticResource Hint}" /></StackPanel><ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding ExternalIpEnabled, Mode=TwoWay}" OnContent="On" OffContent="Off" /></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Service URL" Style="{StaticResource EditorLabel}" /><TextBox Grid.Column="1" Text="{Binding ExternalIpUrl, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding ExternalIpEnabled}" /></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Refresh interval" Style="{StaticResource EditorLabel}" /><StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="90" Minimum="1" Maximum="1440" Value="{Binding ExternalIpRefresh, Mode=TwoWay}" IsEnabled="{Binding ExternalIpEnabled}" /><TextBlock Text="minutes" Margin="6,0,0,0" VerticalAlignment="Center" /></StackPanel></Grid></StackPanel>
                   </Border>
                   <Border Style="{StaticResource SettingsCard}" Visibility="{Binding HasFpsDataSource, Converter={StaticResource BoolToVisibility}}">
-                    <StackPanel><TextBlock Text="Frame data" Style="{StaticResource SectionHeading}" /><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="190" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Capture transport" Style="{StaticResource EditorLabel}" /><ComboBox Grid.Column="1" ItemsSource="{Binding TransportChoices}" SelectedItem="{Binding Transport, Mode=TwoWay}" /></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="190" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Presented tap" Style="{StaticResource EditorLabel}" /><ComboBox Grid.Column="1" ItemsSource="{Binding TapChoices}" SelectedItem="{Binding Tap, Mode=TwoWay}" /></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="ETW flush period" Style="{StaticResource EditorLabel}" /><StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="90" Minimum="0" Maximum="1000" Value="{Binding FlushMs, Mode=TwoWay}" /><TextBlock Text="ms" Margin="6,0,0,0" VerticalAlignment="Center" /></StackPanel></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="1% / 0.1% lows window" Style="{StaticResource EditorLabel}" /><StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="90" Minimum="10" Maximum="600" Value="{Binding LowsWindow, Mode=TwoWay}" /><TextBlock Text="s" Margin="6,0,0,0" VerticalAlignment="Center" /></StackPanel></Grid></StackPanel>
+                    <StackPanel><TextBlock Text="Frame data" Style="{StaticResource SectionHeading}" /><TextBlock Text="Shared by every FPS widget — these are collector settings, not this widget's." Style="{StaticResource Hint}" Margin="0,0,0,6" /><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="190" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Capture transport" Style="{StaticResource EditorLabel}" /><ComboBox Grid.Column="1" ItemsSource="{Binding TransportChoices}" SelectedItem="{Binding Transport, Mode=TwoWay}" /></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="190" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Presented tap" Style="{StaticResource EditorLabel}" /><ComboBox Grid.Column="1" ItemsSource="{Binding TapChoices}" SelectedItem="{Binding Tap, Mode=TwoWay}" /></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="ETW flush period" Style="{StaticResource EditorLabel}" /><StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="90" Minimum="0" Maximum="1000" Value="{Binding FlushMs, Mode=TwoWay}" /><TextBlock Text="ms" Margin="6,0,0,0" VerticalAlignment="Center" /></StackPanel></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="1% / 0.1% lows window" Style="{StaticResource EditorLabel}" /><StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="90" Minimum="10" Maximum="600" Value="{Binding LowsWindow, Mode=TwoWay}" /><TextBlock Text="s" Margin="6,0,0,0" VerticalAlignment="Center" /></StackPanel></Grid></StackPanel>
                   </Border>
                   <Border Style="{StaticResource SettingsCard}" Visibility="{Binding HasNoDataSource, Converter={StaticResource BoolToVisibility}}"><StackPanel><TextBlock Text="No widget-specific data source" FontWeight="SemiBold" /><TextBlock Text="This widget follows the collector's automatic hardware discovery." Style="{StaticResource Hint}" Margin="0,4,0,0" /></StackPanel></Border>
                 </StackPanel>

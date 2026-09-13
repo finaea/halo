@@ -335,7 +335,12 @@ public sealed class OptionEditorViewModel : ObservableObject
         current = string.IsNullOrWhiteSpace(current) ? spec.Default : current;
         (Minimum, Maximum) = ParseRange(spec.Range);
 
-        IReadOnlyList<HardwareChoice> hardwareChoices = HardwareFor(spec.Key, hardware, current);
+        // Only the hardware-backed keys take their choices from the collector, and only they get the
+        // "keep the saved value visible even if that hardware is gone" fallback. Asking HardwareFor
+        // about anything else hands back a one-item list holding nothing but the current value, which
+        // both shadows spec.Choices below and promotes plain options to a combo box.
+        IReadOnlyList<HardwareChoice> hardwareChoices =
+            IsHardwareOption(spec.Key) ? HardwareFor(spec.Key, hardware, current) : [];
         if (spec.Kind == OptionKind.Bool) EditorKind = OptionEditorKind.Boolean;
         else if (spec.Kind == OptionKind.List) EditorKind = OptionEditorKind.Checklist;
         else if (spec.Kind == OptionKind.Enum || hardwareChoices.Count > 0) EditorKind = OptionEditorKind.Choice;
@@ -379,6 +384,9 @@ public sealed class OptionEditorViewModel : ObservableObject
 
     private void Save(string value) => _owner.ChangeOption(_spec.Key, value == _spec.Default ? null : value, _spec.Structural);
 
+    /// <summary>Collector-discovered choices for one of the <see cref="IsHardwareOption"/> keys.
+    /// Never call it for anything else: the saved-value fallback below would turn an empty list
+    /// into a one-item list and the option would offer only the value it already has.</summary>
     private static IReadOnlyList<HardwareChoice> HardwareFor(string key, HardwareSnapshot hardware, string current)
     {
         List<HardwareChoice> choices = key switch
@@ -518,7 +526,11 @@ public sealed class WidgetItemViewModel : ObservableObject
     public string Type { get; }
     public PanelType Panel { get; }
     public string DisplayName => string.IsNullOrWhiteSpace(Title) ? FriendlyPanelName() : Title;
-    public string Subtitle => $"{Panel.DisplayName} · {RateLabel} · {MonitorLabel}";
+    public string Subtitle => $"{PanelLabel} · {RateLabel} · {MonitorLabel}";
+    /// <summary>Panel name, plus whatever tells two widgets of the same type apart.</summary>
+    private string PanelLabel => Type == "fps"
+        ? $"{Panel.DisplayName} · {_owner.ModelFor(Id).Options.GetValueOrDefault("stream", "displayed")}"
+        : Panel.DisplayName;
     public string RateLabel => Panel.EventDriven ? "event-driven" : $"{RateHz:0.#} Hz";
     public string MonitorLabel => Monitor?.Label ?? "Primary monitor";
     public bool IsEventDriven => Panel.EventDriven;
@@ -537,6 +549,7 @@ public sealed class WidgetItemViewModel : ObservableObject
     public IReadOnlyList<ChoiceItem> TransportChoices { get; } = [new("auto", "Auto — bundled PresentMon service"), new("sdk", "Service + SDK only")];
     public IReadOnlyList<ChoiceItem> TapChoices { get; } = [new("auto", "Auto — live tap when supported"), new("off", "Off — capture transport only")];
     public IReadOnlyList<string> FontFamilies => _owner.FontFamilies;
+    public IReadOnlyList<string> NetworkAdapterChoices => _owner.NetworkAdapterChoices;
 
     public bool Enabled { get => _enabled; set { if (Set(ref _enabled, value) && !_applying) Change("enabled", widget => widget.Enabled = value); } }
     public string Title
@@ -683,7 +696,7 @@ public sealed class WidgetItemViewModel : ObservableObject
                 try { BuildDynamicEditors(_owner.ModelFor(Id)); RefreshRate(_owner.ModelFor(Id)); }
                 finally { _applying = false; }
             });
-        Raise(nameof(DisplayName));
+        Raise(nameof(DisplayName)); Raise(nameof(Subtitle));
     }
 
     public void ChangeAppearanceColor(string token, string? value)
@@ -851,7 +864,9 @@ public sealed class WidgetItemViewModel : ObservableObject
         }
         if (spec.Repeat == Repeat.PerRank)
         {
-            int count = int.TryParse(Panel.OptionValue(model.Options, "topN"), out int parsed) ? Math.Clamp(parsed, 1, 10) : 5;
+            // The bounds are the collector's: ProcessProvider publishes exactly 10 ranks per ranking.
+            int count = int.TryParse(Panel.OptionValue(model.Options, "topN"), out int parsed)
+                ? Math.Clamp(parsed, PanelCatalog.MinTopRows, PanelCatalog.MaxTopRows) : 5;
             return Enumerable.Range(0, count).Select(index => (index.ToString(), (index + 1).ToString(), index.ToString(), "", false));
         }
         if (spec.Repeat == Repeat.PerVolume)
@@ -959,6 +974,58 @@ public sealed class WidgetsPageViewModel : ObservableObject, IDisposable
     public LiveConfigService Config => _config;
     public ObservableCollection<WidgetItemViewModel> Widgets { get; } = [];
     public IReadOnlyList<string> FontFamilies { get; } = Fonts.SystemFontFamilies.Select(font => font.Source).Order(StringComparer.CurrentCultureIgnoreCase).ToArray();
+
+    /// <summary>Adapter names for the Data source picker: "Best" first, then every non-loopback
+    /// adapter with the connected ones first. Enumerated once — the Data source tab is not a live
+    /// view of the NIC list.
+    /// <para>MERGE NOTE: ticket 01 landed this same enumeration as
+    /// <c>Halo.Settings.Services.NetworkAdapters.List()</c>, but that file is on their branch and
+    /// does not exist in this worktree, so calling it would not compile here. Delete this and point
+    /// the property at theirs once the branches meet — nothing else has to change.</para></summary>
+    public IReadOnlyList<string> NetworkAdapterChoices { get; } = BuildNetworkAdapterChoices();
+
+    private static IReadOnlyList<string> BuildNetworkAdapterChoices()
+    {
+        var names = new List<string> { "Best" };
+        try
+        {
+            // Offer exactly what the collector can honour. NetworkProvider.PickNic only ever accepts
+            // an interface that is Up and neither Loopback nor Tunnel, matched on Name — so listing
+            // anything else would let the user pick a name that silently matches nothing and leaves
+            // the widget with no network metrics at all.
+            var eligible = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+                .Where(nic => nic.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up)
+                .Where(nic => nic.NetworkInterfaceType
+                    is not (System.Net.NetworkInformation.NetworkInterfaceType.Loopback
+                         or System.Net.NetworkInformation.NetworkInterfaceType.Tunnel))
+                .ToList();
+
+            // .NET 10 also returns one interface per NDIS lightweight filter bound to an adapter,
+            // named "<adapter>-<filter>-0000" — 35 entries on this machine against 3 real NICs.
+            // They pass the collector's test, so they are not wrong, just unusable as a menu. Drop
+            // any candidate whose name is another candidate's name plus a suffix; that identifies
+            // the filter instances by their own naming rule rather than by a vendor blocklist.
+            names.AddRange(eligible
+                .Where(nic => !eligible.Any(parent => !ReferenceEquals(parent, nic)
+                    && nic.Name.StartsWith(parent.Name + "-", StringComparison.OrdinalIgnoreCase)))
+                .OrderByDescending(GatewayCount)
+                .ThenBy(nic => nic.Name, StringComparer.CurrentCultureIgnoreCase)
+                .Select(nic => nic.Name)
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            // Enumeration is best-effort: the box stays editable and "Best" alone is a valid list.
+        }
+        return names;
+    }
+
+    /// <summary>The collector prefers the interface that has a default gateway, so surface those first.</summary>
+    private static int GatewayCount(System.Net.NetworkInformation.NetworkInterface nic)
+    {
+        try { return nic.GetIPProperties().GatewayAddresses.Count; }
+        catch { return 0; }
+    }
     public WidgetItemViewModel? SelectedWidget { get => _selectedWidget; set => Set(ref _selectedWidget, value); }
     public bool CollectorOffline => !_hardware.Online;
     public string CollectorHint { get => _collectorHint; private set => Set(ref _collectorHint, value); }

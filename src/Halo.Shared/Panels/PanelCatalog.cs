@@ -132,6 +132,10 @@ public static class PanelCatalog
                 new OptionSpec("coreColumns", OptionKind.Enum, "auto", "Core columns",
                     "Columns of core rows. Auto: 1 up to 16 threads, 2 up to 32, 3 up to 48.",
                     Structural: true, Choices: ["auto", "1", "2", "3"]),
+                new OptionSpec("groupCoreTypes", OptionKind.Bool, "true", "Group P/E cores",
+                    "Off lists every thread in OS order with no P-cores / E-cores heading rows — "
+                    + "the pre-1.0 layout. Only affects CPUs that have both kinds of core.",
+                    Structural: true),
                 new OptionSpec("cpuFanChannel", OptionKind.Int, "", "CPU fan channel",
                     "Which discovered fan channel is the CPU fan. Empty = first channel whose name contains \"CPU\".",
                     Structural: true),
@@ -323,10 +327,17 @@ public static class PanelCatalog
             DefaultRateHz: 1),
     ];
 
+    /// <summary>Row-count bounds for the Top-processes panels. The ceiling is the collector's:
+    /// <c>ProcessProvider.Ranks</c> publishes 10 <c>proc.top*</c> ranks per ranking, so asking for
+    /// more would only add rows that read N/A.</summary>
+    public const int MinTopRows = 3;
+    public const int MaxTopRows = 10;
+
     private static OptionSpec[] TopProcOptions() =>
     [
         new OptionSpec("topN", OptionKind.Int, "5", "Rows",
-            "How many processes to list (1–10).", Structural: true, Range: "1..10"),
+            $"How many processes to list ({MinTopRows}–{MaxTopRows}).",
+            Structural: true, Range: $"{MinTopRows}..{MaxTopRows}"),
         new OptionSpec("aggregate", OptionKind.Bool, "false", "Sum same-name processes",
             "Task Manager style: all chrome.exe instances become one row.", Structural: true),
     ];
