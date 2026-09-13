@@ -3,6 +3,7 @@ obj/
 bin-*/
 obj-*/
 logs/
+dist/
 tools/nuget-cache/
 *.user
 
@@ -11,9 +12,13 @@ tools/nuget-cache/
 # deliberately kept local only.
 docs/private/
 
-# Third-party PresentMon redistributables — not vendored (see README).
-# Keep the P/Invoke header and license for reference only.
+# PawnIO_setup.exe is GPL-2.0-or-later. tools\build.ps1 fetches it from its official
+# GitHub release and verifies the pinned SHA256 before staging it, so the binary itself
+# does not live in git (THIRD-PARTY-NOTICES.md has the URL and the hash).
+installer/redist/
+
+# The Intel PresentMon 2 SDK under tools/presentmon/sdk/ IS committed (MIT, ~5.4 MB) -
+# a clone has to be able to build a working frame pipeline. Nothing else under
+# tools/presentmon/ should be.
 tools/presentmon/*.exe
 tools/presentmon/*.msi
-tools/presentmon/**/*.exe
-tools/presentmon/**/*.dll

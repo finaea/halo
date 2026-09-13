@@ -1,18 +1,12 @@
 @echo off
 REM Double-click this to run the full Halo dev cycle:
-REM   stop widgets -> stop collector -> publish -> restart both.
-REM Self-elevates (UAC prompt) so it can stop the elevated collector and control the task.
+REM   stop widgets -> stop collector task -> build into dist\app -> restart both.
+REM
+REM Deliberately does NOT self-elevate. Stopping and starting your own \Halo\ tasks needs no
+REM admin, and running the whole script elevated would start Halo.Widgets elevated too -
+REM which is not how it is supposed to run (medium integrity, like any user app).
 title Halo redeploy
 
-REM --- self-elevate: relaunch via UAC if not already running as administrator ---
-net session >nul 2>&1
-if %errorlevel% neq 0 (
-    echo Requesting administrator rights...
-    powershell.exe -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
-    exit /b
-)
-
-REM --- elevated from here ---
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0redeploy-halo.ps1"
 echo.
 echo ---------------------------------------------
