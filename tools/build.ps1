@@ -305,13 +305,24 @@ if ($Installer) {
 # ---------------------------------------------------------------------------
 if ($Zip) {
     Step 'Packing portable zip'
+    # Both: ZipFile/ZipFileExtensions live in .FileSystem, ZipArchiveMode in the other one.
+    Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zipPath = Join-Path $distDir "Halo-$version-win-x64.zip"
     if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
-    [IO.Compression.ZipFile]::CreateFromDirectory($appDir, $zipPath, [IO.Compression.CompressionLevel]::Optimal, $false)
 
-    $archive = [IO.Compression.ZipFile]::Open($zipPath, [IO.Compression.ZipArchiveMode]::Update)
+    # Entries are added by hand rather than with CreateFromDirectory: on .NET Framework
+    # (which is what Windows PowerShell 5.1 runs on) that helper writes BACKSLASH
+    # separators into the entry names, and the ZIP spec says forward slashes. Explorer
+    # copes; other extractors produce files literally named "presentmon\LICENSE.txt".
+    $archive = [IO.Compression.ZipFile]::Open($zipPath, [IO.Compression.ZipArchiveMode]::Create)
     try {
+        $prefix = (Join-Path $appDir '').Length
+        foreach ($file in (Get-ChildItem -LiteralPath $appDir -Recurse -File)) {
+            $entryName = $file.FullName.Substring($prefix).Replace('\', '/')
+            [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $archive, $file.FullName, $entryName, [IO.Compression.CompressionLevel]::Optimal)
+        }
         $entry = $archive.CreateEntry('portable.marker')
         $writer = New-Object IO.StreamWriter($entry.Open())
         $writer.Write("Halo portable mode: config and logs live in .\data next to the exes.`r`nDelete this file to use %LOCALAPPDATA%\Halo instead.`r`n")
