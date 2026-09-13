@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 2,
   "widgets": [
     {
       "id": "clock-1",
@@ -12,8 +13,16 @@
       "keepOnScreen": true,
       "locked": false,
       "opacity": 1,
-      "rateHz": null,
-      "options": {}
+      "hideOnFullscreen": false,
+      "rateHz": 5,
+      "graph": {
+        "historyS": 40,
+        "height": 25,
+        "style": "line"
+      },
+      "options": {},
+      "metrics": {},
+      "appearance": {}
     },
     {
       "id": "power-1",
@@ -27,8 +36,18 @@
       "keepOnScreen": true,
       "locked": false,
       "opacity": 1,
-      "rateHz": null,
-      "options": {}
+      "hideOnFullscreen": false,
+      "rateHz": 5,
+      "graph": {
+        "historyS": 40,
+        "height": 25,
+        "style": "line"
+      },
+      "options": {
+        "gpuIndex": "0"
+      },
+      "metrics": {},
+      "appearance": {}
     },
     {
       "id": "drives-1",
@@ -36,19 +55,31 @@
       "enabled": true,
       "monitor": "\\\\.\\DISPLAY5",
       "x": 0,
-      "y": 1276,
+      "y": 1282,
       "zMode": "Desktop",
       "clickThrough": false,
       "keepOnScreen": true,
       "locked": false,
       "opacity": 1,
-      "rateHz": null,
-      "options": {}
+      "hideOnFullscreen": false,
+      "rateHz": 5,
+      "graph": {
+        "historyS": 40,
+        "height": 25,
+        "style": "line"
+      },
+      "options": {
+        "volumes": "C,D,E,F,G,H,I,J",
+        "freeMode": "E"
+      },
+      "metrics": {},
+      "appearance": {}
     },
     {
       "id": "cpu-ram-1",
       "type": "cpu-ram",
       "enabled": true,
+      "title": "i5-14600K DDR5 6400MHz",
       "monitor": "\\\\.\\DISPLAY5",
       "x": 729,
       "y": 984,
@@ -57,11 +88,22 @@
       "keepOnScreen": true,
       "locked": false,
       "opacity": 1,
-      "rateHz": null,
+      "hideOnFullscreen": false,
+      "rateHz": 5,
+      "graph": {
+        "historyS": 40,
+        "height": 25,
+        "style": "line"
+      },
       "options": {
-        "title": "i5-14600K DDR5 6400MHz",
-        "graphCpuTemp": "false"
-      }
+        "cpuFanChannel": "0"
+      },
+      "metrics": {
+        "temp": {
+          "graph": false
+        }
+      },
+      "appearance": {}
     },
     {
       "id": "fans-1",
@@ -75,8 +117,27 @@
       "keepOnScreen": true,
       "locked": false,
       "opacity": 1,
-      "rateHz": null,
-      "options": {}
+      "hideOnFullscreen": false,
+      "rateHz": 5,
+      "graph": {
+        "historyS": 40,
+        "height": 25,
+        "style": "line"
+      },
+      "options": {
+        "channels": "2,3"
+      },
+      "metrics": {
+        "rpm.2": {
+          "label": "BACK",
+          "max": 2000
+        },
+        "rpm.3": {
+          "label": "FRONT",
+          "max": 2000
+        }
+      },
+      "appearance": {}
     },
     {
       "id": "network-1",
@@ -90,8 +151,16 @@
       "keepOnScreen": true,
       "locked": false,
       "opacity": 1,
-      "rateHz": null,
-      "options": {}
+      "hideOnFullscreen": false,
+      "rateHz": 5,
+      "graph": {
+        "historyS": 40,
+        "height": 25,
+        "style": "line"
+      },
+      "options": {},
+      "metrics": {},
+      "appearance": {}
     },
     {
       "id": "topcpu-1",
@@ -105,8 +174,18 @@
       "keepOnScreen": true,
       "locked": false,
       "opacity": 1,
-      "rateHz": null,
-      "options": {}
+      "hideOnFullscreen": false,
+      "rateHz": 5,
+      "graph": {
+        "historyS": 40,
+        "height": 25,
+        "style": "line"
+      },
+      "options": {
+        "topN": "5"
+      },
+      "metrics": {},
+      "appearance": {}
     },
     {
       "id": "topram-1",
@@ -120,15 +199,25 @@
       "keepOnScreen": true,
       "locked": false,
       "opacity": 1,
-      "rateHz": null,
+      "hideOnFullscreen": false,
+      "rateHz": 5,
+      "graph": {
+        "historyS": 40,
+        "height": 25,
+        "style": "line"
+      },
       "options": {
-        "aggregate": "true"
-      }
+        "aggregate": "true",
+        "topN": "5"
+      },
+      "metrics": {},
+      "appearance": {}
     },
     {
       "id": "fps-presented",
       "type": "fps",
       "enabled": true,
+      "title": "FPS COUNTER (PRESENTED)",
       "monitor": "\\\\.\\DISPLAY5",
       "x": 378,
       "y": 1169,
@@ -137,16 +226,24 @@
       "keepOnScreen": true,
       "locked": false,
       "opacity": 1,
-      "rateHz": null,
+      "hideOnFullscreen": false,
+      "rateHz": 5,
+      "graph": {
+        "historyS": 40,
+        "height": 25,
+        "style": "line"
+      },
       "options": {
-        "stream": "presented",
-        "title": "FPS COUNTER (PRESENTED)"
-      }
+        "stream": "presented"
+      },
+      "metrics": {},
+      "appearance": {}
     },
     {
       "id": "fps-displayed",
       "type": "fps",
       "enabled": false,
+      "title": "FPS COUNTER (DISPLAYED)",
       "monitor": "",
       "x": 5498,
       "y": 631,
@@ -155,16 +252,24 @@
       "keepOnScreen": true,
       "locked": false,
       "opacity": 1,
-      "rateHz": null,
+      "hideOnFullscreen": false,
+      "rateHz": 5,
+      "graph": {
+        "historyS": 40,
+        "height": 25,
+        "style": "line"
+      },
       "options": {
-        "stream": "displayed",
-        "title": "FPS COUNTER (DISPLAYED)"
-      }
+        "stream": "displayed"
+      },
+      "metrics": {},
+      "appearance": {}
     },
     {
       "id": "gpu-1",
       "type": "gpu",
       "enabled": true,
+      "title": "GPU RTX 5070 Ti",
       "monitor": "\\\\.\\DISPLAY5",
       "x": 378,
       "y": 1370,
@@ -173,13 +278,28 @@
       "keepOnScreen": true,
       "locked": false,
       "opacity": 1,
-      "rateHz": null,
+      "hideOnFullscreen": false,
+      "rateHz": 5,
+      "graph": {
+        "historyS": 40,
+        "height": 25,
+        "style": "line"
+      },
       "options": {
-        "title": "GPU RTX 5070 Ti",
-        "graphGpuTemp": "false",
-        "graphGpuMem": "false",
-        "graphGpuFan": "false"
-      }
+        "gpuIndex": "0"
+      },
+      "metrics": {
+        "temp": {
+          "graph": false
+        },
+        "vram": {
+          "graph": false
+        },
+        "fan": {
+          "graph": false
+        }
+      },
+      "appearance": {}
     },
     {
       "id": "latency-1",
@@ -193,8 +313,16 @@
       "keepOnScreen": true,
       "locked": false,
       "opacity": 1,
-      "rateHz": null,
-      "options": {}
+      "hideOnFullscreen": false,
+      "rateHz": 5,
+      "graph": {
+        "historyS": 40,
+        "height": 25,
+        "style": "line"
+      },
+      "options": {},
+      "metrics": {},
+      "appearance": {}
     }
   ]
 }

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 2,
+  "lockAll": false,
+  "snap": true,
+  "appearance": {
+    "scale": 1.7,
+    "fontFamily": "Trebuchet MS",
+    "textSizePt": 8,
+    "cornerRadius": 4,
+    "colors": {}
+  },
+  "collector": {
+    "frameLowsWindowS": 60,
+    "presentMonTransport": "auto",
+    "presentMonEtwFlushMs": 10,
+    "presentedTap": "auto",
+    "networkInterface": "Best",
+    "externalIp": {
+      "enabled": false,
+      "url": "https://api.ipify.org",
+      "refreshMinutes": 5
+    }
+  }
+}
