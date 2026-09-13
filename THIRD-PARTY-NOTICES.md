@@ -65,7 +65,10 @@ device IO control interface, which is exactly the case the PawnIO authors carved
 >
 > -- https://github.com/namazso/PawnIO#license
 
-Upstream's own copyright notice:
+Upstream's own copyright notice, copied verbatim from the header of
+[`PawnIO/src/callbacks.cpp`](https://github.com/namazso/PawnIO/blob/master/PawnIO/src/callbacks.cpp)
+(the same notice appears in [README.md](https://github.com/namazso/PawnIO#license), and the shipped
+`PawnIO_setup.exe` carries `Copyright (c) 2026 namazso <admin@namazso.eu>` in its version resource):
 
     PawnIO - Input-output driver
     Copyright (C) 2026  namazso <admin@namazso.eu>
