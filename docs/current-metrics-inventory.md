@@ -386,9 +386,18 @@ rate would not have taken effect anyway. What *is* configurable under `settings.
 `networkInterface` and `externalIp{enabled,url,refreshMinutes}`.
 
 **Every provider that enumerates hardware in `Initialize` re-runs it on the `rescan` control
-command** (`RescanReinitialises`): builtin, cpu-kernel, disk-io, nvml and all four LHM parts. The
-providers that own an ETW session or a counter baseline (presentmon, pclstats, network) stay out —
-tearing those down to look for a new fan would lose frame data or reset the session totals.
+command** (`RescanReinitialises`): builtin, cpu-kernel, disk-io, nvml, and the SuperIO, Storage and
+GPU parts of LHM — seven in all. Three kinds of provider stay out:
+
+- **presentmon, pclstats, network** own an ETW session or a counter baseline; tearing those down to
+  look for a new fan would lose frame data or reset the session totals.
+- **`lhm-cpu`** has nothing to re-discover (four fixed metrics, no indexed family, a CPU that
+  cannot be hot-plugged) and re-opening it is *dangerous*: LibreHardwareMonitor 0.9.6 throws an NRE
+  out of `CpuId.Get` on a re-`Open()` and, when two re-opens land a few seconds apart,
+  access-violates inside `CpuId..ctor` and takes the whole process down (measured 2026-09-13). An
+  AV is not catchable, so the only fix is not to ask.
+- Repeat `rescan` commands **inside 10 seconds are dropped**, so a held-down button in a future
+  Settings page cannot become a re-open storm across the other three LHM parts.
 
 | Name | Installation source | OS support | Hardware support | Poll / push | Rate · cap · worth raising? |
 |---|---|---|---|---|---|

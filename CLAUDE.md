@@ -38,7 +38,8 @@ Portable-first policy (docs/global-installs.md): the NuGet cache is project-loca
   8-byte value slots, seqlock strings, append-only frame ring, provider health table). Session
   maxima = `.max` metrics via `MetricSink`. Control channel: named pipe `Halo.Control.v2`
   (`reset-max`, `reset-net`, `rescan`, `reload-config`, `ping`); `rescan` re-runs `Initialize` on
-  every provider whose `RescanReinitialises` is true (the ones that enumerate hardware).
+  every provider whose `RescanReinitialises` is true (the ones that enumerate hardware) and drops
+  repeats inside 10 s. `LhmProvider.Part.Cpu` opts out on purpose — see the LHM gotcha below.
 - **Halo.Widgets**: one WS_EX_NOREDIRECTIONBITMAP HWND per widget, DirectComposition +
   D2D on a shared D3D11 device (`Dx`). Panels are element trees (`Render\Elements.cs`)
   in a Rainmeter-like flow layout (`Render\Panel.cs`), built per type in `PanelDefs\`.
@@ -98,5 +99,10 @@ Portable-first policy (docs/global-installs.md): the NuGet cache is project-loca
   `no-sdk`, `failed`.
 - Only one process can own the PresentMon ETW session, so a second collector's fps metrics read
   N/A while the production one runs. Expected, not a bug.
+- **Never re-`Open()` a LibreHardwareMonitor `Computer` with `IsCpuEnabled` in quick succession.**
+  LHM 0.9.6 throws an NRE out of `CpuId.Get` on a re-open and, when two land a few seconds apart,
+  access-violates (`0xC0000005`) inside `CpuId..ctor` — an AV, so uncatchable, process gone
+  (measured 2026-09-13). Tens of seconds apart it survives, which is why the host's poll-failure
+  retry is fine. `LhmProvider.Part.Cpu` therefore opts out of `rescan`.
 - PawnIO (`C:\Program Files\PawnIO`) belongs to FanControl — never uninstall with Halo.
 - The 3 icon fonts in `assets\fonts` are copied from the Rainformer skin (personal use).

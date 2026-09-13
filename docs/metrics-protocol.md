@@ -219,7 +219,7 @@ Plus one for liveness: the collector is gone if `heartbeatQpc` has not moved for
 | --- | --- |
 | `reset-max [prefix]` | clear session maxima whose base metric starts with `prefix` (empty = all) |
 | `reset-net` | restart the network session counters |
-| `rescan` | re-enumerate hardware (GPUs, fans, volumes) |
+| `rescan` | re-enumerate hardware (GPUs, fans, volumes); repeats inside 10 s are ignored |
 | `reload-config` | re-read the config files now instead of waiting for the file watcher |
 | `ping` | no-op liveness check |
 
