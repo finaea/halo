@@ -7,8 +7,14 @@ namespace Halo.Collector.Providers;
 
 /// <summary>
 /// Per-volume read/write B/s + activity %, via PDH LogicalDisk counters
-/// (english names, locale-safe). Counters tick at ~1 s kernel granularity internally,
-/// PDH computes rates between our collects.
+/// (english names, locale-safe). PDH computes rates between our collects, so each published
+/// value is a real average over exactly one poll period.
+///
+/// The raw byte counters are updated per I/O completion, NOT on a ~1 s tick (an earlier comment
+/// here claimed the latter — measured wrong 2026-09-13: sampling the raw accumulator every
+/// 100 ms under sustained writes moved on every single sample, and even caught lone 16 KB
+/// background writes while otherwise idle). So the poll rate really does set the resolution:
+/// short bursts are averaged across the poll period and under-reported at a lower rate.
 /// </summary>
 public sealed class DiskIoProvider(ConfigStore config) : ISensorProvider
 {

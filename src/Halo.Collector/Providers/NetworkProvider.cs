@@ -8,6 +8,12 @@ namespace Halo.Collector.Providers;
 /// <summary>
 /// Network throughput from interface octet counters (delta / dt), plus session totals and
 /// peaks. "Best" interface = the operational non-virtual interface carrying the default route.
+///
+/// The octet counters update far faster than the poll rate (measured 2026-09-13: sampling
+/// GetIPStatistics().BytesReceived every 100 ms under a sustained download moved on every
+/// sample, and still resolved ~90-byte ambient traffic once idle), so the poll rate sets the
+/// resolution — each published value is a real average over one poll period, and short bursts
+/// are under-reported in proportion to how long that period is.
 /// </summary>
 public sealed class NetworkProvider(GeneralSettings settings) : ISensorProvider
 {
