@@ -28,8 +28,12 @@ public sealed unsafe class App : IDisposable
     private volatile bool _deviceLost;
     private string _monitorSignature = "";
     private string _packSignature = "";
-    private bool _firstRunPackPending;
     private int _lastMetricCount = -1;
+
+    /// <summary>Someone asked for the whole layout to be arranged on the primary monitor — the
+    /// Settings app's "Generate default layout", or our own first run. Only the widget process
+    /// can honour it: the packer needs laid-out pixel sizes (H6).</summary>
+    private bool ArrangeRequested => ConfigStore.Widgets.ArrangeRequested;
     private DateTime _nextWatchdogAttempt = DateTime.MinValue;
     private int _watchdogFailures;
     private nint _framesReadyEvent;          // collector's frames-ready signal (0 until opened)
@@ -46,6 +50,7 @@ public sealed unsafe class App : IDisposable
         Log.Info($"desktop host: 0x{DesktopHost:X}");
 
         if (freshInstall && ConfigStore.Widgets.Widgets.Count == 0) GenerateFirstRunLayout();
+        if (ArrangeRequested) Log.Info("config asks for an arrange pass — widgets will be packed onto the primary monitor");
 
         ConfigStore.Changed += () => _configDirty = true;
     }
@@ -86,7 +91,7 @@ public sealed unsafe class App : IDisposable
         try
         {
             var (mon, missing) = ResolveMonitor(inst.Monitor);
-            bool displaced = missing || _firstRunPackPending;
+            bool displaced = missing || ArrangeRequested;
             double maxHz = MaxRateFor(inst);
             var ctx = new PanelContext
             {
@@ -295,8 +300,9 @@ public sealed unsafe class App : IDisposable
             }
 
             var (mon, missing) = ResolveMonitor(inst.Monitor);
+            bool displaced = missing || ArrangeRequested;
             double maxHz = MaxRateFor(inst);
-            win.ApplyInPlace(inst, settings, mon, missing, ResolveTheme(inst, mon, missing), maxHz);
+            win.ApplyInPlace(inst, settings, mon, displaced, ResolveTheme(inst, mon, displaced), maxHz);
         }
 
         // keep window order in step with the config so the packer and snapping are deterministic
@@ -664,7 +670,7 @@ public sealed unsafe class App : IDisposable
         foreach (var win in _windows)
         {
             var (mon, missing) = ResolveMonitor(win.Config.Monitor);
-            bool displaced = missing || _firstRunPackPending;
+            bool displaced = missing || ArrangeRequested;
             win.ApplyMonitor(mon, displaced, ResolveTheme(win.Config, mon, displaced));
         }
         RunPacker();
@@ -683,7 +689,9 @@ public sealed unsafe class App : IDisposable
         foreach (var w in packed) if (w.PixelSize.H <= 0) return;
 
         var target = PrimaryMonitor;
-        string sig = target.Device + "|" + target.W + "x" + target.H + "|"
+        // the arrange flag is part of the signature: a fresh request must re-pack even when the
+        // widgets and their sizes are exactly what they were last time
+        string sig = (ArrangeRequested ? "arrange|" : "") + target.Device + "|" + target.W + "x" + target.H + "|"
             + string.Join(',', packed.Select(w => $"{w.Config.Id}:{w.PixelSize.W}x{w.PixelSize.H}"));
         if (sig == _packSignature) return;
         _packSignature = sig;
@@ -707,15 +715,20 @@ public sealed unsafe class App : IDisposable
                 return $"{p.Id}@{p.X},{p.Y} {w.PixelSize.W}x{w.PixelSize.H} scale {w.Ctx.Theme.BaseScale:0.##}";
             })));
 
-        if (_firstRunPackPending) PersistFirstRunLayout(target);
+        if (ArrangeRequested) PersistArrangedLayout(target);
     }
 
-    /// <summary>First run is the one case where the packed layout is written back: it becomes the
-    /// user's layout. <c>appearance.scale</c> is deliberately left "auto" so a later monitor swap
-    /// keeps adapting (H7).</summary>
-    private void PersistFirstRunLayout(MonitorInfo target)
+    /// <summary>
+    /// An arrange pass is the one case where the packed layout is written back: it becomes the
+    /// user's layout. <c>appearance.scale</c> is deliberately left alone so an "auto" widget keeps
+    /// adapting after a monitor swap (H7). The write is a merge — the Settings app may be editing
+    /// the same file — and clearing the flag is what tells the requester it is done.
+    /// </summary>
+    private void PersistArrangedLayout(MonitorInfo target)
     {
-        _firstRunPackPending = false;
+        // in-memory first, so ArrangeRequested is false before the file change comes back to us
+        ConfigStore.Widgets.Arrange = null;
+        var placed = new Dictionary<string, (int X, int Y)>(StringComparer.Ordinal);
         foreach (var win in _windows)
         {
             var (sx, sy, _, _) = win.ScreenRect();
@@ -723,13 +736,25 @@ public sealed unsafe class App : IDisposable
             win.Config.X = sx - target.X;
             win.Config.Y = sy - target.Y;
             win.MarkPlaced();
+            placed[win.Config.Id] = (win.Config.X, win.Config.Y);
         }
         try
         {
-            ConfigStore.SaveWidgets();
-            Log.Info($"first run: wrote the generated layout for {_windows.Count} widget(s) to widgets.json");
+            string device = target.Device;
+            ConfigStore.UpdateWidgets(cfg =>
+            {
+                cfg.Arrange = null;
+                foreach (var w in cfg.Widgets)
+                    if (placed.TryGetValue(w.Id, out var p))
+                    {
+                        w.Monitor = device;
+                        w.X = p.X;
+                        w.Y = p.Y;
+                    }
+            });
+            Log.Info($"arrange: wrote {placed.Count} position(s) to widgets.json and cleared the flag");
         }
-        catch (Exception ex) { Log.Error("first run: saving the generated layout", ex); }
+        catch (Exception ex) { Log.Error("arrange: saving the packed layout", ex); }
     }
 
     public void ResetPanelMax(string panelType)
@@ -767,44 +792,49 @@ public sealed unsafe class App : IDisposable
     }
 
     /// <summary>
-    /// Fresh install: generate one widget per type that has data on this PC, in the order the
-    /// hardware plan fixes (H6), and let the packer place them on the primary monitor. Scale is
-    /// left "auto" so the layout adapts if the user moves to another screen.
+    /// Fresh install: ask <see cref="DefaultLayout"/> what this PC should have — the same list the
+    /// Settings app's "Generate default layout" produces — write it with the arrange flag set, and
+    /// let the normal arrange path place it. Nothing about which widgets to create lives here.
     /// </summary>
     private void GenerateFirstRunLayout()
     {
-        Metrics.Tick();     // attach once so hardware discovery has something to read
-        var widgets = new List<WidgetInstance>();
-        void Add(string type, string idSuffix = "", Dictionary<string, string>? options = null)
-        {
-            var t = PanelCatalog.Find(type);
-            widgets.Add(new WidgetInstance
-            {
-                Id = type + (idSuffix.Length > 0 ? "-" + idSuffix : "-1"),
-                Type = type,
-                RateHz = t?.DefaultRateHz ?? 5,
-                Options = options ?? new Dictionary<string, string>(),
-            });
-        }
-
-        Add("clock");
-        Add("cpu-ram");
-        int gpus = (int)Math.Clamp(Metrics.Value(Halo.Metrics.MetricNames.GpuCount, 0), 0, 8);
-        for (int i = 0; i < gpus; i++) Add("gpu", i.ToString(), new() { ["gpuIndex"] = i.ToString() });
-        // only the presented stream: the displayed one needs a game running before it says anything
-        Add("fps", "presented", new() { ["stream"] = "presented" });
-        Add("latency");
-        Add("power");
-        Add("drives");
-        Add("network");
-        if (Metrics.Value(Halo.Metrics.MetricNames.FanCount, 0) > 0) Add("fans");
-        Add("topcpu");
-        Add("topram");
+        bool online = WaitForCollector(5);
+        var widgets = DefaultLayout.Generate(n => Metrics.Value(n), n => Metrics.Text(n), online);
 
         ConfigStore.Widgets.Widgets.Clear();
         ConfigStore.Widgets.Widgets.AddRange(widgets);
-        _firstRunPackPending = true;
-        Log.Info($"first run: no widgets.json — generated {widgets.Count} widget(s) ({gpus} GPU(s) found)");
+        ConfigStore.Widgets.Arrange = WidgetsConfig.ArrangePending;
+        try { ConfigStore.SaveWidgets(); }
+        catch (Exception ex) { Log.Error("first run: writing the generated layout", ex); }
+        Log.Info($"first run: no widgets.json — generated {widgets.Count} widget(s) "
+            + $"(collector {(online ? $"online, {Metrics.MetricCount} metrics" : "not running — minimal layout")})");
+    }
+
+    /// <summary>
+    /// Wait for the collector's registry to settle before reading hardware off it. The installer
+    /// starts the collector task first, but NVML and LHM rows keep appearing for a second or two
+    /// after the section exists — generating a layout at the wrong moment silently drops the GPU
+    /// or fans widget. Returns whether there is a collector at all.
+    /// </summary>
+    private bool WaitForCollector(double seconds)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(seconds);
+        int lastCount = -1, stableFor = 0;
+        while (DateTime.UtcNow < deadline)
+        {
+            Metrics.Tick();
+            if (Metrics.Attached)
+            {
+                int count = Metrics.MetricCount;
+                if (count == lastCount && count > 0)
+                {
+                    if (++stableFor >= 5) return true;    // ~500 ms without a new metric
+                }
+                else { lastCount = count; stableFor = 0; }
+            }
+            Thread.Sleep(100);
+        }
+        return Metrics.Attached;
     }
 
     public void RefreshAll()
