@@ -1,169 +1,252 @@
 <UserControl x:Class="Halo.Settings.Pages.WidgetsPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:Halo.Settings">
-  <Grid Margin="18,14">
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:local="clr-namespace:Halo.Settings"
+             xmlns:picker="clr-namespace:ColorPicker;assembly=ColorPicker">
+  <UserControl.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    <Style x:Key="EditorRow" TargetType="Grid">
+      <Setter Property="MinHeight" Value="48" />
+      <Setter Property="Margin" Value="0,2" />
+    </Style>
+    <Style x:Key="EditorLabel" TargetType="TextBlock">
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+  </UserControl.Resources>
+
+  <Grid Background="{StaticResource HaloPageBackground}" Margin="24,20,24,16">
     <Grid.RowDefinitions>
-      <RowDefinition Height="Auto"/>
-      <RowDefinition Height="*"/>
-      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
-    <StackPanel Grid.Row="0">
-      <TextBlock Text="Widgets" Style="{StaticResource PageTitle}"/>
-      <TextBlock Style="{StaticResource PageSub}"
-                 Text="Tick a widget to show it on the desktop. Position, lock, opacity and z-order can also be changed by dragging / right-clicking the widget itself — those changes save instantly."/>
-    </StackPanel>
-
-    <Grid Grid.Row="1">
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="260"/>
-        <ColumnDefinition Width="16"/>
-        <ColumnDefinition Width="*"/>
-      </Grid.ColumnDefinitions>
-
-      <ListBox Grid.Column="0" x:Name="WidgetList" SelectionChanged="WidgetList_SelectionChanged">
-        <ListBox.ItemTemplate>
-          <DataTemplate>
-            <DockPanel Margin="2,3">
-              <CheckBox DockPanel.Dock="Left" VerticalAlignment="Center" Margin="0,0,10,0"
-                        IsChecked="{Binding Enabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                        ToolTip="Show this widget on the desktop (takes effect on Save)"/>
-              <StackPanel>
-                <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
-                <TextBlock Text="{Binding Sub}" Foreground="{StaticResource Sub}" FontSize="11"/>
-              </StackPanel>
-            </DockPanel>
-          </DataTemplate>
-        </ListBox.ItemTemplate>
-      </ListBox>
-
-      <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
-        <StackPanel x:Name="Detail" MaxWidth="620" HorizontalAlignment="Left">
-          <TextBlock x:Name="NameText" FontSize="15" FontWeight="SemiBold"/>
-          <TextBlock x:Name="SubText" Style="{StaticResource Hint}" Margin="0,2,0,10"/>
-
-          <GroupBox Header="Title">
-            <Grid>
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="130"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-              </Grid.ColumnDefinitions>
-              <TextBlock Grid.Column="0" Text="Title" Style="{StaticResource RowLabel}"/>
-              <TextBox   Grid.Column="1" x:Name="TitleBox" Width="320" HorizontalAlignment="Left" Margin="0,4"/>
-              <local:HelpTip Grid.Column="2"
-                             Tip="Text in this widget's title bar. Leave empty for the panel's own default, which for CPU and GPU widgets is the live device name."/>
-            </Grid>
-          </GroupBox>
-
-          <GroupBox Header="Placement">
-            <Grid>
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="130"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-              </Grid.ColumnDefinitions>
-              <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-              </Grid.RowDefinitions>
-
-              <TextBlock Grid.Row="0" Grid.Column="0" Text="Monitor" Style="{StaticResource RowLabel}"/>
-              <ComboBox  Grid.Row="0" Grid.Column="1" x:Name="MonitorCombo" Width="320"
-                         HorizontalAlignment="Left" Margin="0,4"/>
-              <local:HelpTip Grid.Row="0" Grid.Column="2"
-                             Tip="Which monitor the position below is relative to. Dragging the widget onto another monitor updates this automatically on drop."/>
-
-              <TextBlock Grid.Row="1" Grid.Column="0" Text="Position X / Y" Style="{StaticResource RowLabel}"/>
-              <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,4">
-                <TextBox x:Name="XBox" Width="80"/>
-                <TextBox x:Name="YBox" Width="80" Margin="8,0,0,0"/>
-              </StackPanel>
-              <local:HelpTip Grid.Row="1" Grid.Column="2"
-                             Tip="Pixels from the top-left of the monitor's work area. Easiest way to position a widget: just drag it on the desktop — the drop is saved automatically."/>
-
-              <TextBlock Grid.Row="2" Grid.Column="0" Text="Z-order" Style="{StaticResource RowLabel}"/>
-              <ComboBox  Grid.Row="2" Grid.Column="1" x:Name="ZModeCombo" Width="320"
-                         HorizontalAlignment="Left" Margin="0,4"/>
-              <local:HelpTip Grid.Row="2" Grid.Column="2"
-                             Tip="Where the widget lives in the window stack.&#x0a;&#x0a;• On desktop — glued above the wallpaper, under every window; survives Win+D (recommended).&#x0a;• Normal — behaves like an ordinary window.&#x0a;• Always on top — floats above everything, including games in windowed mode."/>
-
-              <CheckBox Grid.Row="3" Grid.Column="1" x:Name="KeepOnScreenCheck" Content="Keep on screen" Margin="0,6"/>
-              <local:HelpTip Grid.Row="3" Grid.Column="2"
-                             Tip="Clamps the widget inside the monitor it sits on, so it can never end up stranded off-screen after resolution or monitor changes."/>
-            </Grid>
-          </GroupBox>
-
-          <GroupBox Header="Behavior">
-            <Grid>
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="130"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-              </Grid.ColumnDefinitions>
-              <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-              </Grid.RowDefinitions>
-
-              <TextBlock Grid.Row="0" Grid.Column="0" Text="Opacity" Style="{StaticResource RowLabel}"/>
-              <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Margin="0,4">
-                <Slider x:Name="OpacitySlider" Width="240" Minimum="0.1" Maximum="1.0"
-                        TickFrequency="0.05" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
-                <TextBlock Margin="10,0,0,0" Width="40"
-                           Text="{Binding Value, ElementName=OpacitySlider, StringFormat={}{0:P0}}"/>
-              </StackPanel>
-              <local:HelpTip Grid.Row="0" Grid.Column="2"
-                             Tip="Overall transparency of this widget (also in its right-click menu)."/>
-
-              <TextBlock Grid.Row="1" Grid.Column="0" Text="Refresh rate (Hz)" Style="{StaticResource RowLabel}"/>
-              <TextBox   Grid.Row="1" Grid.Column="1" x:Name="RateBox" Width="80" HorizontalAlignment="Left" Margin="0,4"/>
-              <local:HelpTip Grid.Row="1" Grid.Column="2"
-                             Tip="How often this widget repaints. Raising it past the rate its data is published at does not make the numbers fresher — the collector's cadences are fixed. FPS panels repaint on real frame events regardless."/>
-              <TextBlock Grid.Row="1" Grid.Column="3" Style="{StaticResource Hint}" Margin="12,0,0,0"
-                         Text="0.5 – 10 · default 5"/>
-
-              <CheckBox Grid.Row="2" Grid.Column="1" x:Name="ClickThroughCheck" Content="Click-through" Margin="0,6"/>
-              <local:HelpTip Grid.Row="2" Grid.Column="2"
-                             Tip="Mouse clicks pass through the widget to whatever is underneath. You lose drag and the right-click menu on the widget itself — come back here (or use the tray icon) to turn it off."/>
-
-              <CheckBox Grid.Row="3" Grid.Column="1" x:Name="LockedCheck" Content="Lock position" Margin="0,6"/>
-              <local:HelpTip Grid.Row="3" Grid.Column="2"
-                             Tip="Blocks dragging this widget so it cannot be moved by accident. The right-click menu keeps working."/>
-            </Grid>
-          </GroupBox>
-
-          <GroupBox x:Name="GraphLinesGroup" Header="Graph lines" Visibility="Collapsed">
-            <StackPanel>
-              <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,6"
-                         Text="Untick a line to hide it from this widget's graph. Changes take effect on Save."/>
-              <StackPanel x:Name="GraphLinesPanel"/>
-            </StackPanel>
-          </GroupBox>
-
-          <GroupBox Header="Panel options">
-            <StackPanel>
-              <TextBox x:Name="OptionsBox" Height="90" AcceptsReturn="True" AcceptsTab="False"
-                       VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap"
-                       FontFamily="Consolas" VerticalContentAlignment="Top"/>
-              <TextBlock x:Name="OptionsHint" Style="{StaticResource Hint}" Margin="0,6,0,0"/>
-            </StackPanel>
-          </GroupBox>
-        </StackPanel>
-      </ScrollViewer>
+    <Grid>
+      <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+      <StackPanel>
+        <TextBlock Text="Widgets" Style="{StaticResource PageTitle}" />
+        <TextBlock Text="Choose what each desktop widget shows and how it behaves. Changes are written live."
+                   Style="{StaticResource PageSub}" Margin="0,0,0,12" />
+      </StackPanel>
+      <Button Grid.Column="1" x:Name="AddWidgetButton" Content="＋ Add widget" Padding="14,7"
+              VerticalAlignment="Top" Click="AddWidget_Click" />
     </Grid>
 
-    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,14,0,0">
-      <Button Content="Save" Click="Save_Click" FontWeight="SemiBold" Padding="20,5"/>
-      <TextBlock x:Name="Status" Foreground="{StaticResource Sub}" VerticalAlignment="Center" TextWrapping="Wrap"/>
-    </StackPanel>
+    <ui:InfoBar Grid.Row="1" IsOpen="{Binding CollectorOffline}"
+                Severity="Informational" Title="Collector not running"
+                Message="{Binding CollectorHint}" IsClosable="False" Margin="0,0,0,12" />
+
+    <Grid Grid.Row="2">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="236" />
+        <ColumnDefinition Width="12" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+
+      <Border Grid.Column="0" Style="{StaticResource SettingsCard}" Padding="7" Margin="0">
+        <Grid>
+          <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+          <ListBox x:Name="WidgetList" ItemsSource="{Binding Widgets}" SelectedItem="{Binding SelectedWidget, Mode=TwoWay}"
+                   BorderThickness="0" Background="Transparent" AllowDrop="True"
+                   PreviewMouseLeftButtonDown="WidgetList_PreviewMouseLeftButtonDown"
+                   PreviewMouseMove="WidgetList_PreviewMouseMove" Drop="WidgetList_Drop"
+                   PreviewKeyDown="WidgetList_PreviewKeyDown">
+            <ListBox.ItemContainerStyle>
+              <Style TargetType="ListBoxItem">
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="Padding" Value="5,7" />
+                <Setter Property="Margin" Value="0,1" />
+              </Style>
+            </ListBox.ItemContainerStyle>
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="18" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                  <TextBlock Text="⋮⋮" Foreground="{StaticResource HaloSubtleText}" VerticalAlignment="Center" ToolTip="Drag to reorder" />
+                  <StackPanel Grid.Column="1" Margin="5,0,8,0">
+                    <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Subtitle}" Style="{StaticResource Hint}" TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                  <ui:ToggleSwitch Grid.Column="2" IsChecked="{Binding Enabled, Mode=TwoWay}"
+                                   OnContent="" OffContent="" AutomationProperties.Name="Enable widget" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <StackPanel Grid.Row="1">
+            <Separator Margin="2,4" />
+            <UniformGrid Columns="2">
+              <Button Content="↑ Move up" Margin="2" Padding="5" Click="MoveUp_Click" />
+              <Button Content="↓ Move down" Margin="2" Padding="5" Click="MoveDown_Click" />
+              <Button Content="Duplicate" Margin="2" Padding="5" Click="Duplicate_Click" />
+              <Button Content="Remove" Margin="2" Padding="5" Foreground="{StaticResource HaloDanger}" Click="Remove_Click" />
+            </UniformGrid>
+            <TextBlock Text="Alt+↑ / Alt+↓ also reorders" Style="{StaticResource Hint}" HorizontalAlignment="Center" Margin="0,4,0,0" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <Border Grid.Column="2" Style="{StaticResource SettingsCard}" Padding="0" Margin="0">
+        <Grid DataContext="{Binding SelectedWidget}">
+          <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+          <Grid Margin="18,14,18,6">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <StackPanel>
+              <TextBlock Text="{Binding DisplayName, TargetNullValue=Select a widget}" FontSize="20" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding Subtitle}" Style="{StaticResource Hint}" />
+            </StackPanel>
+            <TextBlock Grid.Column="1" Text="Live" Foreground="{StaticResource HaloSuccess}" VerticalAlignment="Center" />
+          </Grid>
+
+          <TabControl Grid.Row="1" BorderThickness="0" Background="Transparent">
+            <TabItem Header="Refresh &amp; graphs">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,12">
+                <StackPanel>
+                  <Border Style="{StaticResource SettingsCard}" Visibility="{Binding HasRateSlider, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel>
+                      <Grid Style="{StaticResource EditorRow}">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="78" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Center"><TextBlock Text="Refresh rate" /><TextBlock Text="{Binding RateRangeText}" Style="{StaticResource Hint}" /></StackPanel>
+                        <Slider Grid.Column="1" Minimum="0.5" Maximum="{Binding RateMaximum}" TickFrequency="0.5" IsSnapToTickEnabled="True" Value="{Binding RateHz, Mode=TwoWay}" Margin="8,0" />
+                        <ui:NumberBox Grid.Column="2" Minimum="0.5" Maximum="{Binding RateMaximum}" SmallChange="0.5" MaxDecimalPlaces="1" Value="{Binding RateHz, Mode=TwoWay}" />
+                        <local:HelpTip Grid.Column="3" Tip="{Binding RateHelp}" />
+                      </Grid>
+                      <Separator />
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Graph history" Style="{StaticResource EditorLabel}" /><StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="86" Minimum="10" Maximum="600" SmallChange="5" Value="{Binding HistoryS, Mode=TwoWay}" /><TextBlock Text="s" Margin="6,0,0,0" VerticalAlignment="Center" /></StackPanel></Grid>
+                      <Separator />
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Graph height" Style="{StaticResource EditorLabel}" /><StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="86" Minimum="10" Maximum="200" SmallChange="5" Value="{Binding GraphHeight, Mode=TwoWay}" /><TextBlock Text="px" Margin="6,0,0,0" VerticalAlignment="Center" /></StackPanel></Grid>
+                      <Separator />
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="180" /></Grid.ColumnDefinitions><TextBlock Text="Graph style" Style="{StaticResource EditorLabel}" /><ComboBox Grid.Column="1" ItemsSource="{Binding GraphStyles}" SelectedItem="{Binding GraphStyle, Mode=TwoWay}" /></Grid>
+                    </StackPanel>
+                  </Border>
+                  <Border Style="{StaticResource SettingsCard}" Visibility="{Binding IsEventDriven, Converter={StaticResource BoolToVisibility}}"><StackPanel><TextBlock Text="Event-driven refresh" FontWeight="SemiBold" /><TextBlock Text="Frame metrics repaint when a new frame arrives. A 5 Hz tick keeps the panel alive between events." Style="{StaticResource Hint}" Margin="0,4,0,0" /></StackPanel></Border>
+                  <Button Content="Reset refresh &amp; graphs" HorizontalAlignment="Left" Style="{StaticResource SubtleButton}" Click="ResetRefresh_Click" />
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Metrics">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,12">
+                <StackPanel>
+                  <ItemsControl ItemsSource="{Binding Options}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border Style="{StaticResource SettingsCard}">
+                          <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="175" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center"><TextBlock Text="{Binding Label}" /><TextBlock Text="{Binding SourceHint}" Style="{StaticResource Hint}" /></StackPanel>
+                            <Grid Grid.Column="1" Margin="8,0">
+                              <ui:ToggleSwitch IsChecked="{Binding BoolValue, Mode=TwoWay}" OnContent="On" OffContent="Off" HorizontalAlignment="Left" Visibility="{Binding IsBoolean, Converter={StaticResource BoolToVisibility}}" />
+                              <ui:NumberBox Minimum="{Binding Minimum}" Maximum="{Binding Maximum}" Value="{Binding NumberValue, Mode=TwoWay}" HorizontalAlignment="Left" Width="120" Visibility="{Binding IsNumber, Converter={StaticResource BoolToVisibility}}" />
+                              <ComboBox ItemsSource="{Binding Choices}" SelectedItem="{Binding SelectedChoice, Mode=TwoWay}" MinWidth="240" HorizontalAlignment="Left" Visibility="{Binding IsChoice, Converter={StaticResource BoolToVisibility}}" />
+                              <TextBox Text="{Binding TextValue, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" MinWidth="240" HorizontalAlignment="Left" Visibility="{Binding IsText, Converter={StaticResource BoolToVisibility}}" />
+                              <ItemsControl ItemsSource="{Binding HardwareChoices}" Visibility="{Binding IsChecklist, Converter={StaticResource BoolToVisibility}}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><CheckBox Content="{Binding Label}" IsChecked="{Binding IsSelected, Mode=TwoWay}" Margin="0,3,14,3" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                            </Grid>
+                            <local:HelpTip Grid.Column="2" Tip="{Binding Help}" />
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+
+                  <TextBlock Text="Metrics" Style="{StaticResource SectionHeading}" Margin="0,6,0,8" />
+                  <ItemsControl ItemsSource="{Binding MetricRows}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border Style="{StaticResource SettingsCard}">
+                          <StackPanel>
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="{Binding Name}" FontWeight="SemiBold" /><TextBlock Text="{Binding MetricName}" Style="{StaticResource Hint}" /></StackPanel><ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding Show, Mode=TwoWay}" OnContent="Shown" OffContent="Hidden" /></Grid>
+                            <Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="72" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Label" VerticalAlignment="Center" /><TextBox Grid.Column="1" Text="{Binding Label, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" /><CheckBox Grid.Column="2" Content="Graph" IsChecked="{Binding Graph, Mode=TwoWay}" Margin="12,0,0,0" VerticalAlignment="Center" Visibility="{Binding IsGraphable, Converter={StaticResource BoolToVisibility}}" /></Grid>
+                            <Grid Margin="0,8,0,0">
+                              <Grid.ColumnDefinitions><ColumnDefinition Width="72" /><ColumnDefinition Width="52" /><ColumnDefinition Width="100" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                              <TextBlock Text="Colour" VerticalAlignment="Center" />
+                              <Grid Grid.Column="1"><Button Width="44" Height="30" Padding="3" Click="ColorButton_Click"><Border Background="{Binding Swatch}" BorderBrush="#55000000" BorderThickness="1" CornerRadius="4" /></Button><Popup IsOpen="{Binding IsPickerOpen, Mode=TwoWay}" StaysOpen="False" Placement="Right"><Border Background="White" BorderBrush="#55000000" BorderThickness="1" CornerRadius="8" Padding="10"><picker:PortableColorPicker Width="320" SelectedColor="{Binding Color, Mode=TwoWay}" ShowAlpha="True" /></Border></Popup></Grid>
+                              <TextBox Grid.Column="2" Text="{Binding Hex, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" VerticalAlignment="Center" />
+                              <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right"><ItemsControl ItemsSource="{Binding WarningValues}" Visibility="{Binding HasWarnings, Converter={StaticResource BoolToVisibility}}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel><ItemsControl.ItemTemplate><DataTemplate><ui:NumberBox Width="72" Margin="6,0,0,0" Value="{Binding Value, Mode=TwoWay}" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl><StackPanel Orientation="Horizontal" Margin="8,0,0,0" Visibility="{Binding HasMax, Converter={StaticResource BoolToVisibility}}"><TextBlock Text="Max" VerticalAlignment="Center" Margin="0,0,5,0" /><ui:NumberBox Width="78" Minimum="100" Maximum="10000" SmallChange="100" Value="{Binding Max, Mode=TwoWay}" /></StackPanel><TextBlock Text="{Binding Unit}" VerticalAlignment="Center" Margin="6,0,0,0" /></StackPanel>
+                            </Grid>
+                          </StackPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <Button Content="Reset metrics" HorizontalAlignment="Left" Style="{StaticResource SubtleButton}" Click="ResetMetrics_Click" />
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Appearance">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,12">
+                <StackPanel>
+                  <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Title override" Style="{StaticResource EditorLabel}" /><TextBox Grid.Column="1" Text="{Binding Title, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" /></Grid>
+                      <Separator />
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Font" Style="{StaticResource EditorLabel}" /><ComboBox Grid.Column="1" ItemsSource="{Binding FontFamilies}" Text="{Binding FontFamily, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" IsEditable="True" IsEnabled="{Binding IsFontOverrideEnabled}" /><CheckBox Grid.Column="2" Content="Use global" IsChecked="{Binding UseGlobalFont, Mode=TwoWay}" Margin="10,0,0,0" VerticalAlignment="Center" /></Grid>
+                      <Separator />
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Scale" Style="{StaticResource EditorLabel}" /><StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="90" Minimum="1" Maximum="3.5" SmallChange="0.05" Value="{Binding Scale, Mode=TwoWay}" IsEnabled="{Binding IsScaleOverrideEnabled}" /><ui:ToggleSwitch Margin="8,0,0,0" IsChecked="{Binding ScaleAuto, Mode=TwoWay}" OnContent="Auto" OffContent="Fixed" IsEnabled="{Binding IsScaleOverrideEnabled}" /></StackPanel><CheckBox Grid.Column="2" Content="Use global" IsChecked="{Binding UseGlobalScale, Mode=TwoWay}" Margin="10,0,0,0" VerticalAlignment="Center" /></Grid>
+                      <Separator />
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Show title" Style="{StaticResource EditorLabel}" /><ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding ShowTitle, Mode=TwoWay}" OnContent="Shown" OffContent="Hidden" IsEnabled="{Binding IsShowTitleOverrideEnabled}" HorizontalAlignment="Left" /><CheckBox Grid.Column="2" Content="Use global" IsChecked="{Binding UseGlobalShowTitle, Mode=TwoWay}" Margin="10,0,0,0" VerticalAlignment="Center" /></Grid>
+                      <Separator />
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Panel width" Style="{StaticResource EditorLabel}" /><StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="90" Minimum="120" Maximum="800" SmallChange="5" Value="{Binding Width, Mode=TwoWay}" IsEnabled="{Binding IsWidthOverrideEnabled}" /><TextBlock Text="px" Margin="6,0,0,0" VerticalAlignment="Center" /></StackPanel><CheckBox Grid.Column="2" Content="Use global" IsChecked="{Binding UseGlobalWidth, Mode=TwoWay}" Margin="10,0,0,0" VerticalAlignment="Center" /></Grid>
+                      <Grid Style="{StaticResource EditorRow}" Visibility="{Binding HasTemperature, Converter={StaticResource BoolToVisibility}}"><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Temperature unit" Style="{StaticResource EditorLabel}" /><ComboBox Grid.Column="1" Width="190" HorizontalAlignment="Left" ItemsSource="{Binding TemperatureUnits}" SelectedItem="{Binding TempUnit, Mode=TwoWay}" /></Grid>
+                    </StackPanel>
+                  </Border>
+                  <ItemsControl ItemsSource="{Binding AppearanceColors}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border Style="{StaticResource SettingsCard}">
+                          <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="52" /><ColumnDefinition Width="105" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="{Binding Label}" VerticalAlignment="Center" /><Grid Grid.Column="1"><Button Width="44" Height="30" Padding="3" Click="ColorButton_Click" IsEnabled="{Binding IsEnabled}"><Border Background="{Binding Swatch}" BorderBrush="#55000000" BorderThickness="1" CornerRadius="4" /></Button><Popup IsOpen="{Binding IsPickerOpen, Mode=TwoWay}" StaysOpen="False" Placement="Right"><Border Background="White" BorderBrush="#55000000" BorderThickness="1" CornerRadius="8" Padding="10"><picker:PortableColorPicker Width="320" SelectedColor="{Binding Color, Mode=TwoWay}" ShowAlpha="True" /></Border></Popup></Grid><TextBox Grid.Column="2" Text="{Binding Hex, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding IsEnabled}" /><CheckBox Grid.Column="3" Content="Use global" IsChecked="{Binding UseGlobal, Mode=TwoWay}" HorizontalAlignment="Right" VerticalAlignment="Center" /></Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                  <Button Content="Use global for all" HorizontalAlignment="Left" Style="{StaticResource SubtleButton}" Click="UseGlobal_Click" />
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Placement">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,12">
+                <StackPanel>
+                  <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel>
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Monitor" Style="{StaticResource EditorLabel}" /><ComboBox Grid.Column="1" ItemsSource="{Binding MonitorChoices}" SelectedItem="{Binding Monitor, Mode=TwoWay}" /></Grid>
+                      <Separator />
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Position X / Y" Style="{StaticResource EditorLabel}" /><StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="100" Value="{Binding X, Mode=TwoWay}" /><ui:NumberBox Width="100" Value="{Binding Y, Mode=TwoWay}" Margin="8,0,0,0" /></StackPanel></Grid>
+                      <Separator />
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Z-order" Style="{StaticResource EditorLabel}" /><ComboBox Grid.Column="1" ItemsSource="{Binding ZModes}" SelectedItem="{Binding ZMode, Mode=TwoWay}" /><local:HelpTip Grid.Column="2" Tip="On desktop stays above the wallpaper and below ordinary windows. Normal behaves like an app window. Always on top floats over other windows." /></Grid>
+                      <Separator />
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="170" /><ColumnDefinition Width="*" /><ColumnDefinition Width="70" /></Grid.ColumnDefinitions><TextBlock Text="Opacity" Style="{StaticResource EditorLabel}" /><Slider Grid.Column="1" Minimum="0.1" Maximum="1" TickFrequency="0.05" IsSnapToTickEnabled="True" Value="{Binding Opacity, Mode=TwoWay}" Margin="0,0,10,0" /><TextBlock Grid.Column="2" Text="{Binding Opacity, StringFormat={}{0:P0}}" VerticalAlignment="Center" /></Grid>
+                      <Separator />
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Click-through" /><TextBlock Text="Mouse clicks pass to whatever is underneath." Style="{StaticResource Hint}" /></StackPanel><ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding ClickThrough, Mode=TwoWay}" OnContent="On" OffContent="Off" /></Grid>
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Keep on screen" /><TextBlock Text="Clamps the widget inside its monitor." Style="{StaticResource Hint}" /></StackPanel><ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding KeepOnScreen, Mode=TwoWay}" OnContent="On" OffContent="Off" /></Grid>
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Lock this widget" /><TextBlock Text="Prevents accidental dragging." Style="{StaticResource Hint}" /></StackPanel><ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding Locked, Mode=TwoWay}" OnContent="On" OffContent="Off" /></Grid>
+                      <Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Hide over fullscreen apps" /><TextBlock Text="Useful for games and video playback." Style="{StaticResource Hint}" /></StackPanel><ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding HideOnFullscreen, Mode=TwoWay}" OnContent="On" OffContent="Off" /></Grid>
+                    </StackPanel>
+                  </Border>
+                  <Button Content="Reset placement" HorizontalAlignment="Left" Style="{StaticResource SubtleButton}" Click="ResetPlacement_Click" />
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+
+            <TabItem Header="Data source">
+              <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,12">
+                <StackPanel>
+                  <Border Style="{StaticResource SettingsCard}" Visibility="{Binding HasNetworkDataSource, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel><TextBlock Text="Network data" Style="{StaticResource SectionHeading}" /><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Network adapter" Style="{StaticResource EditorLabel}" /><TextBox Grid.Column="1" Text="{Binding NetworkInterface, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" /></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="External IP" /><TextBlock Text="Off by default. Halo's only outbound web request." Style="{StaticResource Hint}" /></StackPanel><ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding ExternalIpEnabled, Mode=TwoWay}" OnContent="On" OffContent="Off" /></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Service URL" Style="{StaticResource EditorLabel}" /><TextBox Grid.Column="1" Text="{Binding ExternalIpUrl, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding ExternalIpEnabled}" /></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Refresh interval" Style="{StaticResource EditorLabel}" /><StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="90" Minimum="1" Maximum="1440" Value="{Binding ExternalIpRefresh, Mode=TwoWay}" IsEnabled="{Binding ExternalIpEnabled}" /><TextBlock Text="minutes" Margin="6,0,0,0" VerticalAlignment="Center" /></StackPanel></Grid></StackPanel>
+                  </Border>
+                  <Border Style="{StaticResource SettingsCard}" Visibility="{Binding HasFpsDataSource, Converter={StaticResource BoolToVisibility}}">
+                    <StackPanel><TextBlock Text="Frame data" Style="{StaticResource SectionHeading}" /><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="190" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Capture transport" Style="{StaticResource EditorLabel}" /><ComboBox Grid.Column="1" ItemsSource="{Binding TransportChoices}" SelectedItem="{Binding Transport, Mode=TwoWay}" /></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="190" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Presented tap" Style="{StaticResource EditorLabel}" /><ComboBox Grid.Column="1" ItemsSource="{Binding TapChoices}" SelectedItem="{Binding Tap, Mode=TwoWay}" /></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="ETW flush period" Style="{StaticResource EditorLabel}" /><StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="90" Minimum="0" Maximum="1000" Value="{Binding FlushMs, Mode=TwoWay}" /><TextBlock Text="ms" Margin="6,0,0,0" VerticalAlignment="Center" /></StackPanel></Grid><Grid Style="{StaticResource EditorRow}"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="1% / 0.1% lows window" Style="{StaticResource EditorLabel}" /><StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="90" Minimum="10" Maximum="600" Value="{Binding LowsWindow, Mode=TwoWay}" /><TextBlock Text="s" Margin="6,0,0,0" VerticalAlignment="Center" /></StackPanel></Grid></StackPanel>
+                  </Border>
+                  <Border Style="{StaticResource SettingsCard}" Visibility="{Binding HasNoDataSource, Converter={StaticResource BoolToVisibility}}"><StackPanel><TextBlock Text="No widget-specific data source" FontWeight="SemiBold" /><TextBlock Text="This widget follows the collector's automatic hardware discovery." Style="{StaticResource Hint}" Margin="0,4,0,0" /></StackPanel></Border>
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+          </TabControl>
+        </Grid>
+      </Border>
+    </Grid>
   </Grid>
 </UserControl>

@@ -37,7 +37,7 @@ public partial class MainWindow : FluentWindow
             {
                 "general" => new GeneralPage(_config),
                 "system" => new PlaceholderPage("System check", "Collector, provider, driver and autostart checks will appear here."),
-                "widgets" => new PlaceholderPage("Widgets", "Add, reorder and customise widgets here."),
+                "widgets" => new WidgetsPage(_config),
                 "about" => new PlaceholderPage("About", "Halo version, credits and third-party notices."),
                 _ => new GeneralPage(_config),
             };

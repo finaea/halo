@@ -32,6 +32,7 @@ public sealed record AutostartStatus(ScheduledTaskState Collector, ScheduledTask
 
 public static class AutostartManager
 {
+    public const string MissingPayloadMessage = "Halo.Collector.exe / Halo.Widgets.exe not found next to Halo.Settings.exe — run from the installed or published folder";
     private const string TaskFolderPath = @"\Halo";
     private const string CollectorTaskName = "Collector";
     private const string WidgetsTaskName = "Widgets";
@@ -71,6 +72,11 @@ public static class AutostartManager
 
     public static int Register(string? requestedUser)
     {
+        if (!HasTaskPayloads)
+        {
+            Console.Error.WriteLine(MissingPayloadMessage);
+            return 1;
+        }
         if (!Elevation.IsElevated) return 740;
         string user = string.IsNullOrWhiteSpace(requestedUser) ? InteractiveUser() : requestedUser.Trim();
         object? service = null;
@@ -161,6 +167,9 @@ public static class AutostartManager
         }
     }
 
+    public static bool HasTaskPayloads
+        => File.Exists(ExpectedExe("Halo.Collector.exe")) && File.Exists(ExpectedExe("Halo.Widgets.exe"));
+
     private static void RegisterTask(dynamic service, dynamic folder, string name, string exe, string user, int runLevel)
     {
         dynamic definition = service.NewTask(0);
@@ -176,6 +185,7 @@ public static class AutostartManager
         definition.Settings.StartWhenAvailable = true;
         definition.Settings.RestartCount = 3;
         definition.Settings.RestartInterval = "PT1M";
+        definition.Settings.Priority = 5;
 
         dynamic trigger = definition.Triggers.Create(TaskTriggerLogon);
         trigger.UserId = user;

@@ -138,8 +138,14 @@ public partial class GeneralPage : UserControl, ISettingsPage, ISearchableSettin
         AutostartStatus status = await Task.Run(AutostartManager.GetStatus);
         AutostartStatusText.Text = status.Summary;
         AutostartSwitch.IsChecked = status.Enabled;
-        AutostartSwitch.IsEnabled = true;
-        RepairAutostartButton.IsEnabled = !status.Healthy;
+        bool payloadsPresent = AutostartManager.HasTaskPayloads;
+        AutostartSwitch.IsEnabled = payloadsPresent;
+        RepairAutostartButton.IsEnabled = payloadsPresent && !status.Healthy;
+        AutostartSwitch.ToolTip = payloadsPresent ? null : AutostartManager.MissingPayloadMessage;
+        RepairAutostartButton.ToolTip = payloadsPresent
+            ? "Recreates both scheduled tasks and asks Windows for administrator permission."
+            : AutostartManager.MissingPayloadMessage;
+        if (!payloadsPresent) AutostartStatusText.Text = "Autostart can be changed from an installed or published Halo folder.";
         _autostartBusy = false;
     }
 

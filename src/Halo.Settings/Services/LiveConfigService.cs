@@ -194,12 +194,14 @@ public sealed class LiveConfigService : IDisposable
 
     private void OnFileChanged(object sender, FileSystemEventArgs e)
     {
-        ConfigFileKind? kind = Path.GetFileName(e.FullPath).ToLowerInvariant() switch
+        static ConfigFileKind? KindFor(string path) => Path.GetFileName(path).ToLowerInvariant() switch
         {
             "settings.json" => ConfigFileKind.Settings,
             "widgets.json" => ConfigFileKind.Widgets,
             _ => null,
         };
+        ConfigFileKind? kind = KindFor(e.FullPath);
+        if (kind is null && e is RenamedEventArgs renamed) kind = KindFor(renamed.OldFullPath);
         if (kind == ConfigFileKind.Settings)
             _settingsWatchTimer.Change(200, Timeout.Infinite);
         else if (kind == ConfigFileKind.Widgets)
@@ -218,6 +220,12 @@ public sealed class LiveConfigService : IDisposable
                 if ((_ownHashes.TryGetValue(kind, out string? own) && own == hash) ||
                     (_seenHashes.TryGetValue(kind, out string? seen) && seen == hash))
                     return;
+            }
+
+            if (hash == "<missing>")
+            {
+                PublishStatus(new($"{FileName(kind)} is missing — it will be recreated on your next change", IsError: true));
+                return;
             }
 
             await ValidateCurrentFileAsync(kind).ConfigureAwait(false);
