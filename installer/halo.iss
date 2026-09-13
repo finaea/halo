@@ -84,8 +84,18 @@ Name: "{group}\Halo Widgets"; Filename: "{app}\Halo.Widgets.exe"
 ; Both at the original (medium-integrity) user, which is what runasoriginaluser buys us —
 ; the token-inspection dance the old install-halo.ps1 did by hand. Widgets first, then
 ; Settings, which opens on System check the first time.
-Filename: "{app}\Halo.Widgets.exe"; Flags: nowait runasoriginaluser skipifsilent
-Filename: "{app}\Halo.Settings.exe"; Flags: nowait runasoriginaluser skipifsilent
+;
+; postinstall is load-bearing, not cosmetic. A [Run] entry WITHOUT it is processed before
+; CurStepChanged(ssPostInstall) — measured 2026-09-13 in a /LOG: "Installation process
+; succeeded." and "-- Run entry --" 13 ms apart, RegisterAutostart below not yet run — so
+; the widgets would start before the collector task exists, give it 5 s
+; (Halo.Widgets App.GenerateFirstRunLayout) and then write the minimal offline layout.
+; With postinstall the two entries run when the user clicks Finish, after the collector
+; has been registered and started.
+Filename: "{app}\Halo.Widgets.exe"; Description: "{cm:LaunchProgram,Halo Widgets}"; \
+    Flags: nowait postinstall runasoriginaluser skipifsilent
+Filename: "{app}\Halo.Settings.exe"; Description: "Open Halo Settings (System check)"; \
+    Flags: nowait postinstall runasoriginaluser skipifsilent
 
 [UninstallRun]
 ; Runs after CurUninstallStepChanged(usUninstall) below (which has already stopped the
@@ -220,7 +230,8 @@ begin
   end;
 
   { The collector task exists now; start it so this session has sensor data without a
-    logoff. Widgets is launched by the [Run] entry as the original user instead. }
+    logoff. Widgets and Settings are launched by the postinstall [Run] entries when the
+    user clicks Finish — as the original user, and only after this has run. }
   Exec(ExpandConstant('{sys}\schtasks.exe'), '/Run /TN "\Halo\Collector"', '',
        SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
@@ -255,7 +266,8 @@ begin
       a task called \Halo\Collector may belong to a different Halo (a source build registered
       with install-dev.ps1, or an older install) — ending it killed exactly that during the
       2026-09-13 test. The [UninstallRun] entry's --unregister-autostart stops and deletes
-      only the tasks whose action points into {app}, while Halo.Settings.exe still exists. }
+      only the tasks whose action points into the install folder, while Halo.Settings.exe
+      still exists. No brace constants in this comment: a closing brace would end it early. }
     StopHaloProcesses(ExpandConstant('{app}'));
   end
   else if CurUninstallStep = usPostUninstall then
