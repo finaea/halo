@@ -1,146 +1,262 @@
 using System.Diagnostics;
-using System.Globalization;
-using System.Net.NetworkInformation;
+using System.ComponentModel;
+using System.IO;
+using System.IO.Compression;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
-using Halo.Metrics;
+using System.Windows.Data;
+using Halo.Settings.Services;
+using Halo.Settings.ViewModels;
 using Halo.Shared;
 using Halo.Shared.Config;
+using Microsoft.Win32;
+using InfoBarSeverity = Wpf.Ui.Controls.InfoBarSeverity;
 
 namespace Halo.Settings.Pages;
 
-public partial class GeneralPage : UserControl, ISettingsPage
+public partial class GeneralPage : UserControl, ISettingsPage, ISearchableSettingsPage, IDisposable
 {
-    // "console" is gone with schema v2: the capture app was never shipped and the setting was dead.
-    private static readonly (string Value, string Label)[] Transports =
-    {
-        ("auto", "Auto — bundled PresentMon service"),
-        ("sdk", "Service + SDK only"),
-    };
+    private readonly LiveConfigService _config;
+    private readonly GeneralViewModel _viewModel;
+    private bool _autostartBusy;
 
-    private static readonly (string Value, string Label)[] TapModes =
+    public GeneralPage(LiveConfigService config)
     {
-        ("auto", "Auto — live tap when supported"),
-        ("off", "Off — capture transport only"),
-    };
-
-    private readonly ConfigStore _store;
-
-    public GeneralPage(ConfigStore store)
-    {
-        _store = store;
+        _config = config;
+        _viewModel = new GeneralViewModel(config);
         InitializeComponent();
-
-        foreach (var t in Transports) TransportCombo.Items.Add(t.Label);
-        foreach (var t in TapModes) TapCombo.Items.Add(t.Label);
-        foreach (var f in Fonts.SystemFontFamilies.Select(f => f.Source).OrderBy(s => s))
-            FontCombo.Items.Add(f);
+        DataContext = _viewModel;
+        _config.StatusChanged += Config_StatusChanged;
     }
 
     public void OnEnter()
     {
-        _store.Reload();
-        var s = _store.Settings;
-
-        AutoScaleCheck.IsChecked = s.Appearance.Scale.IsAuto;
-        ScaleSlider.Value = Math.Clamp(s.Appearance.Scale.Or(1.7), ScaleSlider.Minimum, ScaleSlider.Maximum);
-        ScaleSlider.IsEnabled = !s.Appearance.Scale.IsAuto;
-        FontCombo.Text = s.Appearance.FontFamily;
-        TextSizeBox.Text = s.Appearance.TextSizePt.ToString(CultureInfo.InvariantCulture);
-        CornerRadiusBox.Text = s.Appearance.CornerRadius.ToString(CultureInfo.InvariantCulture);
-        LockAllCheck.IsChecked = s.LockAll;
-        SnapCheck.IsChecked = s.Snap;
-
-        FrameLowsBox.Text = s.Collector.FrameLowsWindowS.ToString(CultureInfo.InvariantCulture);
-        EtwFlushBox.Text = s.Collector.PresentMonEtwFlushMs.ToString(CultureInfo.InvariantCulture);
-        TransportCombo.SelectedIndex = IndexOf(Transports, s.Collector.PresentMonTransport);
-        TapCombo.SelectedIndex = IndexOf(TapModes, s.Collector.PresentedTap);
-
-        ExternalIpCheck.IsChecked = s.Collector.ExternalIp.Enabled;
-        IpUrlBox.Text = s.Collector.ExternalIp.Url;
-        IpRefreshBox.Text = s.Collector.ExternalIp.RefreshMinutes.ToString(CultureInfo.InvariantCulture);
-        LoadNetworkAdapters(s.Collector.NetworkInterface);
-
-        Status.Text = "";
+        _viewModel.RefreshFromCurrent();
+        _ = RefreshAutostartAsync();
     }
 
     public void OnLeave() { }
 
-    private void AutoScale_Changed(object sender, RoutedEventArgs e)
-        => ScaleSlider.IsEnabled = AutoScaleCheck.IsChecked != true;
-
-    private static int IndexOf((string Value, string Label)[] set, string value)
+    public void ApplyFilter(string query)
     {
-        for (int i = 0; i < set.Length; i++)
-            if (set[i].Value.Equals(value, StringComparison.OrdinalIgnoreCase)) return i;
-        return 0;
+        string filter = query.Trim();
+        bool empty = filter.Length == 0;
+        FrameworkElement[] desktopRows = [AutostartRow, LockRow, SnapRow, RepairAutostartButton];
+        FrameworkElement[] appearanceRows = [PresetRow, ScaleRow, FontRow, CornerRow, ColorsRow];
+        FrameworkElement[] frameRows = [TransportRow, TapRow, FlushRow, LowsRow];
+        FrameworkElement[] networkRows = [AdapterRow, ExternalIpRow, IpUrlRow, IpRefreshRow];
+
+        bool desktop = ApplyRows(desktopRows, filter, empty);
+        bool appearance = ApplyRows(appearanceRows, filter, empty);
+        bool frame = ApplyRows(frameRows, filter, empty);
+        bool network = ApplyRows(networkRows, filter, empty);
+        bool files = empty || Matches(FilesCard, filter);
+
+        ICollectionView colors = CollectionViewSource.GetDefaultView(_viewModel.Colors);
+        colors.Filter = empty ? null : item => item is GlobalColorViewModel row &&
+            ($"{row.Token} {row.Label} {row.Description} color colour palette".Contains(filter, StringComparison.CurrentCultureIgnoreCase));
+        ColorsRow.Visibility = empty || !colors.IsEmpty || Matches(ColorsRow, filter)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        appearance = appearanceRows.Any(row => row.Visibility == Visibility.Visible);
+
+        DesktopCard.Visibility = desktop ? Visibility.Visible : Visibility.Collapsed;
+        AppearanceCard.Visibility = appearance ? Visibility.Visible : Visibility.Collapsed;
+        FrameCard.Visibility = frame ? Visibility.Visible : Visibility.Collapsed;
+        NetworkCard.Visibility = network ? Visibility.Visible : Visibility.Collapsed;
+        FilesCard.Visibility = files ? Visibility.Visible : Visibility.Collapsed;
+        NoSearchResults.Visibility = desktop || appearance || frame || network || files ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    private void LoadNetworkAdapters(string current)
+    private static bool ApplyRows(IEnumerable<FrameworkElement> rows, string filter, bool empty)
     {
-        NetIfCombo.Items.Clear();
-        NetIfCombo.Items.Add("Best");
+        bool any = false;
+        foreach (FrameworkElement row in rows)
+        {
+            bool visible = empty || Matches(row, filter);
+            row.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            any |= visible;
+        }
+        return any;
+    }
+
+    private static bool Matches(FrameworkElement element, string query)
+        => element.Tag?.ToString()?.Contains(query, StringComparison.CurrentCultureIgnoreCase) == true;
+
+    private void Preset_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string name }) _viewModel.ApplyPreset(name);
+    }
+
+    private void ColorButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: GlobalColorViewModel row }) row.IsPickerOpen = !row.IsPickerOpen;
+    }
+
+    private void ResetAppearance_Click(object sender, RoutedEventArgs e) => _viewModel.ResetAppearance();
+    private void ResetCollector_Click(object sender, RoutedEventArgs e) => _viewModel.ResetFrameData();
+    private void ResetNetwork_Click(object sender, RoutedEventArgs e) => _viewModel.ResetNetwork();
+
+    private async void AutostartSwitch_Click(object sender, RoutedEventArgs e)
+    {
+        if (_autostartBusy) return;
+        bool enable = AutostartSwitch.IsChecked == true;
+        await ChangeAutostartAsync(enable);
+    }
+
+    private async void RepairAutostart_Click(object sender, RoutedEventArgs e)
+        => await ChangeAutostartAsync(enable: true);
+
+    private async Task ChangeAutostartAsync(bool enable)
+    {
+        _autostartBusy = true;
+        AutostartSwitch.IsEnabled = false;
+        RepairAutostartButton.IsEnabled = false;
+        AutostartStatusText.Text = enable ? "Waiting for administrator permission…" : "Removing scheduled tasks…";
         try
         {
-            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces()
-                         .Where(n => n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
-                         .OrderByDescending(n => n.OperationalStatus == OperationalStatus.Up)
-                         .ThenBy(n => n.Name))
-                NetIfCombo.Items.Add(ni.Name);
+            int? exitCode = await AutostartManager.RunElevatedAsync(enable);
+            if (exitCode is null)
+                ShowInfo("Action cancelled", "Windows left the autostart tasks unchanged.", InfoBarSeverity.Informational);
+            else if (exitCode != 0)
+                ShowInfo("Autostart change failed", $"Halo.Settings exited with code {exitCode}.", InfoBarSeverity.Error);
         }
-        catch { /* adapter enumeration is best-effort; the editable box still works */ }
-        NetIfCombo.Text = string.IsNullOrWhiteSpace(current) ? "Best" : current;
+        finally
+        {
+            _autostartBusy = false;
+            await RefreshAutostartAsync();
+        }
     }
 
-    private void Save_Click(object sender, RoutedEventArgs e)
+    private async Task RefreshAutostartAsync()
     {
-        var s = _store.Settings;
+        if (_autostartBusy) return;
+        _autostartBusy = true;
+        AutostartSwitch.IsEnabled = false;
+        RepairAutostartButton.IsEnabled = false;
+        AutostartStatus status = await Task.Run(AutostartManager.GetStatus);
+        AutostartStatusText.Text = status.Summary;
+        AutostartSwitch.IsChecked = status.Enabled;
+        AutostartSwitch.IsEnabled = true;
+        RepairAutostartButton.IsEnabled = !status.Healthy;
+        _autostartBusy = false;
+    }
 
-        s.Appearance.Scale = AutoScaleCheck.IsChecked == true
-            ? ScaleValue.Auto
-            : ScaleValue.Fixed(Math.Round(ScaleSlider.Value, 2));
-        s.Appearance.FontFamily = string.IsNullOrWhiteSpace(FontCombo.Text) ? s.Appearance.FontFamily : FontCombo.Text.Trim();
-        s.Appearance.TextSizePt = Clamp(ParseD(TextSizeBox.Text, s.Appearance.TextSizePt), 5, 24);
-        s.Appearance.CornerRadius = Clamp(ParseD(CornerRadiusBox.Text, s.Appearance.CornerRadius), 0, 20);
-        s.LockAll = LockAllCheck.IsChecked == true;
-        s.Snap = SnapCheck.IsChecked == true;
-
-        s.Collector.FrameLowsWindowS = ParseD(FrameLowsBox.Text, s.Collector.FrameLowsWindowS);
-        s.Collector.PresentMonEtwFlushMs = (int)Clamp(ParseD(EtwFlushBox.Text, s.Collector.PresentMonEtwFlushMs), 0, 1000);
-        if (TransportCombo.SelectedIndex >= 0) s.Collector.PresentMonTransport = Transports[TransportCombo.SelectedIndex].Value;
-        if (TapCombo.SelectedIndex >= 0) s.Collector.PresentedTap = TapModes[TapCombo.SelectedIndex].Value;
-        s.Collector.NetworkInterface = string.IsNullOrWhiteSpace(NetIfCombo.Text) ? "Best" : NetIfCombo.Text.Trim();
-        s.Collector.ExternalIp.Enabled = ExternalIpCheck.IsChecked == true;
-        s.Collector.ExternalIp.Url = IpUrlBox.Text.Trim();
-        s.Collector.ExternalIp.RefreshMinutes = ParseD(IpRefreshBox.Text, s.Collector.ExternalIp.RefreshMinutes);
-
+    private async void ExportLayout_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Export Halo layout",
+            Filter = "Halo layout (*.halo-layout)|*.halo-layout",
+            DefaultExt = ".halo-layout",
+            AddExtension = true,
+            FileName = $"Halo-layout-{DateTime.Now:yyyy-MM-dd}",
+        };
+        if (dialog.ShowDialog() != true) return;
         try
         {
-            _store.SaveSettings();
-            Status.Text = $"Saved at {DateTime.Now:HH:mm:ss}. Widgets and collector pick changes up live.";
+            await _config.FlushAllAsync();
+            await using var stream = new FileStream(dialog.FileName, FileMode.Create, FileAccess.Write, FileShare.None);
+            using var archive = new ZipArchive(stream, ZipArchiveMode.Create);
+            await WriteEntryAsync(archive, "settings.json", _config.Settings, ConfigJsonContext.Default.AppSettings);
+            await WriteEntryAsync(archive, "widgets.json", _config.Widgets, ConfigJsonContext.Default.WidgetsConfig);
+            ShowInfo("Layout exported", dialog.FileName, InfoBarSeverity.Success);
         }
-        catch (Exception ex) { Status.Text = "Save failed: " + ex.Message; }
+        catch (Exception ex) { ShowInfo("Export failed", ex.Message, InfoBarSeverity.Error); }
     }
 
-    private void ResetMax_Click(object sender, RoutedEventArgs e)
-        => Status.Text = ControlPipe.Send(ControlPipe.ResetMax)
-            ? "Sent reset-max to collector."
-            : "Collector not running (reset-max not delivered).";
+    private async void ImportLayout_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Import Halo layout",
+            Filter = "Halo layout (*.halo-layout)|*.halo-layout",
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog() != true) return;
+        System.Windows.MessageBoxResult confirmation = System.Windows.MessageBox.Show(
+            "This replaces settings.json and widgets.json with the selected Halo layout.",
+            "Import Halo layout", System.Windows.MessageBoxButton.OKCancel, MessageBoxImage.Warning, System.Windows.MessageBoxResult.Cancel);
+        if (confirmation != System.Windows.MessageBoxResult.OK) return;
+        try
+        {
+            using ZipArchive archive = ZipFile.OpenRead(dialog.FileName);
+            AppSettings settings = await ReadEntryAsync(archive, "settings.json", ConfigJsonContext.Default.AppSettings);
+            WidgetsConfig widgets = await ReadEntryAsync(archive, "widgets.json", ConfigJsonContext.Default.WidgetsConfig);
+            _config.QueueSettings("$", target => CopySettings(settings, target), flushImmediately: true);
+            _config.QueueWidgets("$", target => CopyWidgets(widgets, target), flushImmediately: true);
+            await _config.FlushAllAsync();
+            _viewModel.RefreshFromCurrent();
+            ShowInfo("Layout imported", "settings.json and widgets.json were updated.", InfoBarSeverity.Success);
+        }
+        catch (Exception ex) { ShowInfo("Import failed", ex.Message, InfoBarSeverity.Error); }
+    }
 
-    private void ResetNet_Click(object sender, RoutedEventArgs e)
-        => Status.Text = ControlPipe.Send(ControlPipe.ResetNet)
-            ? "Sent reset-net to collector."
-            : "Collector not running (reset-net not delivered).";
+    private void ResetEverything_Click(object sender, RoutedEventArgs e)
+    {
+        System.Windows.MessageBoxResult result = System.Windows.MessageBox.Show(
+            "This resets settings.json and widgets.json to Halo defaults. This cannot be undone.",
+            "Reset everything", System.Windows.MessageBoxButton.OKCancel, MessageBoxImage.Warning, System.Windows.MessageBoxResult.Cancel);
+        if (result != System.Windows.MessageBoxResult.OK) return;
+        _viewModel.ResetEverything();
+        ShowInfo("Defaults queued", "Resetting both settings.json and widgets.json.", InfoBarSeverity.Informational);
+    }
 
     private void OpenDataFolder_Click(object sender, RoutedEventArgs e)
     {
         try { Process.Start(new ProcessStartInfo(Paths.DataDir) { UseShellExecute = true }); }
-        catch (Exception ex) { Status.Text = "Could not open " + Paths.DataDir + ": " + ex.Message; }
+        catch (Exception ex) { ShowInfo("Could not open data folder", ex.Message, InfoBarSeverity.Error); }
     }
 
-    private static double ParseD(string t, double fallback)
-        => double.TryParse(t, NumberStyles.Any, CultureInfo.InvariantCulture, out double d) ? d : fallback;
+    private void Config_StatusChanged(object? sender, ConfigWriteStatus e)
+    {
+        if (e.IsError) ShowInfo("Configuration error", e.Message, InfoBarSeverity.Error);
+        else if (PageInfoBar.IsOpen && PageInfoBar.Title == "Configuration error") PageInfoBar.IsOpen = false;
+    }
 
-    private static double Clamp(double v, double lo, double hi) => v < lo ? lo : v > hi ? hi : v;
+    private void ShowInfo(string title, string message, InfoBarSeverity severity)
+    {
+        PageInfoBar.Title = title;
+        PageInfoBar.Message = message;
+        PageInfoBar.Severity = severity;
+        PageInfoBar.IsOpen = true;
+    }
+
+    private static async Task<T> ReadEntryAsync<T>(ZipArchive archive, string name,
+        System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo) where T : class
+    {
+        ZipArchiveEntry entry = archive.GetEntry(name) ?? throw new InvalidDataException($"The layout does not contain {name}.");
+        await using Stream stream = entry.Open();
+        return await JsonSerializer.DeserializeAsync(stream, typeInfo) ?? throw new InvalidDataException($"{name} is empty.");
+    }
+
+    private static async Task WriteEntryAsync<T>(ZipArchive archive, string name, T value,
+        System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)
+    {
+        ZipArchiveEntry entry = archive.CreateEntry(name, CompressionLevel.Optimal);
+        await using Stream stream = entry.Open();
+        await JsonSerializer.SerializeAsync(stream, value, typeInfo);
+    }
+
+    private static void CopySettings(AppSettings source, AppSettings target)
+    {
+        target.SchemaVersion = source.SchemaVersion;
+        target.LockAll = source.LockAll;
+        target.Snap = source.Snap;
+        target.Appearance = source.Appearance;
+        target.Collector = source.Collector;
+    }
+
+    private static void CopyWidgets(WidgetsConfig source, WidgetsConfig target)
+    {
+        target.SchemaVersion = source.SchemaVersion;
+        target.Widgets = source.Widgets;
+    }
+
+    public void Dispose()
+    {
+        _config.StatusChanged -= Config_StatusChanged;
+        _viewModel.Dispose();
+    }
 }

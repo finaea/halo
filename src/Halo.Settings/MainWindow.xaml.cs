@@ -1,56 +1,72 @@
-using System.Windows;
 using System.Windows.Controls;
 using Halo.Settings.Pages;
-using Halo.Shared.Config;
+using Halo.Settings.Services;
+using Halo.Shared;
+using Wpf.Ui.Controls;
 
 namespace Halo.Settings;
 
-public partial class MainWindow : Window
+public partial class MainWindow : FluentWindow
 {
-    private readonly ConfigStore _store;
-    private readonly Dictionary<int, ISettingsPage> _pages = new();
+    private readonly LiveConfigService _config;
+    private readonly Dictionary<string, ISettingsPage> _pages = new(StringComparer.Ordinal);
     private ISettingsPage? _current;
 
     public MainWindow()
     {
         InitializeComponent();
-        // Settings app never watches; the collector/widgets own hot-reload. We just read + write.
-        _store = new ConfigStore(Halo.Shared.Paths.ConfigDir, watch: false);
-        ConfigPathText.Text = Halo.Shared.Paths.ConfigDir;
-        Nav.SelectedIndex = 0; // triggers first navigation
+        _config = new LiveConfigService(Paths.ConfigDir);
+        _config.StatusChanged += Config_StatusChanged;
+        ConfigPathText.Text = Paths.ConfigDir;
+        ConfigPathText.ToolTip = Paths.ConfigDir;
+        Navigation.SelectedIndex = 0;
     }
 
-    private void Nav_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void Navigation_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        int i = Nav.SelectedIndex;
-        if (i < 0) return;
+        if (Navigation.SelectedItem is not ListBoxItem { Tag: string key }) return;
+        ShowPage(key);
+    }
 
+    public void ShowPage(string key)
+    {
         _current?.OnLeave();
-
-        if (!_pages.TryGetValue(i, out ISettingsPage? page))
+        if (!_pages.TryGetValue(key, out ISettingsPage? page))
         {
-            page = i switch
+            page = key switch
             {
-                0 => new GeneralPage(_store),
-                1 => new WidgetsPage(_store),
-                2 => new ThemePage(_store),
-                3 => new MetricsPage(),
-                4 => new AutostartPage(),
-                _ => new GeneralPage(_store),
+                "general" => new GeneralPage(_config),
+                "system" => new PlaceholderPage("System check", "Collector, provider, driver and autostart checks will appear here."),
+                "widgets" => new PlaceholderPage("Widgets", "Add, reorder and customise widgets here."),
+                "about" => new PlaceholderPage("About", "Halo version, credits and third-party notices."),
+                _ => new GeneralPage(_config),
             };
-            _pages[i] = page;
+            _pages[key] = page;
         }
-
-        Host.Content = page;
+        PageHost.Content = page;
         _current = page;
         page.OnEnter();
+        if (page is ISearchableSettingsPage searchable) searchable.ApplyFilter(SearchBox.Text);
+    }
+
+    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_current is ISearchableSettingsPage searchable) searchable.ApplyFilter(SearchBox.Text);
+    }
+
+    private void Config_StatusChanged(object? sender, ConfigWriteStatus e)
+    {
+        SaveStatusText.Text = e.IsError ? "⚠ " + e.Message : e.IsSaving ? e.Message : "✓ " + e.Message;
+        SaveStatusText.Foreground = (System.Windows.Media.Brush)FindResource(e.IsError ? "HaloDanger" : "HaloSuccess");
     }
 
     protected override void OnClosed(EventArgs e)
     {
         _current?.OnLeave();
-        foreach (var p in _pages.Values) (p as IDisposable)?.Dispose();
-        _store.Dispose();
+        foreach (ISettingsPage page in _pages.Values)
+            (page as IDisposable)?.Dispose();
+        _config.StatusChanged -= Config_StatusChanged;
+        _config.Dispose();
         base.OnClosed(e);
     }
 }

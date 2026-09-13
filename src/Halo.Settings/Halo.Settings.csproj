@@ -16,6 +16,10 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="PixiEditor.ColorPicker" Version="3.4.2.3" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Halo.Metrics\Halo.Metrics.csproj" />
     <ProjectReference Include="..\Halo.Shared\Halo.Shared.csproj" />
   </ItemGroup>
