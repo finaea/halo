@@ -11,17 +11,16 @@ namespace Halo.Collector.Providers;
 /// 3D app; per-frame events land in the shared-memory frame ring, windowed stats (1%/0.1% lows,
 /// worst frametime, FG ratio, Click-to-Photon) are published at poll rate.
 ///
-/// Two transports behind one seam (collector.presentMonTransport: auto | sdk):
-///  - **sdk** (plan D7, preferred): PresentMon 2 service + PresentMonAPI2.dll. Frames are pulled
-///    from the service's shared-memory ring each Poll with true PRESENT_START_QPC timestamps;
-///    ETW flush cadence is tuned via pmSetEtwFlushPeriod (collector.presentMonEtwFlushMs), so
-///    frame data is ~flush+poll fresh instead of ~1 s (console ETW batching + 4 KB stdout pipe).
-///    See PresentMonSdkSource for the service lifecycle (no SCM registration needed).
-///  - **console**: the capture app as a child process with CSV over stdout ("--stop_existing_session";
-///    frame timestamps reconstructed by anchoring the CSV time column to arrival QPC). Fallback
-///    when the SDK path is unavailable.
-/// Both need elevation to own an ETW session; attaching to an already-installed running
-/// PresentMon service works unelevated.
+/// One transport (plan D7): the bundled PresentMon 2 service + PresentMonAPI2.dll. Frames are
+/// pulled from the service's shared-memory ring each Poll with true PRESENT_START_QPC timestamps;
+/// ETW flush cadence is tuned via pmSetEtwFlushPeriod (collector.presentMonEtwFlushMs), so frame
+/// data is ~flush+poll fresh. See PresentMonSdkSource for the service lifecycle (no SCM
+/// registration needed).
+///
+/// collector.presentMonTransport still accepts "auto" and "sdk"; both mean this transport since
+/// the console capture app was dropped (it was never on disk, so that path could only fail).
+/// Owning the ETW session needs elevation; attaching to an already-installed running PresentMon
+/// service works unelevated.
 /// </summary>
 public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
 {
@@ -44,9 +43,6 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
     public string? UnavailableReason => _unavailableReason;
     private string? _unavailableReason;
 
-    private Process? _proc;
-    private Thread? _pumpThread;
-    private volatile bool _stopping;
     private PresentMonSdkSource? _sdk;
     private PresentTap? _tap;
     private readonly List<PresentMonSdkSource.FrameSample> _sdkScratch = new(256);
@@ -80,9 +76,6 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
 
         // re-init safety (host calls Initialize again after repeated poll failures):
         // tear down any previous transport before starting a fresh one
-        _stopping = true;
-        try { if (_proc is { HasExited: false }) _proc.Kill(entireProcessTree: true); } catch { }
-        _proc = null;
         _sdk?.Dispose();
         _sdk = null;
         _tap?.Dispose();
@@ -123,14 +116,12 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
         Stats.SetWindow(Settings.FrameLowsWindowS);
 
         bool elevated = Elevation.IsElevated;
-        // Documented values are "auto" and "sdk" (the console capture app is an internal
-        // fallback, not something a user picks any more). Anything else means auto.
+        // Documented values are "auto" and "sdk"; both select the SDK transport, which is the
+        // only one left. Anything else normalises to "auto" with a warning rather than silently
+        // meaning something undocumented.
         string transport = Settings.PresentMonTransport.Trim().ToLowerInvariant();
         if (transport is not ("auto" or "sdk"))
-        {
             Log.Warn($"collector.presentMonTransport '{transport}' is not a value Halo knows — using \"auto\"");
-            transport = "auto";
-        }
         _unavailableReason = null;
 
         var sdk = new PresentMonSdkSource();
@@ -142,48 +133,10 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
             return true;
         }
         sdk.Dispose();
-        if (transport == "sdk")
-        {
-            _unavailableReason = elevated ? ProviderError.NoSdk : ProviderError.Unelevated;
-            return false;
-        }
-
-        if (!elevated)
-        {
-            // The console transport owns its own ETW session, so without admin there is nothing
-            // left to try. The host retries with backoff in case a service appears later.
-            _unavailableReason = ProviderError.Unelevated;
-            return false;
-        }
-
-        string? exe = Directory.Exists(Paths.PresentMonDir)
-            ? Directory.EnumerateFiles(Paths.PresentMonDir, "PresentMon-*-x64.exe").FirstOrDefault()
-            : null;
-        if (exe == null)
-        {
-            Log.Warn("presentmon: binary not found under tools\\presentmon");
-            _unavailableReason = ProviderError.NoSdk;
-            return false;
-        }
-
-        // instrumentation ladder: prefer app-timing (marker-based PCL + sim pacing) + frame types
-        string[] argLadder =
-        [
-            " --track_frame_type --track_app_timing",
-            " --track_app_timing",
-            " --track_frame_type",
-            "",
-        ];
-        bool started = false;
-        foreach (string extra in argLadder)
-            if (StartCapture(exe, extra)) { started = true; break; }
-        if (started)
-        {
-            Log.Info("presentmon transport: console app");
-            StartTap(sink, elevated: true);
-        }
-        else _unavailableReason = ProviderError.Failed;
-        return started;
+        // Nothing else to try. The host retries with backoff in case the service appears later
+        // (an unelevated collector can attach to one somebody else installed and started).
+        _unavailableReason = elevated ? ProviderError.NoSdk : ProviderError.Unelevated;
+        return false;
     }
 
     /// <summary>Door-1 tap for the presented stream (collector.presentedTap). Independent of the
@@ -203,143 +156,11 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
         }
     }
 
-    private bool StartCapture(string exe, string extraArgs)
-    {
-        try
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = exe,
-                Arguments = "--output_stdout --stop_existing_session --session_name HaloPM" + extraArgs,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-            };
-            _proc = Process.Start(psi);
-            if (_proc == null) return false;
-
-            // fail fast if it dies immediately (bad arg, no admin, session conflict)
-            if (_proc.WaitForExit(1500))
-            {
-                string err = _proc.StandardError.ReadToEnd();
-                Log.Warn($"presentmon exited {_proc.ExitCode} (args=[{extraArgs}]): {Truncate(err, 400)}");
-                _proc = null;
-                return false;
-            }
-
-            _stopping = false;
-            _pumpThread = new Thread(() => Pump(_proc)) { IsBackground = true, Name = "halo-pm-pump" };
-            _pumpThread.Start();
-            Log.Info($"presentmon started (args=[{extraArgs}])");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Log.Error("presentmon start", ex);
-            return false;
-        }
-    }
-
-    private void Pump(Process proc)
-    {
-        try
-        {
-            var reader = proc.StandardOutput;
-            string? header = reader.ReadLine();
-            if (header == null) return;
-            var cols = ParseHeader(header);
-            Log.Info($"presentmon columns: time={cols.Time}(x{cols.TimeScale}) ft={cols.FrameTime} dispFt={cols.DisplayedTime} dispLat={cols.DisplayLatency} click={cols.Click} allInput={cols.AllInput} frameType={cols.FrameType} | header: {Truncate(header, 800)}");
-            long qpcFreq = Stopwatch.Frequency;
-            long anchorQpc = 0;
-            double anchorTime = double.NaN;
-            long synthQpc = 0; // fallback timeline accumulated from frametimes (no usable time column)
-
-            string? line;
-            while (!_stopping && (line = reader.ReadLine()) != null)
-            {
-                var f = line.Split(',');
-                if (f.Length < 4) continue;
-
-                uint pid = ParseU(f, cols.Pid);
-                int target = _targetPid;
-                if (target == 0 || pid != (uint)target) continue;
-
-                double t = ParseD(f, cols.Time) * cols.TimeScale;
-                double ft = ParseD(f, cols.FrameTime);
-                double dispFt = ParseD(f, cols.DisplayedTime);
-                double dispLat = ParseD(f, cols.DisplayLatency);
-                double click = ParseD(f, cols.Click);
-                double allInput = ParseD(f, cols.AllInput);
-                string frameType = cols.FrameType >= 0 && cols.FrameType < f.Length ? f[cols.FrameType] : "";
-
-                if (double.IsNaN(anchorTime) && !double.IsNaN(t))
-                {
-                    anchorTime = t;
-                    anchorQpc = Stopwatch.GetTimestamp();
-                }
-                long qpc;
-                if (!double.IsNaN(t))
-                {
-                    qpc = anchorQpc + (long)((t - anchorTime) * qpcFreq);
-                }
-                else
-                {
-                    // no time column: build a monotonic timeline by accumulating frametimes
-                    // (bursty stdout would otherwise clump many frames onto one timestamp,
-                    // which wrecks any short-window rate math)
-                    if (synthQpc == 0) synthQpc = Stopwatch.GetTimestamp();
-                    else synthQpc += (long)((double.IsNaN(ft) ? 0.007 : ft / 1000.0) * qpcFreq);
-                    qpc = synthQpc;
-                }
-
-                bool displayed = !double.IsNaN(dispLat) || (!double.IsNaN(dispFt) && dispFt > 0);
-                bool generated = frameType.Length > 0 && !frameType.Equals("Application", StringComparison.OrdinalIgnoreCase)
-                                                       && !frameType.Equals("NotSet", StringComparison.OrdinalIgnoreCase)
-                                                       && !frameType.Equals("Repeated", StringComparison.OrdinalIgnoreCase);
-
-                var entry = new FrameEntry
-                {
-                    Qpc = qpc,
-                    FrametimeMs = double.IsNaN(ft) ? 0f : (float)ft,
-                    DisplayedFtMs = double.IsNaN(dispFt) ? 0f : (float)dispFt,
-                    Flags = (displayed ? (uint)FrameFlags.Displayed : 0)
-                          | (generated ? (uint)FrameFlags.Generated : (uint)FrameFlags.AppFrame)
-                          | (frameType.Equals("Repeated", StringComparison.OrdinalIgnoreCase) ? (uint)FrameFlags.Repeated : 0)
-                          | (!displayed ? (uint)FrameFlags.Dropped : 0),
-                    Pid = pid,
-                };
-
-                double simMs = ParseD(f, cols.SimStart);
-
-                lock (_statsLock)
-                {
-                    Stats.Add(entry);
-                    _pendingRing.Add(entry);
-                    _lastTargetFrameQpc = qpc;
-                    if (!double.IsNaN(click) && click > 0) { _clickSum += click; _clickCount++; }
-                    if (!double.IsNaN(allInput) && allInput > 0) { _allInputSum += allInput; _allInputCount++; }
-                    if (!double.IsNaN(simMs) && simMs > 0) { _simMsSum += simMs; _simCount++; }
-                    if (!double.IsNaN(dispLat) && dispLat is > 0 and < 200) { _dispLatSum += dispLat; _dispLatCount++; }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            if (!_stopping) Log.Error("presentmon pump", ex);
-        }
-        finally
-        {
-            if (!_stopping) Log.Warn("presentmon pump ended (process died?)");
-        }
-    }
-
     public void Poll(MetricSink sink)
     {
-        if (_sdk != null)
-            _sdk.EnsureHealthy(); // throws when transport died; host re-inits with backoff
-        else if (_proc == null || _proc.HasExited)
-            throw new InvalidOperationException("presentmon process not running"); // host re-inits with backoff
+        if (_sdk == null)
+            throw new InvalidOperationException("presentmon transport not started"); // host re-inits with backoff
+        _sdk.EnsureHealthy(); // throws when transport died; host re-inits with backoff
 
         UpdateForegroundTarget(sink);
         UpdateIdleMode();
@@ -598,62 +419,12 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
         return 0;
     }
 
-    private static string Truncate(string s, int n) => s.Length <= n ? s : s[..n];
-
     public void Dispose()
     {
-        _stopping = true;
-        try { if (_proc is { HasExited: false }) _proc.Kill(entireProcessTree: true); } catch { }
-        _proc = null;
         _sdk?.Dispose();
         _sdk = null;
         _tap?.Dispose();
         _tap = null;
-    }
-
-    // ---- CSV header mapping (tolerates console-v2 "TimeInMs/MsBetweenâ€¦", SDK "CPUStartTime/
-    // FrameTime" and v1 naming; missing columns resolve to -1). Observed 2.5.1 console header:
-    // Application,ProcessID,â€¦,TimeInMs,MsBetweenSimulationStart,MsBetweenPresents,
-    // MsBetweenDisplayChange,â€¦,MsUntilDisplayed,CPUStartTimeInMs,â€¦ ----
-    private record struct Cols(int Pid, int Time, double TimeScale, int FrameTime, int DisplayedTime, int DisplayLatency, int Click, int AllInput, int FrameType, int Instrumented, int SimStart);
-
-    private static Cols ParseHeader(string header)
-    {
-        var names = header.Split(',');
-        int Find(params string[] candidates)
-        {
-            foreach (string c in candidates)
-                for (int i = 0; i < names.Length; i++)
-                    if (string.Equals(names[i].Trim(), c, StringComparison.OrdinalIgnoreCase))
-                        return i;
-            return -1;
-        }
-        int time = Find("TimeInMs", "CPUStartTimeInMs", "CPUStartTime", "TimeInSeconds");
-        double timeScale = time >= 0 && names[time].Trim().EndsWith("InMs", StringComparison.OrdinalIgnoreCase) ? 0.001 : 1.0;
-        return new Cols(
-            Pid: Find("ProcessID"),
-            Time: time,
-            TimeScale: timeScale,
-            FrameTime: Find("MsBetweenPresents", "FrameTime"),
-            DisplayedTime: Find("MsBetweenDisplayChange", "DisplayedTime"),
-            DisplayLatency: Find("MsUntilDisplayed", "DisplayLatency"),
-            Click: Find("MsClickToPhotonLatency", "ClickToPhotonLatency"),
-            AllInput: Find("MsAllInputToPhotonLatency", "AllInputToPhotonLatency"),
-            FrameType: Find("FrameType"),
-            Instrumented: Find("MsInstrumentedLatency", "InstrumentedLatency"),
-            SimStart: Find("MsBetweenSimulationStart"));
-    }
-
-    private static double ParseD(string[] f, int idx)
-    {
-        if (idx < 0 || idx >= f.Length) return double.NaN;
-        return double.TryParse(f[idx], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double v) ? v : double.NaN;
-    }
-
-    private static uint ParseU(string[] f, int idx)
-    {
-        if (idx < 0 || idx >= f.Length) return 0;
-        return uint.TryParse(f[idx], out uint v) ? v : 0;
     }
 
     [DllImport("user32")] private static extern nint GetForegroundWindow();
