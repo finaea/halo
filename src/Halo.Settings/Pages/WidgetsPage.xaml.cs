@@ -35,6 +35,8 @@ public partial class WidgetsPage : UserControl, ISettingsPage, ISearchableSettin
 
     public void OnLeave() => _collectorTimer.Stop();
 
+    public void ShowReadyBanner() => ReadyBanner.Visibility = Visibility.Visible;
+
     public void ApplyFilter(string query)
     {
         _filter = query.Trim();

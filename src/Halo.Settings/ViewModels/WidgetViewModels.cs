@@ -815,7 +815,7 @@ public sealed class WidgetItemViewModel : ObservableObject
         MetricRows.Clear();
         foreach (MetricSpec spec in Panel.Metrics)
         {
-            foreach ((string suffix, string displaySuffix, string repeat, string volume) in RepeatValues(spec, model))
+            foreach ((string suffix, string displaySuffix, string repeat, string volume, bool placeholder) in RepeatValues(spec, model))
             {
                 string key = suffix.Length == 0 ? spec.Key : $"{spec.Key}.{suffix}";
                 string defaultLabel = spec.DefaultLabel.Replace("{n}", displaySuffix).Replace("{x}", displaySuffix);
@@ -832,42 +832,48 @@ public sealed class WidgetItemViewModel : ObservableObject
                     Panel.OptionValue(model.Options, "stream"),
                     Panel.OptionValue(model.Options, "aggregate").Equals("true", StringComparison.OrdinalIgnoreCase));
                 string name = suffix.Length == 0 ? spec.DefaultLabel.TrimEnd(':') : $"{spec.DefaultLabel.Replace("{n}", displaySuffix).Replace("{x}", displaySuffix).TrimEnd(':')}";
+                if (placeholder) name = "Not currently detected";
                 MetricRows.Add(new MetricRowViewModel(this, spec, key, metricName, name, defaultLabel, model.Metrics.GetValueOrDefault(key)));
             }
         }
     }
 
-    private IEnumerable<(string Suffix, string Display, string Repeat, string Volume)> RepeatValues(MetricSpec spec, WidgetInstance model)
+    private IEnumerable<(string Suffix, string Display, string Repeat, string Volume, bool Placeholder)> RepeatValues(MetricSpec spec, WidgetInstance model)
     {
-        if (spec.Repeat == Repeat.None) return [("", "", "", "")];
+        if (spec.Repeat == Repeat.None) return [("", "", "", "", false)];
         if (spec.Repeat == Repeat.PerCore)
         {
             int count = _hardware.LogicalCpuCount;
-            if (count == 0) count = Math.Max(1, SavedSuffixes(model, spec.Key).Select(ParseNonNegative).DefaultIfEmpty(0).Max() + 1);
-            return Enumerable.Range(0, Math.Min(count, 256)).Select(index => (index.ToString(), (index + 1).ToString(), index.ToString(), ""));
+            string[] saved = SavedSuffixes(model, spec.Key).ToArray();
+            bool placeholder = count == 0 && saved.Length == 0;
+            if (count == 0) count = Math.Max(1, saved.Select(ParseNonNegative).DefaultIfEmpty(0).Max() + 1);
+            return Enumerable.Range(0, Math.Min(count, 256)).Select(index => (index.ToString(), (index + 1).ToString(), index.ToString(), "", placeholder));
         }
         if (spec.Repeat == Repeat.PerRank)
         {
             int count = int.TryParse(Panel.OptionValue(model.Options, "topN"), out int parsed) ? Math.Clamp(parsed, 1, 10) : 5;
-            return Enumerable.Range(0, count).Select(index => (index.ToString(), (index + 1).ToString(), index.ToString(), ""));
+            return Enumerable.Range(0, count).Select(index => (index.ToString(), (index + 1).ToString(), index.ToString(), "", false));
         }
         if (spec.Repeat == Repeat.PerVolume)
         {
-            IReadOnlyList<string> values = SelectedValues(model, "volumes", _hardware.Volumes.Select(choice => choice.Value), spec.Key, "C");
-            return values.Select(value => (value, value, "", value.ToLowerInvariant()));
+            (IReadOnlyList<string> values, bool placeholder) = SelectedValues(model, "volumes", _hardware.Volumes.Select(choice => choice.Value), spec.Key, "C");
+            return values.Select(value => (value, value, "", value.ToLowerInvariant(), placeholder));
         }
-        IReadOnlyList<string> fans = SelectedValues(model, "channels", _hardware.Fans.Select(choice => choice.Value), spec.Key, "0");
-        return fans.Select(value => (value, value, value, ""));
+        (IReadOnlyList<string> fans, bool fanPlaceholder) = SelectedValues(model, "channels", _hardware.Fans.Select(choice => choice.Value), spec.Key, "0");
+        return fans.Select(value => (value, value, value, "", fanPlaceholder));
     }
 
-    private static IReadOnlyList<string> SelectedValues(WidgetInstance model, string optionKey, IEnumerable<string> discovered, string metricKey, string fallback)
+    private static (IReadOnlyList<string> Values, bool Placeholder) SelectedValues(WidgetInstance model, string optionKey, IEnumerable<string> discovered, string metricKey, string fallback)
     {
         string option = model.Options.GetValueOrDefault(optionKey, "");
         var values = option.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-        if (values.Count == 0) values.AddRange(discovered);
-        if (values.Count == 0) values.AddRange(SavedSuffixes(model, metricKey));
+        string[] found = discovered.ToArray();
+        string[] saved = SavedSuffixes(model, metricKey).ToArray();
+        if (values.Count == 0) values.AddRange(found);
+        if (values.Count == 0) values.AddRange(saved);
+        bool placeholder = values.Count == 0;
         if (values.Count == 0) values.Add(fallback);
-        return values.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        return (values.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), placeholder);
     }
 
     private static IEnumerable<string> SavedSuffixes(WidgetInstance model, string key)
@@ -878,7 +884,7 @@ public sealed class WidgetItemViewModel : ObservableObject
     {
         if (Panel.EventDriven)
         {
-            RateMaximum = 5;
+            RateMaximum = PanelRates.EventDrivenFallbackHz;
             RateHelp = "Frame metrics repaint when new frames arrive, up to the monitor refresh rate. A 5 Hz tick remains as fallback.";
             _rateHz = 5;
             Raise(nameof(RateHz)); Raise(nameof(RateLabel)); Raise(nameof(Subtitle));
@@ -886,20 +892,19 @@ public sealed class WidgetItemViewModel : ObservableObject
         }
 
         var rates = new List<(MetricRowViewModel Row, double Rate, bool Registered)>();
-        double maximum = Panel.Id == "clock" ? 10 : 1;
-        bool anyRegistered = false;
         foreach (MetricRowViewModel row in MetricRows.GroupBy(item => item.Name).Select(group => group.First()))
         {
             if (_hardware.Metrics.TryGetValue(row.MetricName, out MetricInfo info))
             {
-                anyRegistered = true;
-                maximum = Math.Max(maximum, info.NominalRateHz);
+                if (info.Semantics == MetricSemantics.Static) continue;
                 rates.Add((row, info.NominalRateHz, true));
             }
             else rates.Add((row, Panel.DefaultRateHz, false));
         }
-        if (!_hardware.Online || !anyRegistered) maximum = Math.Max(maximum, Panel.DefaultRateHz);
-        RateMaximum = Math.Clamp(maximum, 1, 10);
+        RateMaximum = PanelRates.MaxHz(Panel, MetricRows.Select(row => row.MetricName), name =>
+            _hardware.Metrics.TryGetValue(name, out MetricInfo info) && info.Semantics != MetricSemantics.Static
+                ? info.NominalRateHz
+                : 0);
         var help = rates.Select(item => item.Registered
             ? $"{item.Row.Name}: {item.Rate:0.###} Hz{(item.Rate < RateMaximum ? " — raising the widget higher redraws the same value" : "")}"
             : $"{item.Row.Name}: {item.Rate:0.###} Hz default (not registered now)").ToList();

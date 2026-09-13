@@ -34,9 +34,18 @@
               VerticalAlignment="Top" Click="AddWidget_Click" />
     </Grid>
 
-    <ui:InfoBar Grid.Row="1" IsOpen="{Binding CollectorOffline}"
-                Severity="Informational" Title="Collector not running"
-                Message="{Binding CollectorHint}" IsClosable="False" Margin="0,0,0,12" />
+    <StackPanel Grid.Row="1">
+      <Border x:Name="ReadyBanner" Visibility="Collapsed" Background="#EAF7F0" BorderBrush="#660F7B4D"
+              BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,8">
+        <StackPanel>
+          <TextBlock Text="Halo is ready" FontWeight="SemiBold" Foreground="{StaticResource HaloSuccess}" />
+          <TextBlock Text="Your default layout was created. Changes below apply live." Style="{StaticResource Hint}" Margin="0,2,0,0" />
+        </StackPanel>
+      </Border>
+      <ui:InfoBar IsOpen="{Binding CollectorOffline}"
+                  Severity="Informational" Title="Collector not running"
+                  Message="{Binding CollectorHint}" IsClosable="False" Margin="0,0,0,12" />
+    </StackPanel>
 
     <Grid Grid.Row="2">
       <Grid.ColumnDefinitions>

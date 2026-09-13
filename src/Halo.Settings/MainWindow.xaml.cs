@@ -1,4 +1,5 @@
 using System.Windows.Controls;
+using System.IO;
 using Halo.Settings.Pages;
 using Halo.Settings.Services;
 using Halo.Shared;
@@ -9,17 +10,19 @@ namespace Halo.Settings;
 public partial class MainWindow : FluentWindow
 {
     private readonly LiveConfigService _config;
+    private readonly bool _firstRun;
     private readonly Dictionary<string, ISettingsPage> _pages = new(StringComparer.Ordinal);
     private ISettingsPage? _current;
 
     public MainWindow()
     {
+        _firstRun = !File.Exists(Path.Combine(Paths.ConfigDir, "widgets.json"));
         InitializeComponent();
         _config = new LiveConfigService(Paths.ConfigDir);
         _config.StatusChanged += Config_StatusChanged;
         ConfigPathText.Text = Paths.ConfigDir;
         ConfigPathText.ToolTip = Paths.ConfigDir;
-        Navigation.SelectedIndex = 0;
+        Navigation.SelectedIndex = _firstRun ? 1 : 0;
     }
 
     private void Navigation_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -36,9 +39,9 @@ public partial class MainWindow : FluentWindow
             page = key switch
             {
                 "general" => new GeneralPage(_config),
-                "system" => new PlaceholderPage("System check", "Collector, provider, driver and autostart checks will appear here."),
+                "system" => new SystemCheckPage(_config, _firstRun, OpenWidgets),
                 "widgets" => new WidgetsPage(_config),
-                "about" => new PlaceholderPage("About", "Halo version, credits and third-party notices."),
+                "about" => new AboutPage(),
                 _ => new GeneralPage(_config),
             };
             _pages[key] = page;
@@ -47,6 +50,14 @@ public partial class MainWindow : FluentWindow
         _current = page;
         page.OnEnter();
         if (page is ISearchableSettingsPage searchable) searchable.ApplyFilter(SearchBox.Text);
+    }
+
+    private void OpenWidgets()
+    {
+        if (Navigation.SelectedIndex == 2) ShowPage("widgets");
+        else Navigation.SelectedIndex = 2;
+        if (_pages.TryGetValue("widgets", out ISettingsPage? page) && page is WidgetsPage widgets)
+            widgets.ShowReadyBanner();
     }
 
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
