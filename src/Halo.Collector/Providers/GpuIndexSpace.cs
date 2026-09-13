@@ -22,9 +22,14 @@ internal static class GpuIndexSpace
 {
     private static readonly object Lock = new();
     private static readonly List<Slot> _slots = new();
+    /// <summary>LHM hardware identifier → the index that card was given. LHM's *name* is not
+    /// unique (two identical cards report the same model string) but its identifier is, so this
+    /// is what makes a re-init hand the same card the same index instead of re-matching.</summary>
+    private static readonly Dictionary<string, (int Index, bool MatchedNvml)> _byLhmId = new(StringComparer.Ordinal);
     private static bool _probed;
 
-    /// <param name="Key">Stable identity: PCI bus id for NVML devices, LHM's name otherwise.</param>
+    /// <param name="Key">Stable identity: PCI bus id for NVML devices, LHM's hardware identifier
+    /// otherwise. Never the model string — two identical cards share one of those.</param>
     private readonly record struct Slot(bool Nvidia, string Key, string Name, uint NvmlIndex);
 
     /// <summary>Total GPUs published so far.</summary>
@@ -51,50 +56,83 @@ internal static class GpuIndexSpace
     /// slot by name containment (the same trick <see cref="DriveMap"/> uses for disk models) so
     /// LHM's NVAPI-only sensors land on the index NVML already owns; anything unmatched gets a
     /// fresh index at the end.
+    ///
+    /// <b>One NVML slot, one LHM card.</b> Two identical cards report the same model string, so
+    /// name matching alone would send both to the lower slot and leave the higher one without
+    /// LHM's voltage and fan RPM forever. Each card is remembered by its LHM identifier (unique
+    /// where the name is not) and only ever matched against a slot no other card has taken.
     /// </summary>
+    /// <param name="lhmId">LHM's hardware identifier, e.g. <c>/gpu-nvidia/1</c> — the stable key.</param>
+    /// <param name="lhmName">LHM's model string, used only for matching.</param>
     /// <param name="matchedNvml">True when this is an NVML device LHM is only adding sensors to,
     /// so the caller knows not to re-publish name/vendor over NVML's values.</param>
-    public static int IndexForLhm(string lhmName, bool isNvidiaVendor, out bool matchedNvml)
+    public static int IndexForLhm(string lhmId, string lhmName, bool isNvidiaVendor, out bool matchedNvml)
     {
         lock (Lock)
         {
             EnsureProbed();
+
+            // A re-init (retry or rescan) must hand the same card the same index, not re-match it.
+            if (_byLhmId.TryGetValue(lhmId, out var known))
+            {
+                matchedNvml = known.MatchedNvml;
+                return known.Index;
+            }
+
             if (isNvidiaVendor)
             {
+                var claimed = ClaimedNvmlSlots();
                 for (int i = 0; i < _slots.Count; i++)
                 {
-                    if (!_slots[i].Nvidia) continue;
+                    if (!_slots[i].Nvidia || claimed.Contains(i)) continue;
                     string nv = _slots[i].Name;
                     if (nv.Length == 0 || lhmName.Length == 0) continue;
                     if (nv.Contains(lhmName, StringComparison.OrdinalIgnoreCase) ||
                         lhmName.Contains(nv, StringComparison.OrdinalIgnoreCase))
-                    {
-                        matchedNvml = true;
-                        return i;
-                    }
+                        return Assign(lhmId, i, matched: true, out matchedNvml);
                 }
+
                 // One NVIDIA card on each side that simply spells its name differently is the
-                // common case; only guess that way when there is exactly one of each.
-                int onlyNvidia = -1, nvidiaCount = 0;
+                // common case, so fall back to elimination when exactly one NVML slot is still
+                // free. AMD and Intel slots do not make this ambiguous — NVML only ever reports
+                // NVIDIA devices, so a non-NVIDIA card could never have been the one in that slot.
+                int onlyFree = -1, freeCount = 0;
                 for (int i = 0; i < _slots.Count; i++)
-                    if (_slots[i].Nvidia) { nvidiaCount++; onlyNvidia = i; }
-                if (nvidiaCount == 1 && _slots.Count == 1)
+                    if (_slots[i].Nvidia && !claimed.Contains(i)) { freeCount++; onlyFree = i; }
+                if (freeCount == 1)
                 {
-                    Log.Info($"gpu: matching LHM '{lhmName}' to the only NVML device '{_slots[onlyNvidia].Name}' by elimination");
-                    matchedNvml = true;
-                    return onlyNvidia;
+                    Log.Info($"gpu: matching LHM '{lhmName}' to the only free NVML device '{_slots[onlyFree].Name}' by elimination");
+                    return Assign(lhmId, onlyFree, matched: true, out matchedNvml);
                 }
+
+                Log.Warn($"gpu: LHM reports NVIDIA '{lhmName}' ({lhmId}) but no free NVML slot matches it " +
+                         "— giving it its own index, so its voltage and fan RPM land there rather than on another card");
             }
 
-            matchedNvml = false;
-            for (int i = 0; i < _slots.Count; i++)
-                if (!_slots[i].Nvidia && string.Equals(_slots[i].Key, lhmName, StringComparison.OrdinalIgnoreCase))
-                    return i;
-
-            _slots.Add(new Slot(Nvidia: false, Key: lhmName, Name: lhmName, NvmlIndex: 0));
+            _slots.Add(new Slot(Nvidia: false, Key: lhmId, Name: lhmName, NvmlIndex: 0));
             Log.Info($"gpu: '{lhmName}' claims index {_slots.Count - 1} (no NVML device)");
-            return _slots.Count - 1;
+            return Assign(lhmId, _slots.Count - 1, matched: false, out matchedNvml);
         }
+    }
+
+    private static int Assign(string lhmId, int index, bool matched, out bool matchedNvml)
+    {
+        _byLhmId[lhmId] = (index, matched);
+        matchedNvml = matched;
+        return index;
+    }
+
+    /// <summary>
+    /// NVML slots an LHM card already holds. Derived from the assignment map rather than kept as
+    /// a second set, so the two cannot drift apart across a re-init — and so <see cref="Reprobe"/>
+    /// needs no reset, since it only ever appends slots.
+    /// </summary>
+    private static HashSet<int> ClaimedNvmlSlots()
+    {
+        var claimed = new HashSet<int>();
+        foreach (var (index, matched) in _byLhmId.Values)
+            if (matched) claimed.Add(index);
+        return claimed;
     }
 
     /// <summary>Re-read NVML and append anything new (the <c>rescan</c> path). Existing indexes

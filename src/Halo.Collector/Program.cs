@@ -165,7 +165,10 @@ using var commands = new CommandServer(cmd =>
             // Re-runs Initialize on every provider that enumerates hardware there (GPUs, fans,
             // volumes, CPU topology), on each provider's own thread. Providers that own an ETW
             // session or a counter baseline are skipped — see ISensorProvider.RescanReinitialises.
-            Log.Info($"rescan requested: re-enumerating {host.Rescan()} provider(s)");
+            int rescanned = host.Rescan();
+            Log.Info(rescanned < 0
+                ? "rescan requested, ignored (one just ran)"
+                : $"rescan requested: re-enumerating {rescanned} provider(s)");
             break;
         case ControlPipe.Ping: break;
         default: Log.Warn($"unknown command: {cmd}"); break;

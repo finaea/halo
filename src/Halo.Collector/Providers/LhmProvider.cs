@@ -29,9 +29,20 @@ public sealed class LhmProvider : ISensorProvider
 
     public string? UnavailableReason => _unavailableReason;
 
-    /// <summary>Initialize opens the LHM Computer, which is where the hardware tree — fans, GPUs,
-    /// disks — is enumerated. A `rescan` re-runs it.</summary>
-    public bool RescanReinitialises => true;
+    /// <summary>
+    /// Initialize opens the LHM Computer, which is where the hardware tree — fans, GPUs, disks —
+    /// is enumerated, so a `rescan` re-runs it.
+    ///
+    /// <b>The CPU part is excluded, deliberately.</b> It has nothing to re-discover: a fixed four
+    /// metrics, no indexed family, and a CPU that cannot be hot-plugged. It is also the one part
+    /// that is *dangerous* to re-open — measured 2026-09-13: LibreHardwareMonitor 0.9.6 throws an
+    /// NRE out of `CpuId.Get` on a re-`Open()` and, when two re-opens land a few seconds apart,
+    /// access-violates (0xC0000005) inside `CpuId..ctor` and takes the whole process down. An AV
+    /// is not catchable, so the only fix is not to ask. Spaced tens of seconds apart it survives,
+    /// which is why the host's own poll-failure retry path is unaffected (88 such re-inits in one
+    /// session, no crash).
+    /// </summary>
+    public bool RescanReinitialises => _part != Part.Cpu;
 
     public double MaxRateHz => _part switch
     {
@@ -384,7 +395,7 @@ public sealed class LhmProvider : ISensorProvider
         foreach (var hw in AllHardware().Where(IsGpu))
         {
             string id = hw.Identifier.ToString();
-            int idx = GpuIndexSpace.IndexForLhm(hw.Name, hw.HardwareType == HardwareType.GpuNvidia, out bool matched);
+            int idx = GpuIndexSpace.IndexForLhm(id, hw.Name, hw.HardwareType == HardwareType.GpuNvidia, out bool matched);
             _gpuIndex[id] = idx;
             if (matched) _gpuOwnedByNvml.Add(id);
 

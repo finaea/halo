@@ -35,9 +35,28 @@ public sealed class ProviderHost : IDisposable
     /// Handle a <c>rescan</c> command: every provider whose Initialize enumerates hardware is
     /// woken and re-initialised on its own thread, so a GPU, fan channel or volume that appeared
     /// since start-up gets registered without restarting the collector. Returns how many were
-    /// asked (the work itself happens asynchronously on the provider threads).
+    /// asked (the work itself happens asynchronously on the provider threads), or -1 when the
+    /// command was ignored as a repeat.
+    ///
+    /// Repeats inside <see cref="RescanDebounce"/> are dropped. Re-opening a
+    /// LibreHardwareMonitor <c>Computer</c> is not free and not entirely robust (see
+    /// <see cref="Providers.LhmProvider.RescanReinitialises"/>), and nothing a user can plug in
+    /// appears twice in a few seconds — so a held-down button must not become a re-open storm.
     /// </summary>
-    public int Rescan() => _runners.Count(r => r.RequestRescan());
+    public int Rescan()
+    {
+        lock (_rescanLock)
+        {
+            var now = DateTime.UtcNow;
+            if (now - _lastRescan < RescanDebounce) return -1;
+            _lastRescan = now;
+        }
+        return _runners.Count(r => r.RequestRescan());
+    }
+
+    private static readonly TimeSpan RescanDebounce = TimeSpan.FromSeconds(10);
+    private readonly object _rescanLock = new();
+    private DateTime _lastRescan = DateTime.MinValue;
 
     public void Dispose()
     {
