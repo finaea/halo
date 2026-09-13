@@ -31,11 +31,12 @@ public static class LatencyPanel
 
         // ROW 1 — headline PC latency the overlay's way: continuous, ping/marker-based,
         // starting at ②a (input enters the game). = queue wait + render + display.
-        p.Elements.Add(new TextEl { Text = c => c.Label("pclat", "PC LAT:"), Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", AbsY = 30, FixedH = 11 });
+        p.Elements.Add(new TextEl { Text = c => c.Label("pclat", "PC LAT:"), VisibleWhen = c => c.Shows("pclat"), Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", AbsY = 30, FixedH = 11 });
         p.Elements.Add(new TextEl
         {
             Text = c => IsIdle(c) || PcLatency(c) <= 0 ? "N/A" : $"{ValueFormat.Int0(PcLatency(c))}ms",
             ColorFn = c => !IsIdle(c) && PcLatency(c) > 0 ? CpuRamPanelImpl.WarnColor(PcLatency(c), c.Warn("pclat")) : "inactiveButton",
+            VisibleWhen = c => c.Shows("pclat"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
@@ -45,10 +46,11 @@ public static class LatencyPanel
         // ROW 2 — the three components that sum to ROW 1 (queue + render + display), on a pill.
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "QUEUE —" : $"QUEUE {ValueFormat.Int0(Comp(c, MetricNames.LatencyQueueMs))}",
+            Text = c => IsIdle(c) ? $"{c.Label("queue", "QUEUE")} —" : $"{c.Label("queue", "QUEUE")} {ValueFormat.Int0(Comp(c, MetricNames.LatencyQueueMs))}",
+            VisibleWhen = c => c.Shows("queue"),
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
-            Color = "text2",
+            ColorFn = c => c.Color("queue", "text2"),
             SolidColor = "solidLabel",
             SolidW = t.ContentWidth,
             SolidH = 11,
@@ -57,19 +59,21 @@ public static class LatencyPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "REND —" : $"REND {ValueFormat.Int0(Comp(c, MetricNames.LatencyRenderMs))}",
+            Text = c => IsIdle(c) ? $"{c.Label("render", "REND")} —" : $"{c.Label("render", "REND")} {ValueFormat.Int0(Comp(c, MetricNames.LatencyRenderMs))}",
+            VisibleWhen = c => c.Shows("render"),
             Style = TextStyle.Text8,
             Align = TextAlign.Center,
-            Color = "text2",
+            ColorFn = c => c.Color("render", "text2"),
             SameRow = true,
             FixedH = 11,
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "DISP —" : $"DISP {ValueFormat.Int0(Comp(c, MetricNames.FpsDisplayLatencyMs))}",
+            Text = c => IsIdle(c) ? $"{c.Label("display", "DISP")} —" : $"{c.Label("display", "DISP")} {ValueFormat.Int0(Comp(c, MetricNames.FpsDisplayLatencyMs))}",
+            VisibleWhen = c => c.Shows("display"),
             Style = TextStyle.Text8,
             Align = TextAlign.Right,
-            Color = "text2",
+            ColorFn = c => c.Color("display", "text2"),
             SameRow = true,
             FixedH = 11,
         });
@@ -77,10 +81,11 @@ public static class LatencyPanel
         // ROW 3 — PresentMon click-to-photon + input-to-photon references, on a pill.
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) || !c.Metrics.TryValue(MetricNames.LatencyClickMs, out double v, 10) ? "CLICK —" : $"CLICK {ValueFormat.Int0(v)}ms",
+            Text = c => IsIdle(c) || !c.Metrics.TryValue(MetricNames.LatencyClickMs, out double v, 10) ? $"{c.Label("click", "CLICK")} —" : $"{c.Label("click", "CLICK")} {ValueFormat.Int0(v)}ms",
+            VisibleWhen = c => c.Shows("click"),
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
-            Color = "text2",
+            ColorFn = c => c.Color("click", "text2"),
             SolidColor = "solidLabel",
             SolidW = t.ContentWidth,
             SolidH = 11,
@@ -89,16 +94,17 @@ public static class LatencyPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "INPUT —" : $"INPUT {ValueFormat.Int0(c.Metrics.Value(MetricNames.LatencyAllInputMs))}ms",
+            Text = c => IsIdle(c) ? $"{c.Label("input", "INPUT")} —" : $"{c.Label("input", "INPUT")} {ValueFormat.Int0(c.Metrics.Value(MetricNames.LatencyAllInputMs))}ms",
+            VisibleWhen = c => c.Shows("input"),
             Style = TextStyle.Text8,
             Align = TextAlign.Right,
-            Color = "text2",
+            ColorFn = c => c.Color("input", "text2"),
             SameRow = true,
             FixedH = 11,
         });
 
         // DLSS: version + loaded features
-        p.Elements.Add(new TextEl { Text = _ => "DLSS:", Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", FixedH = 11, Advance = 2 });
+        p.Elements.Add(new TextEl { Text = c => c.Label("dlss", "DLSS:"), VisibleWhen = c => c.Shows("dlss"), Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", FixedH = 11, Advance = 2 });
         p.Elements.Add(new TextEl
         {
             Text = c =>
@@ -112,16 +118,17 @@ public static class LatencyPanel
                 string ver = c.Metrics.Text(MetricNames.DlssVersion);
                 return ver.Length > 0 ? $"{ver} · {feats}" : feats;
             },
+            VisibleWhen = c => c.Shows("dlss"),
             Style = TextStyle.Text8,
             Align = TextAlign.Right,
-            Color = "text2",
+            ColorFn = c => c.Color("dlss", "text2"),
             WidthClip = 130,
             SameRow = true,
             FixedH = 11,
         });
 
         // MODEL: Transformer/CNN + override-vs-game origin
-        p.Elements.Add(new TextEl { Text = _ => "MODEL:", Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", FixedH = 11, Advance = 1 });
+        p.Elements.Add(new TextEl { Text = c => c.Label("model", "MODEL:"), VisibleWhen = c => c.Shows("model"), Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", FixedH = 11, Advance = 1 });
         p.Elements.Add(new TextEl
         {
             Text = c =>
@@ -130,16 +137,17 @@ public static class LatencyPanel
                 string m = c.Metrics.Text(MetricNames.DlssModel);
                 return m.Length > 0 ? m : "—";
             },
+            VisibleWhen = c => c.Shows("model"),
             Style = TextStyle.Text8,
             Align = TextAlign.Right,
-            Color = "text2",
+            ColorFn = c => c.Color("model", "text2"),
             WidthClip = 130,
             SameRow = true,
             FixedH = 11,
         });
 
         // FRAME GEN: effective multiplier
-        p.Elements.Add(new TextEl { Text = _ => "FRAME GEN:", Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", FixedH = 11, Advance = 1 });
+        p.Elements.Add(new TextEl { Text = c => c.Label("framegen", "FRAME GEN:"), VisibleWhen = c => c.Shows("framegen"), Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", FixedH = 11, Advance = 1 });
         p.Elements.Add(new TextEl
         {
             Text = c =>
@@ -150,26 +158,30 @@ public static class LatencyPanel
                 if (ratio > 1.15) return $"{ValueFormat.Fixed(ratio, 1)}×";
                 return fgLoaded ? "loaded · 1.0×" : "off";
             },
-            ColorFn = c => !IsIdle(c) && FgMult(c) > 1.15 ? "activeTitle" : "text2",
+            ColorFn = c => !IsIdle(c) && FgMult(c) > 1.15 ? "activeTitle" : c.Color("framegen", "text2"),
+            VisibleWhen = c => c.Shows("framegen"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
             FixedH = 11,
         });
 
-        // PCL sparkline (autoscaled, 5 Hz)
+        // PCL sparkline (autoscaled), time-bucketed over graph.historyS
         p.Elements.Add(new GraphEl
         {
             Advance = 4,
             BgColor = "emptyBar",
             Start = GraphStart.Left,
-            SampleRateHz = 5,
+            H = ctx.GraphHeight,
+            HistoryS = ctx.GraphHistoryS,
+            Style = ctx.GraphStyle,
+            VisibleWhen = c => c.Graphs("pclat"),
             Series =
             {
                 new GraphSeries
                 {
-                    Color = "histogram",
-                    Ring = new HistoryRing(188),
+                    Color = ctx.Color("pclat", "histogram"),
+                    Ring = ctx.NewRing(),
                     FixedMax = null,
                     Sample = c => PcLatency(c),
                 },
@@ -184,14 +196,12 @@ public static class LatencyPanel
     private static double Comp(PanelContext c, string metric)
         => c.Metrics.TryValue(metric, out double v, maxAgeS: 3) ? v : 0;
 
-    /// <summary>Overlay-equivalent PC latency, continuous over ping-tagged frames, starting at
-    /// ②a = queue wait (input post→consume) + render (consume→present) + display (P2D).
-    /// Requires at least the render component; queue/display add on when present.</summary>
+    /// <summary>Overlay-equivalent PC latency = queue wait + render + display, summed by the
+    /// collector and published as <c>latency.pc.ms</c> (ticket 02). The panel used to add the
+    /// three components up itself, which meant two places could disagree about what "PC LAT"
+    /// means and only this one applied a staleness rule.</summary>
     private static double PcLatency(PanelContext c)
-    {
-        if (!c.Metrics.TryValue(MetricNames.LatencyRenderMs, out double render, maxAgeS: 3) || render <= 0) return 0;
-        return Comp(c, MetricNames.LatencyQueueMs) + render + Comp(c, MetricNames.FpsDisplayLatencyMs);
-    }
+        => c.Metrics.TryValue(MetricNames.LatencyPcMs, out double v, maxAgeS: 3) ? v : 0;
 
     /// <summary>Frame-gen multiplier = displayed rate ÷ true rendered (pre-FG) rate from PCL
     /// simulation markers; falls back to PresentMon's sim-pacing ratio when render rate absent.</summary>

@@ -54,7 +54,7 @@ public static class DrivesPanel
                 Style = TextStyle.Bold8,
                 Align = TextAlign.Center,
                 X = t.CenterAlign,
-                Color = "text",
+                ColorFn = c => c.Color($"label.{d}", "text"),
                 WidthClip = 125,             // ContentWidth-65
                 FixedH = 11,
                 Advance = 0,                 // pitch (37) carried by prevBottom; first drive => TopMarginFormula
@@ -63,11 +63,12 @@ public static class DrivesPanel
             {
                 // elevated-only sensor: on failure show "--°C" in text2 rather than hiding the row
                 Text = c => c.Metrics.TryValue(MetricNames.DriveTempC(d), out double tv)
-                    ? $"{ValueFormat.Int0(tv)}°C"
-                    : "--°C",
+                    ? c.TempText(tv)
+                    : "--" + c.TempUnit,
                 ColorFn = c => c.Metrics.TryValue(MetricNames.DriveTempC(d), out double tv)
-                    ? CpuRamPanelImpl.WarnColor(tv, c.Warn("temp"))
+                    ? CpuRamPanelImpl.WarnColor(tv, c.Warn($"temp.{d}"))
                     : "text2",
+                VisibleWhen = c => c.Shows($"temp.{d}") && c.Shows("temp"),
                 Style = TextStyle.Text8,
                 Align = TextAlign.Right,
                 SameRow = true,
@@ -83,20 +84,22 @@ public static class DrivesPanel
                     double total = c.Metrics.Value(MetricNames.DriveTotalB(d));
                     return free
                         ? $"Free: {ValueFormat.AutoScale(total - used)}B"
-                        : $"Used: {ValueFormat.AutoScale(used)}B";
+                        : $"{c.Label("used", "Used:")} {ValueFormat.AutoScale(used)}B";
                 },
+                VisibleWhen = c => c.Shows("used"),
                 Style = TextStyle.Bold8,
                 Align = TextAlign.Left,
-                Color = "text",
+                ColorFn = c => c.Color("used", "text"),
                 FixedH = 11,
                 Advance = 0,
             });
             p.Elements.Add(new TextEl
             {
-                Text = c => $"Total: {ValueFormat.AutoScale(c.Metrics.Value(MetricNames.DriveTotalB(d)))}B",
+                Text = c => $"{c.Label("total", "Total:")} {ValueFormat.AutoScale(c.Metrics.Value(MetricNames.DriveTotalB(d)))}B",
+                VisibleWhen = c => c.Shows("total"),
                 Style = TextStyle.Bold8,
                 Align = TextAlign.Right,
-                Color = "text",
+                ColorFn = c => c.Color("total", "text"),
                 SameRow = true,
                 FixedH = 11,
             });
@@ -115,8 +118,9 @@ public static class DrivesPanel
                     double total = c.Metrics.Value(MetricNames.DriveTotalB(d));
                     double pct = total > 0 ? c.Metrics.Value(MetricNames.DriveUsedB(d)) * 100 / total : 0;
                     var warn = c.Warn("used");
-                    return warn.Length > 0 && pct >= warn[^1] ? "barWarn" : "bar";
+                    return warn.Length > 0 && pct >= warn[^1] ? "barWarn" : c.Color($"used.{d}", "bar");
                 },
+                VisibleWhen = c => c.Shows("used") || c.Shows("total"),
                 Advance = 0,
             });
 
@@ -128,6 +132,7 @@ public static class DrivesPanel
                 Align = TextAlign.Left,
                 X = t.ContentMargin,
                 ColorFn = c => c.Metrics.Value(MetricNames.DriveWriteBps(d)) > 0 ? "red" : "inactiveButton",
+                VisibleWhen = c => c.Shows("write"),
                 FixedH = 14,
                 Advance = 0,
             });
@@ -138,6 +143,7 @@ public static class DrivesPanel
                 Align = TextAlign.Right,
                 X = t.RightAlign,
                 ColorFn = c => c.Metrics.Value(MetricNames.DriveReadBps(d)) > 0 ? "red" : "inactiveButton",
+                VisibleWhen = c => c.Shows("read"),
                 SameRow = true,
                 FixedH = 14,
             });
@@ -151,6 +157,7 @@ public static class DrivesPanel
                 Align = TextAlign.Left,
                 X = t.ContentMargin + 25,    // 32
                 Color = "text2",
+                VisibleWhen = c => c.Shows("write"),
                 SameRow = true,
                 SameRowOffset = 2,
                 FixedH = 10,
@@ -162,20 +169,21 @@ public static class DrivesPanel
                 Align = TextAlign.Right,
                 X = t.RightAlign - 25,       // 172
                 Color = "text2",
+                VisibleWhen = c => c.Shows("read"),
                 SameRow = true,
                 FixedH = 10,
             });
         }
 
         // ---- Bottom shared graphs: write history (left half) / read history (right half) ----
-        // One series per drive; all "histogram" (no per-drive Theme accent token); 5 Hz, autoscale.
+        // One series per drive; all "histogram" (no per-drive Theme accent token), autoscale.
         var writeSeries = new List<GraphSeries>();
         var readSeries = new List<GraphSeries>();
         foreach (char letter in letters)
         {
             char d = letter;
-            writeSeries.Add(new GraphSeries { Color = "histogram", Ring = new HistoryRing(94), Sample = c => c.Metrics.Value(MetricNames.DriveWriteBps(d)) });
-            readSeries.Add(new GraphSeries { Color = "histogram", Ring = new HistoryRing(94), Sample = c => c.Metrics.Value(MetricNames.DriveReadBps(d)) });
+            writeSeries.Add(new GraphSeries { Color = ctx.Color("write", "histogram"), Ring = ctx.NewRing(), Sample = c => c.Metrics.Value(MetricNames.DriveWriteBps(d)) });
+            readSeries.Add(new GraphSeries { Color = ctx.Color("read", "histogram"), Ring = ctx.NewRing(), Sample = c => c.Metrics.Value(MetricNames.DriveReadBps(d)) });
         }
 
         // Either history graph is toggled by its metric setting (metrics.write.graph / read.graph).
@@ -186,10 +194,11 @@ public static class DrivesPanel
         {
             p.Elements.Add(new GraphEl
             {
-                X = t.ContentMargin, W = 94, H = 25,     // StyleHalfLengthGraphLeft: X=7, W=(ContentWidth-2)/2=94
+                X = t.ContentMargin, W = 94, H = ctx.GraphHeight,   // StyleHalfLengthGraphLeft: X=7, W=(ContentWidth-2)/2=94
                 Start = GraphStart.Left,
                 BgColor = "emptyBar",
-                SampleRateHz = 5,
+                HistoryS = ctx.GraphHistoryS,
+                Style = ctx.GraphStyle,
                 Series = writeSeries,
                 Advance = 4,                              // BottomMargin+1
             });
@@ -198,10 +207,11 @@ public static class DrivesPanel
         {
             p.Elements.Add(new GraphEl
             {
-                X = t.ContentMargin + 96, W = 94, H = 25, // StyleHalfLengthGraphRight: X=7+94+2=103
+                X = t.ContentMargin + 96, W = 94, H = ctx.GraphHeight, // StyleHalfLengthGraphRight: X=7+94+2=103
                 Start = GraphStart.Right,
                 BgColor = "emptyBar",
-                SampleRateHz = 5,
+                HistoryS = ctx.GraphHistoryS,
+                Style = ctx.GraphStyle,
                 Series = readSeries,
                 SameRow = showWrite,                      // share the write graph's row when both shown
                 Advance = 4,                              // else lead its own row

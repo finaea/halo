@@ -114,6 +114,26 @@ internal static unsafe partial class Native
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szDevice;
     }
 
+    public const uint MONITORINFOF_PRIMARY = 1;
+    public const uint MONITOR_DEFAULTTONEAREST = 2;
+
+    // Per-monitor DPI (hardware plan H5). The exe manifest declares PerMonitorV2, so these
+    // return the monitor's real DPI instead of the process-wide virtualised 96.
+    public const int MDT_EFFECTIVE_DPI = 0;
+    [DllImport("shcore")] public static extern int GetDpiForMonitor(nint hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+
+    /// <summary>Effective DPI of a monitor, or 96 when shcore is unavailable (Win7-era shells).</summary>
+    public static double MonitorDpi(nint hmonitor)
+    {
+        try
+        {
+            if (GetDpiForMonitor(hmonitor, MDT_EFFECTIVE_DPI, out uint dx, out _) == 0 && dx > 0) return dx;
+        }
+        catch (DllNotFoundException) { }
+        catch (EntryPointNotFoundException) { }
+        return 96;
+    }
+
     // desktop (WorkerW) parenting for "on desktop" z-mode
     [DllImport("user32", CharSet = CharSet.Unicode)] public static extern nint FindWindowW(string? cls, string? name);
     [DllImport("user32", CharSet = CharSet.Unicode)] public static extern nint FindWindowExW(nint parent, nint after, string? cls, string? name);

@@ -19,6 +19,19 @@ public sealed class Panel
     /// panels are pulled forward by the frames-ready event instead of waiting for their tick.</summary>
     public bool HasFrameGraph => _hasFrameGraph ??= Elements.Any(e => e is GraphEl { FrameSample: not null });
 
+    /// <summary>Push a changed graph.historyS / refresh bound into every graph without rebuilding
+    /// the window: the rings resize in place and keep the samples that still fit (R4).</summary>
+    public void ApplyGraphSettings(double historyS, double height, GraphStyle style, double maxRateHz)
+    {
+        foreach (var e in Elements)
+            if (e is GraphEl g)
+            {
+                g.H = height;
+                g.Style = style;
+                g.ApplyHistory(historyS, maxRateHz);
+            }
+    }
+
     public double ComputedHeight { get; private set; }
 
     private readonly List<Element> _visible = new();
@@ -27,8 +40,9 @@ public sealed class Panel
     public bool Update(PanelContext ctx)
     {
         bool dirty = false;
-        foreach (var e in TitleElements)
-            if (e.IsVisible(ctx) && e.Update(ctx)) dirty = true;
+        if (ctx.Theme.ShowTitle)
+            foreach (var e in TitleElements)
+                if (e.IsVisible(ctx) && e.Update(ctx)) dirty = true;
         foreach (var e in Elements)
             if (e.IsVisible(ctx) && e.Update(ctx)) dirty = true;
         return dirty;
@@ -38,6 +52,9 @@ public sealed class Panel
     public double Layout(RenderContext rc, PanelContext ctx)
     {
         var theme = rc.Theme;
+        // showTitle = false drops the title band, so every row (including the AbsY-anchored ones
+        // the skins use for their first lines) moves up by the band's height.
+        double shift = theme.ContentShiftY;
 
         foreach (var e in TitleElements)
         {
@@ -47,29 +64,40 @@ public sealed class Panel
         }
 
         _visible.Clear();
-        foreach (var e in Elements)
-            if (e.IsVisible(ctx)) _visible.Add(e);
 
         double prevY = theme.TopMarginFormula, prevBottom = theme.TopMarginFormula;
         bool first = true;
-        foreach (var e in _visible)
+        // A row is one non-SameRow leader plus the SameRow elements after it. When the user hides
+        // the leader's metric (metrics.<key>.show = false) the next element of that row has to
+        // become the leader, or it would silently join the row above and draw on top of it.
+        double leaderAdvance = 0;
+        bool rowLed = false;
+        foreach (var e in Elements)
         {
+            if (!e.SameRow) { leaderAdvance = e.Advance; rowLed = false; }
+            if (!e.IsVisible(ctx)) continue;
+            _visible.Add(e);
+
             e.Measure(rc, ctx);
             if (e.AbsY != null)
                 e.Y = e.AbsY.Value;
-            else if (e.SameRow)
+            else if (e.SameRow && rowLed)
                 e.Y = prevY + e.SameRowOffset;
             else if (first)
                 e.Y = theme.TopMarginFormula;
             else
-                e.Y = prevBottom + e.Advance;
+                e.Y = prevBottom + (e.SameRow ? leaderAdvance : e.Advance);
             first = false;
+            rowLed = true;
             prevY = e.Y;
             prevBottom = Math.Max(prevBottom, e.Y + e.Height);
             if (!e.SameRow) prevBottom = e.Y + e.Height;
         }
 
-        ComputedHeight = prevBottom + theme.BottomMargin + theme.BgOffset + 2;
+        if (shift != 0)
+            foreach (var e in _visible) e.Y += shift;
+
+        ComputedHeight = prevBottom + shift + theme.BottomMargin + theme.BgOffset + 2;
         return ComputedHeight;
     }
 
@@ -78,23 +106,38 @@ public sealed class Panel
         var theme = rc.Theme;
         DrawBackground(rc, theme, ComputedHeight);
 
-        foreach (var e in TitleElements)
-            if (e.IsVisible(ctx)) e.Draw(rc, ctx);
+        if (theme.ShowTitle)
+            foreach (var e in TitleElements)
+                if (e.IsVisible(ctx)) e.Draw(rc, ctx);
         foreach (var e in _visible)
             e.Draw(rc, ctx);
 
         if (ctx.Stale)
         {
             // per-panel stale badge (plan Â§11): small red dot in the title band corner
-            rc.DC.FillEllipse(new Ellipse(new System.Numerics.Vector2((float)(theme.BgWidth - theme.BgOffset - 6), (float)(theme.BgOffset + 5)), 2.5f, 2.5f),
+            rc.DC.FillEllipse(new Ellipse(new System.Numerics.Vector2((float)(theme.BgWidth - theme.BgOffset - 6), (float)(theme.BgOffset + 5 + theme.ContentShiftY)), 2.5f, 2.5f),
                 rc.Brush(theme.Color("staleBadge")));
         }
     }
 
-    /// <summary>Two-zone card: rounded-top band + rounded-bottom body (StyleBackground shapes).</summary>
+    /// <summary>Two-zone card: rounded-top band + rounded-bottom body (StyleBackground shapes).
+    /// With the title bar hidden there is one zone, rounded on all four corners.</summary>
     private static void DrawBackground(RenderContext rc, Theme theme, double panelH)
     {
         float x = (float)theme.BgOffset, w = (float)theme.BgShapeW, r = (float)theme.CornerRadius;
+
+        if (!theme.ShowTitle)
+        {
+            float h = (float)(panelH - 2 * theme.BgOffset);
+            if (h > 2)
+                rc.DC.FillRoundedRectangle(new RoundedRectangle
+                {
+                    Rect = new Rect(x, (float)theme.BgOffset, w, h),
+                    RadiusX = r,
+                    RadiusY = r,
+                }, rc.Brush(theme.Color("bgBody")));
+            return;
+        }
 
         // top band: y 5..26, rounded top corners, square bottom
         DrawHalfRounded(rc, x, (float)theme.BgOffset, w, (float)theme.TitleZoneH, r, roundTop: true, theme.Color("bgTop"));

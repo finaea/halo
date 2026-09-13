@@ -68,6 +68,7 @@ public static class TopProcPanel
             {
                 Text = nameText,
                 ColorFn = warnColor,
+                VisibleWhen = c => c.Shows("name"),
                 Style = TextStyle.Bold8,
                 Align = TextAlign.Left,
                 WidthClip = 70,
@@ -81,6 +82,7 @@ public static class TopProcPanel
                 p.Elements.Add(new TextEl
                 {
                     Text = c => $"{ValueFormat.Fixed(c.Metrics.Value(MetricNames.TopRamCpuPct(rank, Agg(c))), 1)}%",
+                    VisibleWhen = c => c.Shows("cpu"),
                     Style = TextStyle.Bold8,
                     Align = TextAlign.Center,
                     Color = "text2",
@@ -92,6 +94,7 @@ public static class TopProcPanel
                 {
                     Text = c => $"{ValueFormat.AutoScale(c.Metrics.Value(MetricNames.TopRamB(rank, Agg(c))), 1)}B",
                     ColorFn = warnColor,
+                    VisibleWhen = c => c.Shows("ram"),
                     Style = TextStyle.Bold8,
                     Align = TextAlign.Right,
                     SameRow = true,
@@ -104,6 +107,7 @@ public static class TopProcPanel
                 p.Elements.Add(new TextEl
                 {
                     Text = c => $"{ValueFormat.AutoScale(c.Metrics.Value(MetricNames.TopCpuRamB(rank, Agg(c))), 1)}B",
+                    VisibleWhen = c => c.Shows("ram"),
                     Style = TextStyle.Bold8,
                     Align = TextAlign.Center,
                     Color = "text2",
@@ -115,6 +119,7 @@ public static class TopProcPanel
                 {
                     Text = c => $"{ValueFormat.Fixed(c.Metrics.Value(MetricNames.TopCpuPct(rank, Agg(c))), 1)}%",
                     ColorFn = warnColor,
+                    VisibleWhen = c => c.Shows("cpu"),
                     Style = TextStyle.Bold8,
                     Align = TextAlign.Right,
                     SameRow = true,

@@ -58,10 +58,11 @@ public static class ClockPanel
         p.Elements.Add(new TextEl
         {
             Text = c => ValueFormat.Uptime(c.Metrics.Value(Halo.Metrics.MetricNames.SysUptimeS)),
+            VisibleWhen = c => c.Shows("uptime"),
             Style = TextStyle.Text8,
             Align = TextAlign.Center,
             X = ctx.Theme.CenterAlign - 1,
-            Color = "text2",
+            ColorFn = c => c.Color("uptime", "text2"),
             SolidColor = "solidLabel",
             SolidW = ctx.Theme.ContentWidth,
             SolidH = 12,

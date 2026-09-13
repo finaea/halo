@@ -16,16 +16,24 @@ public sealed class PanelContext
 {
     public required MetricCache Metrics { get; init; }
     public required Theme Theme { get; init; }
-    public required AppSettings Settings { get; init; }
-    public required WidgetInstance Widget { get; init; }
+    // Settings and Widget are re-pointed on an in-place config apply: a reload builds new objects
+    // and a window left holding the old ones would render (and save) stale config.
+    public required AppSettings Settings { get; set; }
+    public required WidgetInstance Widget { get; set; }
 
     /// <summary>Catalog entry for this widget's type; null only for an unknown type.</summary>
     public PanelType? Type { get; init; }
+
+    /// <summary>Fastest useful repaint for this widget (rates plan R2) — also the sampling rate
+    /// the graph rings are sized for.</summary>
+    public double MaxRateHz = PanelRates.CeilingHz;
 
     public Dictionary<string, string> Options => Widget.Options;
 
     public bool Stale;
     public DateTime Now;
+    /// <summary>QPC of this tick. Graph samples are timestamped with it (rates plan R4).</summary>
+    public long NowQpc;
     public long TickIndex;
 
     // ---- options ----
@@ -59,12 +67,18 @@ public sealed class PanelContext
     public bool Graphs(string key)
         => Metric(key)?.Graph ?? Type?.Metric(BaseKey(key))?.GraphDefaultOn ?? true;
 
-    /// <summary>Row label: the user's rename, else the catalog default.</summary>
+    /// <summary>Row label: the user's rename for this exact row, else the rename they set on the
+    /// repeated group ("Core {n}:" applies to every core row), else the catalog default.</summary>
     public string Label(string key, string fallback = "")
+        => UserLabel(key) ?? Type?.Metric(BaseKey(key))?.DefaultLabel ?? fallback;
+
+    /// <summary>The user's label for a row (or its repeat group), or null when they set none.</summary>
+    public string? UserLabel(string key)
     {
-        string? custom = Metric(key)?.Label;
-        if (!string.IsNullOrEmpty(custom)) return custom;
-        return Type?.Metric(BaseKey(key))?.DefaultLabel ?? fallback;
+        if (Metric(key)?.Label is { Length: > 0 } exact) return exact;
+        string b = BaseKey(key);
+        if (b != key && Metric(b)?.Label is { Length: > 0 } group) return group;
+        return null;
     }
 
     /// <summary>Warn thresholds: the user's, else the catalog's defaults, else empty.</summary>
@@ -73,6 +87,46 @@ public sealed class PanelContext
 
     /// <summary>Scale ceiling for a metric (fan max RPM), or the fallback when unset.</summary>
     public double MaxOf(string key, double fallback) => Metric(key)?.Max ?? fallback;
+
+    /// <summary>
+    /// Colour token for a metric row: the widget's own <c>metrics.&lt;key&gt;.color</c> when it set
+    /// one, else the catalog's token. Per-metric overrides are pre-resolved into the widget's
+    /// <see cref="Halo.Widgets.Theme"/> under <c>metric:&lt;key&gt;</c>, so an element still names a
+    /// token and nothing has to carry a Color4 around.
+    /// </summary>
+    public string Color(string key, string fallbackToken)
+    {
+        if (Theme.HasColor("metric:" + key)) return "metric:" + key;
+        string base_ = BaseKey(key);
+        if (base_ != key && Theme.HasColor("metric:" + base_)) return "metric:" + base_;
+        return fallbackToken;
+    }
+
+    // ---- graphs (widget-level settings shared by every graph in the panel) ----
+
+    public double GraphHistoryS => Math.Clamp(Widget.Graph.HistoryS, 10, 600);
+
+    public double GraphHeight => Math.Clamp(Widget.Graph.Height, 4, 200);
+
+    public GraphStyle GraphStyle
+        => string.Equals(Widget.Graph.Style, "filled", StringComparison.OrdinalIgnoreCase)
+            ? Render.GraphStyle.Filled : Render.GraphStyle.Line;
+
+    /// <summary>A ring big enough for this widget's history at its fastest possible tick.</summary>
+    public SampleRing NewRing() => new(GraphEl.CapacityFor(GraphHistoryS, MaxRateHz));
+
+    // ---- formatting ----
+
+    /// <summary>Per-widget temperature unit (appearance.tempUnit). Thresholds stay in °C;
+    /// only the displayed number is converted, at format time.</summary>
+    public bool Fahrenheit => string.Equals(Widget.Appearance?.TempUnit, "F", StringComparison.OrdinalIgnoreCase);
+
+    public double Temp(double celsius) => Fahrenheit ? celsius * 9.0 / 5.0 + 32.0 : celsius;
+
+    public string TempUnit => Fahrenheit ? "°F" : "°C";
+
+    /// <summary>"48°C" / "118°F" for a Celsius reading.</summary>
+    public string TempText(double celsius) => ValueFormat.Int0(Temp(celsius)) + TempUnit;
 
     /// <summary>"rpm.2" → "rpm": repeated rows share one catalog spec.</summary>
     private static string BaseKey(string key)
@@ -208,33 +262,53 @@ public sealed class BarEl : Element
 
 public enum GraphStart { Left, Right }
 
+public enum GraphStyle { Line, Filled }
+
 public sealed class GraphSeries
 {
     public required string Color;
-    public required HistoryRing Ring;
-    /// <summary>Fixed max for scaling; null = autoscale to ring max (min 1).</summary>
+    public required SampleRing Ring;
+    /// <summary>Fixed max for scaling; null = autoscale to the visible window's max.</summary>
     public double? FixedMax;
-    /// <summary>Pull one sample per sample-tick.</summary>
+    /// <summary>Pull one sample per widget tick.</summary>
     public required Func<PanelContext, double> Sample;
+
+    /// <summary>Highest value seen in the column currently being filled — lets the panel skip a
+    /// repaint when a new sample cannot change any drawn pixel.</summary>
+    internal double BucketMax = double.NegativeInfinity;
 }
 
+/// <summary>
+/// A history graph. Columns are <b>time buckets</b>, not sample slots: the visible span is
+/// <see cref="HistoryS"/> seconds and one column covers <c>HistoryS / width</c> seconds, holding
+/// the maximum of whatever landed in it (rates plan R4). That way the span a graph means never
+/// changes when the user moves the refresh slider — before this, history was
+/// "188 px ÷ sample rate" and silently stretched or shrank.
+///
+/// Frame graphs (<see cref="FrameSample"/>) are the exception and stay one bar per frame.
+/// </summary>
 public sealed class GraphEl : Element
 {
+    private static readonly long Qpf = System.Diagnostics.Stopwatch.Frequency;
+
     public double? X, W;
     public double H = 25;
     public GraphStart Start = GraphStart.Right;
     public string? BgColor;                      // e.g. emptyBar for half graphs
     public List<GraphSeries> Series = new();
-    /// <summary>Sampling cadence; Rainformer skins sample 1/s (Update=1000).</summary>
-    public double SampleRateHz = 1;
+    /// <summary>Visible history in seconds (widget setting graph.historyS, 10–600).</summary>
+    public double HistoryS = 40;
+    public GraphStyle Style = GraphStyle.Line;
     /// <summary>When set, samples come from the shared frame ring instead (per-frame graph).</summary>
     public Func<Halo.Metrics.FrameEntry, double>? FrameSample;
     public bool FrameDisplayedOnly;
     /// <summary>Optional per-frame predicate — lane selection by FrameFlags (tap vs resolved).</summary>
     public Func<PanelContext, Halo.Metrics.FrameEntry, bool>? FrameFilter;
 
-    private long _lastSampleTick = -1;
     private bool _dirty = true;
+    private long _lastBucket = long.MinValue;
+    private double _lastWidth = 188;
+    private double[] _cols = [];
 
     public override bool Update(PanelContext ctx)
     {
@@ -248,24 +322,49 @@ public sealed class GraphEl : Element
                 if (FrameDisplayedOnly && (f.Flags & (uint)Halo.Metrics.FrameFlags.Displayed) == 0) continue;
                 if (FrameFilter != null && !FrameFilter(ctx, f)) continue;
                 double v = FrameSample(f);
-                foreach (var s in Series) s.Ring.Add(v);
+                foreach (var s in Series) s.Ring.Add(f.Qpc, v);
                 _dirty = true;
             }
         }
         else
         {
-            // sample on our own cadence, independent of widget tick rate
-            long due = (long)(ctx.Now.Ticks * SampleRateHz / TimeSpan.TicksPerSecond);
-            if (due != _lastSampleTick)
+            // One sample per tick, timestamped: the bucket drawing decides what is visible.
+            long colTicks = ColumnTicks(_lastWidth);
+            long bucket = ctx.NowQpc / colTicks;
+            bool boundary = bucket != _lastBucket;
+            _lastBucket = bucket;
+
+            foreach (var s in Series)
             {
-                _lastSampleTick = due;
-                foreach (var s in Series) s.Ring.Add(s.Sample(ctx));
-                _dirty = true;
+                double v = s.Sample(ctx);
+                s.Ring.Add(ctx.NowQpc, v);
+                if (boundary) s.BucketMax = double.NegativeInfinity;
+                // a sample inside the current column that can't raise it changes no pixel
+                if (v > s.BucketMax) { s.BucketMax = v; _dirty = true; }
             }
+            // crossing a column boundary scrolls every column along, so the image always changes
+            if (boundary) _dirty = true;
         }
         bool d = _dirty;
         _dirty = false;
         return d;
+    }
+
+    private long ColumnTicks(double width) => Math.Max(1, (long)(HistoryS * Qpf / Math.Max(1, width)));
+
+    /// <summary>Ring capacity for a given refresh bound: one sample per tick over the whole
+    /// visible span, plus headroom for a late tick (rates plan R4).</summary>
+    public static int CapacityFor(double historyS, double maxRateHz)
+        => (int)Math.Ceiling(Math.Clamp(historyS, 1, 3600) * Math.Clamp(maxRateHz, 0.5, 64)) + 16;
+
+    /// <summary>Apply a changed graph.historyS / rate in place, keeping the samples that fit.</summary>
+    public void ApplyHistory(double historyS, double maxRateHz)
+    {
+        HistoryS = historyS;
+        if (FrameSample != null) return;         // frame graphs are per-frame, not per-second
+        int cap = CapacityFor(historyS, maxRateHz);
+        foreach (var s in Series) s.Ring.Resize(cap);
+        _dirty = true;
     }
 
     public override void Measure(RenderContext rc, PanelContext ctx) => Height = H;
@@ -275,9 +374,17 @@ public sealed class GraphEl : Element
         var theme = rc.Theme;
         double x = X ?? theme.ContentMargin + 1;
         double w = W ?? theme.ContentWidth - 2;
+        _lastWidth = w;
         if (BgColor != null)
             rc.DC.FillRectangle(new Rect((float)x, (float)Y, (float)w, (float)H), rc.Brush(theme.Color(BgColor)));
 
+        if (FrameSample != null) DrawPerSample(rc, theme, x, w);
+        else DrawBuckets(rc, theme, ctx, x, w);
+    }
+
+    /// <summary>Frame graphs: one bar per frame, newest at the Start edge (unchanged).</summary>
+    private void DrawPerSample(RenderContext rc, Theme theme, double x, double w)
+    {
         foreach (var s in Series)
         {
             int n = s.Ring.Count;
@@ -285,11 +392,10 @@ public sealed class GraphEl : Element
             double max = s.FixedMax ?? Math.Max(1e-9, s.Ring.Max());
             int points = Math.Min(n, (int)w);
             var brush = rc.Brush(theme.Color(s.Color));
-            // newest sample at the Start edge; 1 logical px per sample (Rainmeter Line meter)
             System.Numerics.Vector2? prev = null;
             for (int i = 0; i < points; i++)
             {
-                double v = s.Ring[n - points + i];
+                double v = s.Ring.ValueAt(n - points + i);
                 float px = Start == GraphStart.Right
                     ? (float)(x + w - (points - 1 - i))
                     : (float)(x + (points - 1 - i));
@@ -297,6 +403,68 @@ public sealed class GraphEl : Element
                 var pt = new System.Numerics.Vector2(px, py);
                 if (prev != null) rc.DC.DrawLine(prev.Value, pt, brush, 1.0f);
                 prev = pt;
+            }
+        }
+    }
+
+    /// <summary>Time-bucket drawing: column c covers (now-(c+1)·colSpan, now-c·colSpan], value =
+    /// the max that landed in it, empty column = hold the previous (older) value.</summary>
+    private void DrawBuckets(RenderContext rc, Theme theme, PanelContext ctx, double x, double w)
+    {
+        int cols = Math.Max(1, (int)w);
+        if (_cols.Length < cols) _cols = new double[cols];
+        double colTicks = HistoryS * Qpf / cols;
+        long now = ctx.NowQpc;
+
+        foreach (var s in Series)
+        {
+            int n = s.Ring.Count;
+            if (n == 0) continue;
+
+            for (int i = 0; i < cols; i++) _cols[i] = double.NaN;
+
+            // newest → oldest; the ring is chronological, so the first sample past the window
+            // ends the walk
+            for (int i = n - 1; i >= 0; i--)
+            {
+                var (q, v) = s.Ring[i];
+                long age = now - q;
+                if (age < 0) age = 0;
+                int col = (int)(age / colTicks);
+                if (col >= cols) break;
+                if (double.IsNaN(_cols[col]) || v > _cols[col]) _cols[col] = v;
+            }
+
+            // hold-last: carry an older column's value into the newer, still-empty ones (a 0.5 Hz
+            // metric only lands in roughly one column in nine)
+            double carry = double.NaN;
+            double maxSeen = 0;
+            for (int col = cols - 1; col >= 0; col--)
+            {
+                if (double.IsNaN(_cols[col])) _cols[col] = carry;
+                else carry = _cols[col];
+                if (!double.IsNaN(_cols[col]) && _cols[col] > maxSeen) maxSeen = _cols[col];
+            }
+
+            double max = s.FixedMax ?? Math.Max(1e-9, maxSeen);
+            var brush = rc.Brush(theme.Color(s.Color));
+            System.Numerics.Vector2? prev = null;
+            for (int col = 0; col < cols; col++)
+            {
+                double v = _cols[col];
+                if (double.IsNaN(v)) { prev = null; continue; }
+                float px = Start == GraphStart.Right ? (float)(x + w - col) : (float)(x + col);
+                float py = (float)(Y + H - Math.Clamp(v / max, 0, 1) * H);
+                if (Style == GraphStyle.Filled)
+                {
+                    rc.DC.FillRectangle(new Rect(px, py, 1f, (float)(Y + H - py)), brush);
+                }
+                else
+                {
+                    var pt = new System.Numerics.Vector2(px, py);
+                    if (prev != null) rc.DC.DrawLine(prev.Value, pt, brush, 1.0f);
+                    prev = pt;
+                }
             }
         }
     }

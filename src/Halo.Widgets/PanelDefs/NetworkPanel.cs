@@ -9,6 +9,8 @@ namespace Halo.Widgets.PanelDefs;
 /// and two half-width autoscaling traffic line-graphs (download blue left, upload green right)
 /// with ElegantIcons down/up arrow glyphs overlaid at the graph corners. SSID/Signal rows are
 /// disabled in the source config and intentionally omitted.
+///
+/// The "units" option switches every rate and total between bytes and bits.
 /// </summary>
 public static class NetworkPanel
 {
@@ -23,6 +25,20 @@ public static class NetworkPanel
     private static readonly TextStyle ArrowStyle = new(12, false, "ElegantIcons");
 
     private const string MaxSuffix = MetricNames.MaxSuffix;
+
+    /// <summary>Bits mode keeps the 1024-step AutoScale the rest of the panel uses; only the
+    /// multiplier and the unit change (bytes → bits is ×8).</summary>
+    private static bool Bits(PanelContext c) => c.Option("units") == "bits";
+
+    private static string Rate(PanelContext c, double bytesPerSecond)
+        => Bits(c)
+            ? ValueFormat.AutoScale(bytesPerSecond * 8, 1) + "bit/s"
+            : ValueFormat.AutoScale(bytesPerSecond, 1) + "B/s";
+
+    private static string Total(PanelContext c, double bytes)
+        => Bits(c)
+            ? ValueFormat.AutoScale(bytes * 8, 1) + "bit"
+            : ValueFormat.AutoScale(bytes, 1) + "B";
 
     public static Panel Build(PanelContext ctx)
     {
@@ -40,105 +56,136 @@ public static class NetworkPanel
         });
 
         // External IP row (styleFirstLineText → Bold8/text). Anchors the content column at Y=32.
-        p.Elements.Add(new TextEl { Text = _ => "External IP:", Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", FixedH = 11 });
+        p.Elements.Add(new TextEl
+        {
+            Text = c => c.Label("ipExternal", "External IP:"),
+            VisibleWhen = c => c.Shows("ipExternal"),
+            Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", FixedH = 11,
+        });
         p.Elements.Add(new TextEl
         {
             Text = c => c.Metrics.Text(MetricNames.NetIpExternal, "N/A"),
+            VisibleWhen = c => c.Shows("ipExternal"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
-            Color = "text",
+            ColorFn = c => c.Color("ipExternal", "text"),
             WidthClip = 120,
             SameRow = true,
             FixedH = 11,
         });
 
         // Internal IP row (styleFirstLineText → Bold8/text), 1px gap (RowSpacing).
-        p.Elements.Add(new TextEl { Text = _ => "Internal IP:", Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", FixedH = 11, Advance = t.RowSpacing });
+        p.Elements.Add(new TextEl
+        {
+            Text = c => c.Label("ipInternal", "Internal IP:"),
+            VisibleWhen = c => c.Shows("ipInternal"),
+            Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", FixedH = 11, Advance = t.RowSpacing,
+        });
         p.Elements.Add(new TextEl
         {
             Text = c => c.Metrics.Text(MetricNames.NetIpInternal, "N/A"),
+            VisibleWhen = c => c.Shows("ipInternal"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
-            Color = "text",
+            ColorFn = c => c.Color("ipInternal", "text"),
             WidthClip = 120,
             SameRow = true,
             FixedH = 11,
         });
 
         // ⏷SPEED⏶ row: download rate (left, full-width solidLabel pill, stylePrimaryText → Bold8/text),
-        // centred SPEED label (7pt/text), upload rate (right, Bold8/text). AutoScale F1 + "B/s".
+        // centred SPEED label (7pt/text), upload rate (right, Bold8/text).
         p.Elements.Add(new TextEl
         {
-            Text = c => ValueFormat.AutoScale(c.Metrics.Value(MetricNames.NetDownBps), 1) + "B/s",
+            Text = c => Rate(c, c.Metrics.Value(MetricNames.NetDownBps)),
+            VisibleWhen = c => c.Shows("down"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Left,
-            Color = "text",
+            ColorFn = c => c.Color("down", "text"),
             SolidColor = "solidLabel",
             SolidW = t.ContentWidth,
             SolidH = 11,
             FixedH = 11,
             Advance = t.RowSpacing,
         });
-        p.Elements.Add(new TextEl { Text = _ => SpeedLabel, Style = CenterLabel, Align = TextAlign.Center, Color = "text", SameRow = true, FixedH = 11 });
         p.Elements.Add(new TextEl
         {
-            Text = c => ValueFormat.AutoScale(c.Metrics.Value(MetricNames.NetUpBps), 1) + "B/s",
+            Text = _ => SpeedLabel, Style = CenterLabel, Align = TextAlign.Center, Color = "text",
+            VisibleWhen = c => c.Shows("down") || c.Shows("up"),
+            SameRow = true, FixedH = 11,
+        });
+        p.Elements.Add(new TextEl
+        {
+            Text = c => Rate(c, c.Metrics.Value(MetricNames.NetUpBps)),
+            VisibleWhen = c => c.Shows("up"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
-            Color = "text",
+            ColorFn = c => c.Color("up", "text"),
             SameRow = true,
             FixedH = 11,
         });
 
-        // ⏷PEAK⏶ row: session peak down/up (styleSecondaryText → Text8/text2). AutoScale F1 + "B/s".
+        // ⏷PEAK⏶ row: session peak down/up (styleSecondaryText → Text8/text2).
         p.Elements.Add(new TextEl
         {
-            Text = c => ValueFormat.AutoScale(c.Metrics.Value(MetricNames.NetDownBps + MaxSuffix), 1) + "B/s",
+            Text = c => Rate(c, c.Metrics.Value(MetricNames.NetDownBps + MaxSuffix)),
+            VisibleWhen = c => c.Shows("peak"),
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
-            Color = "text2",
+            ColorFn = c => c.Color("peak", "text2"),
             SolidColor = "solidLabel",
             SolidW = t.ContentWidth,
             SolidH = 11,
             FixedH = 11,
             Advance = t.RowSpacing,
         });
-        p.Elements.Add(new TextEl { Text = _ => PeakLabel, Style = CenterLabel, Align = TextAlign.Center, Color = "text", SameRow = true, FixedH = 11 });
         p.Elements.Add(new TextEl
         {
-            Text = c => ValueFormat.AutoScale(c.Metrics.Value(MetricNames.NetUpBps + MaxSuffix), 1) + "B/s",
+            Text = _ => PeakLabel, Style = CenterLabel, Align = TextAlign.Center, Color = "text",
+            VisibleWhen = c => c.Shows("peak"), SameRow = true, FixedH = 11,
+        });
+        p.Elements.Add(new TextEl
+        {
+            Text = c => Rate(c, c.Metrics.Value(MetricNames.NetUpBps + MaxSuffix)),
+            VisibleWhen = c => c.Shows("peak"),
             Style = TextStyle.Text8,
             Align = TextAlign.Right,
-            Color = "text2",
+            ColorFn = c => c.Color("peak", "text2"),
             SameRow = true,
             FixedH = 11,
         });
 
-        // ⏷SUM⏶ row: cumulative session totals (styleSecondaryText → Text8/text2). AutoScale F1 + "B".
+        // ⏷SUM⏶ row: cumulative session totals (styleSecondaryText → Text8/text2).
         p.Elements.Add(new TextEl
         {
-            Text = c => ValueFormat.AutoScale(c.Metrics.Value(MetricNames.NetDownTotalB), 1) + "B",
+            Text = c => Total(c, c.Metrics.Value(MetricNames.NetDownTotalB)),
+            VisibleWhen = c => c.Shows("sum"),
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
-            Color = "text2",
+            ColorFn = c => c.Color("sum", "text2"),
             SolidColor = "solidLabel",
             SolidW = t.ContentWidth,
             SolidH = 11,
             FixedH = 11,
             Advance = t.RowSpacing,
         });
-        p.Elements.Add(new TextEl { Text = _ => SumLabel, Style = CenterLabel, Align = TextAlign.Center, Color = "text", SameRow = true, FixedH = 11 });
         p.Elements.Add(new TextEl
         {
-            Text = c => ValueFormat.AutoScale(c.Metrics.Value(MetricNames.NetUpTotalB), 1) + "B",
+            Text = _ => SumLabel, Style = CenterLabel, Align = TextAlign.Center, Color = "text",
+            VisibleWhen = c => c.Shows("sum"), SameRow = true, FixedH = 11,
+        });
+        p.Elements.Add(new TextEl
+        {
+            Text = c => Total(c, c.Metrics.Value(MetricNames.NetUpTotalB)),
+            VisibleWhen = c => c.Shows("sum"),
             Style = TextStyle.Text8,
             Align = TextAlign.Right,
-            Color = "text2",
+            ColorFn = c => c.Color("sum", "text2"),
             SameRow = true,
             FixedH = 11,
         });
 
-        // Two half-width traffic graphs (Line meters), 1 Hz, autoscaling (no FixedMax).
+        // Two half-width traffic graphs (Line meters), autoscaling (no FixedMax).
         double halfW = (t.ContentWidth - 14) / 2;            // 88
         double dlX = t.ContentMargin;                        // 7
         double ulX = t.ContentMargin + halfW + 14;           // 109
@@ -148,14 +195,16 @@ public static class NetworkPanel
         {
             X = dlX,
             W = halfW,
-            H = 25,
+            H = ctx.GraphHeight,
             Start = GraphStart.Left,
             BgColor = "emptyBar",
-            SampleRateHz = 5,
+            HistoryS = ctx.GraphHistoryS,
+            Style = ctx.GraphStyle,
+            VisibleWhen = c => c.Graphs("down"),
             Advance = t.BottomMargin - 2,
             Series =
             {
-                new GraphSeries { Color = "netDown", Ring = new HistoryRing((int)halfW), Sample = c => c.Metrics.Value(MetricNames.NetDownBps) },
+                new GraphSeries { Color = ctx.Color("down", "netDown"), Ring = ctx.NewRing(), Sample = c => c.Metrics.Value(MetricNames.NetDownBps) },
             },
         });
         // upload graph (green, GraphStart Right), same row, 14px right of the download graph.
@@ -163,14 +212,17 @@ public static class NetworkPanel
         {
             X = ulX,
             W = halfW,
-            H = 25,
+            H = ctx.GraphHeight,
             Start = GraphStart.Right,
             BgColor = "emptyBar",
-            SampleRateHz = 5,
+            HistoryS = ctx.GraphHistoryS,
+            Style = ctx.GraphStyle,
+            VisibleWhen = c => c.Graphs("up"),
             SameRow = true,
+            Advance = t.BottomMargin - 2,
             Series =
             {
-                new GraphSeries { Color = "netUp", Ring = new HistoryRing((int)halfW), Sample = c => c.Metrics.Value(MetricNames.NetUpBps) },
+                new GraphSeries { Color = ctx.Color("up", "netUp"), Ring = ctx.NewRing(), Sample = c => c.Metrics.Value(MetricNames.NetUpBps) },
             },
         });
 
@@ -181,7 +233,8 @@ public static class NetworkPanel
             Text = _ => "7",   // ElegantIcons glyph 0x37 (down arrow)
             Style = ArrowStyle,
             Align = TextAlign.Left,
-            ColorFn = c => c.Metrics.Value(MetricNames.NetDownBps) > 0 ? "netDown" : "inactiveButton",
+            ColorFn = c => c.Metrics.Value(MetricNames.NetDownBps) > 0 ? c.Color("down", "netDown") : "inactiveButton",
+            VisibleWhen = c => c.Graphs("down") || c.Graphs("up"),
             SameRow = true,
             SameRowOffset = -3,
             FixedH = 14,
@@ -191,7 +244,8 @@ public static class NetworkPanel
             Text = _ => "6",   // ElegantIcons glyph 0x36 (up arrow)
             Style = ArrowStyle,
             Align = TextAlign.Right,
-            ColorFn = c => c.Metrics.Value(MetricNames.NetUpBps) > 0 ? "netUp" : "inactiveButton",
+            ColorFn = c => c.Metrics.Value(MetricNames.NetUpBps) > 0 ? c.Color("up", "netUp") : "inactiveButton",
+            VisibleWhen = c => c.Graphs("down") || c.Graphs("up"),
             SameRow = true,
             FixedH = 14,
         });

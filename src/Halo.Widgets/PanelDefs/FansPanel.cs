@@ -46,11 +46,13 @@ public static class FansPanel
             {
                 Text = c =>
                 {
-                    string custom = c.Metric(key)?.Label ?? "";
-                    if (custom.Length > 0) return custom;
+                    // the catalog default ("Fan {n}") is only reached when the chip publishes no
+                    // name, so ask for the user's rename explicitly rather than via Label()
+                    if (c.UserLabel(key) is { Length: > 0 } custom) return custom.Replace("{n}", ch.ToString());
                     string sensorName = c.Metrics.Text(MetricNames.FanName(ch));
                     return sensorName.Length > 0 ? sensorName : $"FAN {ch}";
                 },
+                VisibleWhen = c => c.Shows(key),
                 Style = TextStyle.Bold8,
                 Align = TextAlign.Left,
                 Color = "text",
@@ -61,6 +63,7 @@ public static class FansPanel
             p.Elements.Add(new TextEl
             {
                 Text = c => c.Metrics.TryValue(rpmMetric, out double rpm) ? $"{ValueFormat.Int0(rpm)} rpm" : "N/A",
+                VisibleWhen = c => c.Shows(key),
                 Style = TextStyle.Text8,
                 Align = TextAlign.Center,
                 Color = "text2",
@@ -71,6 +74,7 @@ public static class FansPanel
             p.Elements.Add(new TextEl
             {
                 Text = c => c.Metrics.TryValue(rpmMetric, out _) ? $"{ValueFormat.Int0(Percent(c, ch, key))}%" : "N/A",
+                VisibleWhen = c => c.Shows(key),
                 Style = TextStyle.Bold8,
                 Align = TextAlign.Right,
                 Color = "text",
@@ -81,7 +85,8 @@ public static class FansPanel
             p.Elements.Add(new BarEl
             {
                 Value = c => c.Metrics.TryValue(rpmMetric, out _) ? Percent(c, ch, key) / 100 : 0,
-                FillColorFn = c => CpuRamPanelImpl.Over(Percent(c, ch, key), c.Warn(key)) ? "barWarn" : "bar",
+                VisibleWhen = c => c.Shows(key),
+                FillColorFn = c => CpuRamPanelImpl.Over(Percent(c, ch, key), c.Warn(key)) ? "barWarn" : c.Color(key, "bar"),
                 Advance = 0,
             });
         }

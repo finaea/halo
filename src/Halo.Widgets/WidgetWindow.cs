@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Halo.Shared;
 using Halo.Shared.Config;
+using Halo.Shared.Panels;
 using Halo.Widgets.Render;
 using Vortice.Direct2D1;
 using Vortice.DirectComposition;
@@ -24,16 +25,34 @@ public sealed unsafe class WidgetWindow : IDisposable
     private delegate nint WndProcDelegate(nint hwnd, uint msg, nuint wParam, nint lParam);
 
     public nint Hwnd { get; private set; }
-    public WidgetInstance Config { get; }
+    public WidgetInstance Config { get; private set; }
     public Panel Panel { get; }
     public PanelContext Ctx { get; }
+
+    /// <summary>Fastest useful repaint for this widget: the highest nominal rate among its
+    /// metrics, floor 1 Hz, ceiling 10 Hz (rates plan R2). Event-driven panels don't get a
+    /// slider at all — they repaint on the frames-ready event with a fixed fallback tick.</summary>
+    public double MaxRateHz { get; private set; } = PanelRates.CeilingHz;
+
     /// <summary>Repaint rate. The upper bound is the fastest data source in this panel, so a
     /// slider can never promise data the collector does not produce (rates plan R2).</summary>
-    public double RateHz => Math.Clamp(Config.RateHz, MinRateHz, MaxRateHz);
+    public double RateHz => Ctx.Type?.EventDriven == true
+        ? PanelRates.EventDrivenFallbackHz
+        : PanelRates.Clamp(Config.RateHz, MaxRateHz);
 
-    public const double MinRateHz = 0.5;
-    public const double MaxRateHz = 10;
     public long NextDueQpc;
+
+    /// <summary>The monitor this widget is currently drawn on — its own when that monitor
+    /// exists, otherwise the fallback the packer placed it on.</summary>
+    public MonitorInfo HostMonitor { get; private set; } = MonitorInfo.None;
+
+    /// <summary>True while the configured monitor is missing. The position and scale used are
+    /// then in memory only; widgets.json still holds the real layout (hardware plan H6).</summary>
+    public bool Displaced { get; private set; }
+
+    private int? _packedX, _packedY;
+
+    public (int W, int H) PixelSize => (_pxW, _pxH);
 
     private readonly Dx _dx;
     private readonly App _app;
@@ -43,6 +62,7 @@ public sealed unsafe class WidgetWindow : IDisposable
     private ID2D1DeviceContext? _d2dDc;
     private RenderContext? _rc;
     private int _pxW, _pxH;
+    private float _dcDpi;
     private bool _needsFullRedraw = true;
 
     public bool IsDragging => _dragging;
@@ -52,13 +72,18 @@ public sealed unsafe class WidgetWindow : IDisposable
     private POINT _dragStartCursor;
     private int _dragStartX, _dragStartY;
 
-    public WidgetWindow(App app, Dx dx, WidgetInstance config, Panel panel, PanelContext ctx)
+    public WidgetWindow(App app, Dx dx, WidgetInstance config, Panel panel, PanelContext ctx,
+        MonitorInfo monitor, bool displaced, double maxRateHz)
     {
         _app = app;
         _dx = dx;
         Config = config;
         Panel = panel;
         Ctx = ctx;
+        HostMonitor = monitor;
+        Displaced = displaced;
+        MaxRateHz = maxRateHz;
+        ctx.MaxRateHz = maxRateHz;
 
         EnsureClass();
         int ex = WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
@@ -95,6 +120,7 @@ public sealed unsafe class WidgetWindow : IDisposable
         _dx.CompDevice.CreateTargetForHwnd(Hwnd, false, out IDCompositionTarget target).CheckError();
         _compTarget = target;
         _compVisual = _dx.CompDevice.CreateVisual();
+        _dcDpi = 0;
         _needsFullRedraw = true;
     }
 
@@ -152,13 +178,16 @@ public sealed unsafe class WidgetWindow : IDisposable
     public bool Tick()
     {
         Ctx.Now = DateTime.Now;
+        Ctx.NowQpc = System.Diagnostics.Stopwatch.GetTimestamp();
         Ctx.TickIndex++;
         bool wasStale = Ctx.Stale;
         Ctx.Stale = Ctx.Metrics.Stale;
         bool dirty = Panel.Update(Ctx) || _needsFullRedraw || wasStale != Ctx.Stale;
         if (!dirty) return false;
 
-        double scale = Ctx.Theme.Scale;
+        // Window size is in physical pixels, so it carries the monitor's DPI; the D2D transform
+        // carries only the base scale, because the target bitmap is created at that same DPI.
+        double scale = Ctx.Theme.EffectiveScale;
         double logicalH = Panel.Layout(_rc!, Ctx);
         int pxW = (int)Math.Ceiling(Ctx.Theme.BgWidth * scale);
         int pxH = (int)Math.Ceiling(logicalH * scale);
@@ -181,15 +210,23 @@ public sealed unsafe class WidgetWindow : IDisposable
         try
         {
             using var surface = _swapChain.GetBuffer<IDXGISurface>(0);
+            // The target is created at the monitor's DPI (hardware plan H5), so D2D converts
+            // DIPs to pixels itself and DirectWrite grid-fits at the real device resolution.
+            // The world transform therefore carries only the user's scale.
+            float dpi = (float)Ctx.Theme.Dpi;
             var props = new BitmapProperties1(
                 new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied),
-                96, 96, BitmapOptions.Target | BitmapOptions.CannotDraw);
+                dpi, dpi, BitmapOptions.Target | BitmapOptions.CannotDraw);
             using var bitmap = _d2dDc.CreateBitmapFromDxgiSurface(surface, props);
             _d2dDc.Target = bitmap;
+            // SetTarget does not adopt the bitmap's DPI — the context keeps whatever it was
+            // created with (the system DPI), so say it explicitly or a 125 % monitor renders at
+            // the primary monitor's scale and gets clipped.
+            if (_dcDpi != dpi) { _d2dDc.SetDpi(dpi, dpi); _dcDpi = dpi; }
 
             _d2dDc.BeginDraw();
             _d2dDc.Clear(new Color4(0, 0, 0, 0));
-            _d2dDc.Transform = System.Numerics.Matrix3x2.CreateScale((float)Ctx.Theme.Scale);
+            _d2dDc.Transform = System.Numerics.Matrix3x2.CreateScale((float)Ctx.Theme.BaseScale);
 
             bool useOpacityLayer = Config.Opacity < 0.999;
             if (useOpacityLayer)
@@ -227,8 +264,17 @@ public sealed unsafe class WidgetWindow : IDisposable
     /// </summary>
     public (int X, int Y) TargetScreenPos()
     {
-        var (mx, my, _, _) = _app.ResolveMonitorWorkArea(Config.Monitor);
-        int x = mx + Config.X, y = my + Config.Y;
+        int x, y;
+        if (_packedX is { } px && _packedY is { } py)
+        {
+            // displaced (or first-run) placement from the column packer — already screen coords
+            x = px; y = py;
+        }
+        else
+        {
+            x = HostMonitor.X + Config.X;
+            y = HostMonitor.Y + Config.Y;
+        }
         if (Config.KeepOnScreen)
         {
             var (_, wx, wy, ww, wh) = _app.MonitorForRect(x, y, _pxW, _pxH);
@@ -236,6 +282,45 @@ public sealed unsafe class WidgetWindow : IDisposable
             y = Math.Clamp(y, wy, Math.Max(wy, wy + wh - _pxH));
         }
         return (x, y);
+    }
+
+    /// <summary>Position chosen by the packer, in screen coordinates. Memory only — the config
+    /// keeps the user's real layout so it comes back when the monitor does (H6).</summary>
+    public void SetPackedPosition(int x, int y)
+    {
+        if (_packedX == x && _packedY == y) return;
+        _packedX = x;
+        _packedY = y;
+        Reposition();
+        _needsFullRedraw = true;
+    }
+
+    /// <summary>The packed position has just been written into the config as the real one, so
+    /// this widget is no longer displaced and resolves through Config.X/Y from now on.</summary>
+    public void MarkPlaced()
+    {
+        _packedX = null;
+        _packedY = null;
+        Displaced = false;
+    }
+
+    /// <summary>Re-bind to a monitor (display change, or the configured one came back) and take
+    /// the theme that was resolved for it — scale and DPI both depend on which monitor this is.</summary>
+    public void ApplyMonitor(MonitorInfo monitor, bool displaced, Theme resolved)
+    {
+        bool changed = !HostMonitor.Equals(monitor) || displaced != Displaced;
+        HostMonitor = monitor;
+        Displaced = displaced;
+        if (!displaced) { _packedX = null; _packedY = null; }
+        if (Math.Abs(Ctx.Theme.BaseScale - resolved.BaseScale) > 1e-9 || Math.Abs(Ctx.Theme.Dpi - monitor.Dpi) > 1e-9)
+            changed = true;
+        Ctx.Theme.CopyFrom(resolved);
+        Ctx.Theme.Dpi = monitor.Dpi;
+        if (changed)
+        {
+            _needsFullRedraw = true;
+            Reposition();
+        }
     }
 
     private void MoveWindowScreen(int x, int y)
@@ -336,6 +421,14 @@ public sealed unsafe class WidgetWindow : IDisposable
                 ShowContextMenu();
                 return 0;
 
+            // A desktop-parented child does not reliably get either of these, so the 5 s position
+            // guard re-resolves DPI and monitors anyway; handling them here just makes the
+            // common cases (Normal / Topmost z-modes) instant.
+            case WM_DPICHANGED:
+            case WM_DISPLAYCHANGE:
+                _app.RequestPlacementRefresh();
+                return 0;
+
             case WM_WINDOWPOSCHANGING when Config.ZMode == ZMode.Desktop && _app.DesktopHost == 0:
                 // keep at bottom when desktop-parenting unavailable
                 var wp = (WINDOWPOS*)lParam;
@@ -361,7 +454,13 @@ public sealed unsafe class WidgetWindow : IDisposable
         Config.Monitor = dev;
         Config.X = sx - mx;
         Config.Y = sy - my;
-        _app.SaveWidgetConfig();
+        // dragging a displaced widget is the user saying "it lives here now"
+        _packedX = null;
+        _packedY = null;
+        Displaced = false;
+        string monitor = dev; int cx = Config.X, cy = Config.Y;
+        _app.PatchWidget(Config.Id, w => { w.Monitor = monitor; w.X = cx; w.Y = cy; });
+        _app.RefreshPlacement();
     }
 
     private void ShowContextMenu()
@@ -408,35 +507,107 @@ public sealed unsafe class WidgetWindow : IDisposable
         }
     }
 
+    /// <summary>
+    /// Quick toggles write through the same merge-on-write path the drag does: re-read
+    /// widgets.json, change only this field, write it back. A whole-file save from our in-memory
+    /// copy would undo whatever the Settings app wrote since our last reload (settings plan S3
+    /// writes every ~200 ms while a user is dragging a slider).
+    /// </summary>
     private void HandleMenu(int cmd)
     {
         switch (cmd)
         {
-            case 1: Config.Locked = !Config.Locked; _app.SaveWidgetConfig(); break;
-            case 11: Config.ZMode = ZMode.Desktop; ApplyZMode(); _app.SaveWidgetConfig(); break;
-            case 12: Config.ZMode = ZMode.Normal; ApplyZMode(); _app.SaveWidgetConfig(); break;
-            case 13: Config.ZMode = ZMode.Topmost; ApplyZMode(); _app.SaveWidgetConfig(); break;
+            case 1:
+                Config.Locked = !Config.Locked;
+                Patch(w => w.Locked = Config.Locked);
+                break;
+            case 11: case 12: case 13:
+                Config.ZMode = cmd == 11 ? ZMode.Desktop : cmd == 12 ? ZMode.Normal : ZMode.Topmost;
+                ApplyZMode();
+                Patch(w => w.ZMode = Config.ZMode);
+                break;
             case 21: Config.Opacity = 1.0; goto case 99;
             case 22: Config.Opacity = 0.9; goto case 99;
             case 23: Config.Opacity = 0.75; goto case 99;
             case 24: Config.Opacity = 0.5; goto case 99;
-            case 2: Config.ClickThrough = !Config.ClickThrough; _app.SaveWidgetConfig(); break;
-            case 3: Config.KeepOnScreen = !Config.KeepOnScreen; _app.SaveWidgetConfig(); break;
+            case 2:
+                Config.ClickThrough = !Config.ClickThrough;
+                Patch(w => w.ClickThrough = Config.ClickThrough);
+                break;
+            case 3:
+                Config.KeepOnScreen = !Config.KeepOnScreen;
+                Patch(w => w.KeepOnScreen = Config.KeepOnScreen);
+                Reposition();
+                break;
             case 4: _needsFullRedraw = true; break;
             case 5: _app.ResetPanelMax(Config.Type); break;
             case 6: _app.OpenSettings(); break;
-            case 7: Ctx.Settings.LockAll = !Ctx.Settings.LockAll; _app.SaveGeneralSettings(); break;
+            case 7: _app.ToggleLockAll(); break;
             case 9: _app.Quit(); break;
             case 30:
                 Config.Options["aggregate"] = Config.Options.GetValueOrDefault("aggregate") == "true" ? "false" : "true";
-                _app.SaveWidgetConfig();
+                string agg = Config.Options["aggregate"];
+                Patch(w => w.Options["aggregate"] = agg);
                 _needsFullRedraw = true;
                 break;
-            case 99: _needsFullRedraw = true; _app.SaveWidgetConfig(); break;
+            case 99:
+                _needsFullRedraw = true;
+                Patch(w => w.Opacity = Config.Opacity);
+                break;
         }
     }
 
+    private void Patch(Action<WidgetInstance> mutate)
+    {
+        _needsFullRedraw = true;
+        _app.PatchWidget(Config.Id, mutate);
+    }
+
     public void ForceRedraw() => _needsFullRedraw = true;
+
+    /// <summary>
+    /// Adopt a changed config without rebuilding the window (settings plan §Live-apply). Anything
+    /// that only changes values — rate, graph history/height/style, colours, labels, warn points,
+    /// scale, placement, opacity, z-mode, click-through, title — lands here; only a type change,
+    /// a structural option or a metric show/graph toggle costs a rebuild, and then App replaces
+    /// this window instead of calling this.
+    /// </summary>
+    public void ApplyInPlace(WidgetInstance next, AppSettings settings, MonitorInfo monitor, bool displaced,
+        Theme resolved, double maxRateHz)
+    {
+        var prev = Config;
+        Config = next;
+        Ctx.Widget = next;
+        Ctx.Settings = settings;
+        MaxRateHz = maxRateHz;
+        Ctx.MaxRateHz = maxRateHz;
+
+        ApplyMonitor(monitor, displaced, resolved);
+
+        if (prev.ZMode != next.ZMode) ApplyZMode();
+        if (prev.X != next.X || prev.Y != next.Y || prev.Monitor != next.Monitor
+            || prev.KeepOnScreen != next.KeepOnScreen) Reposition();
+
+        if (Math.Abs(prev.Graph.HistoryS - next.Graph.HistoryS) > 1e-9
+            || Math.Abs(prev.Graph.Height - next.Graph.Height) > 1e-9
+            || !string.Equals(prev.Graph.Style, next.Graph.Style, StringComparison.OrdinalIgnoreCase)
+            || Math.Abs(prev.RateHz - next.RateHz) > 1e-9)
+        {
+            Panel.ApplyGraphSettings(Ctx.GraphHistoryS, Ctx.GraphHeight, Ctx.GraphStyle, maxRateHz);
+        }
+
+        _needsFullRedraw = true;
+    }
+
+    /// <summary>Re-clamp the rate and re-size the graph rings after the registry grew (a provider
+    /// that was not running when this widget was built can raise its bound, R2).</summary>
+    public void ApplyRateBound(double maxRateHz)
+    {
+        if (Math.Abs(MaxRateHz - maxRateHz) < 1e-9) return;
+        MaxRateHz = maxRateHz;
+        Ctx.MaxRateHz = maxRateHz;
+        Panel.ApplyGraphSettings(Ctx.GraphHistoryS, Ctx.GraphHeight, Ctx.GraphStyle, maxRateHz);
+    }
 
     public void Dispose()
     {

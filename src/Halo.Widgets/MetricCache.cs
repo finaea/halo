@@ -41,32 +41,79 @@ public sealed class MetricCache : IDisposable
 
     public IReadOnlyList<MetricInfo> Describe() => _session.Metrics();
 
+    /// <summary>How many metrics the collector has registered. A growing count means new
+    /// hardware appeared, which can raise a widget's refresh bound (rates plan R2).</summary>
+    public int MetricCount => _session.MetricCount;
+
     public void Dispose() => _session.Dispose();
 }
 
-/// <summary>Fixed-capacity sample ring for graph series (one value per sample tick).</summary>
-public sealed class HistoryRing(int capacity)
+/// <summary>
+/// Timestamped sample ring for graph series. Samples carry the QPC they were taken at, because
+/// graph columns are time buckets, not sample slots: the visible span is <c>graph.historyS</c>
+/// seconds whatever the widget's refresh rate happens to be (rates plan R4).
+///
+/// Frame-driven series store the frame's own QPC and are drawn one bar per sample instead.
+/// </summary>
+public sealed class SampleRing
 {
-    private readonly double[] _data = new double[Math.Max(2, capacity)];
+    private long[] _qpc;
+    private double[] _val;
     private int _count, _head;
 
-    public int Capacity => _data.Length;
+    public SampleRing(int capacity)
+    {
+        int n = Math.Max(2, capacity);
+        _qpc = new long[n];
+        _val = new double[n];
+    }
+
+    public int Capacity => _val.Length;
     public int Count => _count;
 
-    public void Add(double v)
+    public void Add(long qpc, double v)
     {
-        _data[_head] = v;
-        _head = (_head + 1) % _data.Length;
-        if (_count < _data.Length) _count++;
+        _qpc[_head] = qpc;
+        _val[_head] = v;
+        _head = (_head + 1) % _val.Length;
+        if (_count < _val.Length) _count++;
     }
 
     /// <summary>i=0 oldest … Count-1 newest.</summary>
-    public double this[int i] => _data[(_head - _count + i + 2 * _data.Length) % _data.Length];
+    public (long Qpc, double Value) this[int i]
+    {
+        get { int k = (_head - _count + i + 2 * _val.Length) % _val.Length; return (_qpc[k], _val[k]); }
+    }
+
+    public double ValueAt(int i) => _val[(_head - _count + i + 2 * _val.Length) % _val.Length];
+
+    /// <summary>
+    /// Grow or shrink without losing the newest samples — a rate or history change must not blank
+    /// a graph that is already drawing (settings plan: applied in place, no window rebuild).
+    /// </summary>
+    public void Resize(int capacity)
+    {
+        int n = Math.Max(2, capacity);
+        if (n == _val.Length) return;
+        int keep = Math.Min(_count, n);
+        var q = new long[n];
+        var v = new double[n];
+        for (int i = 0; i < keep; i++)
+        {
+            var s = this[_count - keep + i];
+            q[i] = s.Qpc;
+            v[i] = s.Value;
+        }
+        _qpc = q;
+        _val = v;
+        _count = keep;
+        _head = keep % n;
+    }
 
     public double Max()
     {
         double m = 0;
-        for (int i = 0; i < _count; i++) { double v = this[i]; if (v > m) m = v; }
+        for (int i = 0; i < _count; i++) { double v = ValueAt(i); if (v > m) m = v; }
         return m;
     }
 

@@ -20,25 +20,32 @@ public sealed unsafe class App : IDisposable
 
     private readonly Dx _dx;
     private readonly List<WidgetWindow> _windows = new();
-    private readonly List<(string Device, RECT Work)> _monitors = new();
+    private readonly List<MonitorInfo> _monitors = new();
     private TrayIcon? _tray;
     private bool _quit;
     private volatile bool _configDirty;
+    private volatile bool _placementDirty = true;
     private volatile bool _deviceLost;
+    private string _monitorSignature = "";
+    private string _packSignature = "";
+    private bool _firstRunPackPending;
+    private int _lastMetricCount = -1;
     private DateTime _nextWatchdogAttempt = DateTime.MinValue;
     private int _watchdogFailures;
     private nint _framesReadyEvent;          // collector's frames-ready signal (0 until opened)
     private long _nextFrameEventOpenQpc;
     private long _nextFrameWakeQpc;          // coalesce event-driven repaints to ~refresh rate
-    private DateTime _suppressSaveReload = DateTime.MinValue;
 
     public App()
     {
+        bool freshInstall = !File.Exists(Path.Combine(Paths.ConfigDir, "widgets.json"));
         ConfigStore = new ConfigStore(Paths.ConfigDir);
         _dx = new Dx(Paths.FontsDir);
         RefreshMonitors();
         DesktopHost = FindDesktopHost();
         Log.Info($"desktop host: 0x{DesktopHost:X}");
+
+        if (freshInstall && ConfigStore.Widgets.Widgets.Count == 0) GenerateFirstRunLayout();
 
         ConfigStore.Changed += () => _configDirty = true;
     }
@@ -46,6 +53,11 @@ public sealed unsafe class App : IDisposable
     public void Run()
     {
         _tray = new TrayIcon(this);
+        // Panels are built from discovered hardware — the core grid's P/E classes, the drive and
+        // fan channel lists, the GPU count. Attach before building or every one of those reads
+        // its fallback and the first layout is wrong until something else forces a rebuild.
+        Metrics.Tick();
+        _wasAttached = Metrics.Attached;
         BuildWindows();
         _ = timeBeginPeriod(1);
         try { Loop(); }
@@ -59,31 +71,67 @@ public sealed unsafe class App : IDisposable
 
         foreach (var inst in ConfigStore.Widgets.Widgets.Where(w => w.Enabled))
         {
-            try
-            {
-                var ctx = new PanelContext
-                {
-                    Metrics = Metrics,
-                    // one resolved theme per widget: global appearance + this widget's overrides
-                    Theme = Theme.Resolve(ConfigStore.Settings.Appearance, inst.Appearance, ReferenceScale),
-                    Settings = ConfigStore.Settings,
-                    Widget = inst,
-                    Type = PanelCatalog.Find(inst.Type),
-                };
-                var panel = PanelDefs.PanelFactory.Create(inst.Type, ctx);
-                if (panel == null)
-                {
-                    Log.Warn($"unknown widget type '{inst.Type}' ({inst.Id})");
-                    continue;
-                }
-                _windows.Add(new WidgetWindow(this, _dx, inst, panel, ctx));
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"widget {inst.Id} create failed", ex);
-            }
+            var win = CreateWindow(inst);
+            if (win != null) _windows.Add(win);
         }
+        _packSignature = "";
+        _placementDirty = true;
         Log.Info($"{_windows.Count} widgets created");
+    }
+
+    /// <summary>Build one widget window: resolve its monitor (and whether that monitor is
+    /// missing), its refresh bound and its theme, then hand all three to the panel.</summary>
+    private WidgetWindow? CreateWindow(WidgetInstance inst)
+    {
+        try
+        {
+            var (mon, missing) = ResolveMonitor(inst.Monitor);
+            bool displaced = missing || _firstRunPackPending;
+            double maxHz = MaxRateFor(inst);
+            var ctx = new PanelContext
+            {
+                Metrics = Metrics,
+                // one resolved theme per widget: global appearance + this widget's overrides
+                Theme = ResolveTheme(inst, mon, displaced),
+                Settings = ConfigStore.Settings,
+                Widget = inst,
+                Type = PanelCatalog.Find(inst.Type),
+                MaxRateHz = maxHz,
+            };
+            var panel = PanelDefs.PanelFactory.Create(inst.Type, ctx);
+            if (panel == null)
+            {
+                Log.Warn($"unknown widget type '{inst.Type}' ({inst.Id})");
+                return null;
+            }
+            if (missing)
+                Log.Info($"widget {inst.Id}: monitor '{inst.Monitor}' not present — auto-arranging on {mon.Device} at scale {ctx.Theme.BaseScale:0.##}");
+            return new WidgetWindow(this, _dx, inst, panel, ctx, mon, displaced, maxHz);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"widget {inst.Id} create failed", ex);
+            return null;
+        }
+    }
+
+    /// <summary>Fastest useful repaint for this widget, from the live registry (rates plan R2).</summary>
+    private double MaxRateFor(WidgetInstance inst)
+    {
+        var type = PanelCatalog.Find(inst.Type);
+        return PanelRates.MaxHz(type, PanelRates.MetricNamesFor(type, inst.Options), Metrics.NominalRateHz);
+    }
+
+    /// <summary>Global appearance + this widget's overrides, with "auto" resolved for the monitor
+    /// it will live on. A displaced widget never renders larger than that monitor's auto scale,
+    /// so a 3.4× layout from a 4K screen still fits the 1080p one it falls back to (H7).</summary>
+    private Theme ResolveTheme(WidgetInstance inst, MonitorInfo mon, bool displaced)
+    {
+        double auto = AutoScale.For(mon);
+        var theme = Theme.Resolve(ConfigStore.Settings.Appearance, inst, auto);
+        if (displaced) theme.BaseScale = Math.Min(theme.BaseScale, auto);
+        theme.Dpi = mon.Dpi;
+        return theme;
     }
 
     private void Loop()
@@ -128,6 +176,9 @@ public sealed unsafe class App : IDisposable
                     try { w.Tick(); }
                     catch (Exception ex) { Log.Error($"tick {w.Config.Id}", ex); }
                 }
+                // The packer needs laid-out pixel sizes, which only exist after a tick.
+                if (_placementDirty) RefreshPlacement(); else RunPacker();
+                RateBoundGuard();
             }
 
             // sleep until next due tick, next message, or the collector's frames-ready event
@@ -192,15 +243,98 @@ public sealed unsafe class App : IDisposable
         }
     }
 
+    /// <summary>
+    /// Hot-reload, one widget at a time (settings plan §Live-apply). A reload always produces new
+    /// <see cref="WidgetInstance"/> objects, so every window is re-pointed at its new one even
+    /// when nothing else changed — a window left holding the old object would render and save
+    /// stale config. Only a type change, a structural option or a metric show/graph toggle costs
+    /// a window rebuild; everything else is applied in place.
+    /// </summary>
     private void ApplyConfigChange()
     {
-        // Keep dirty set while suppressed and retry next pass: the store has ALREADY
-        // reloaded (new WidgetInstance objects) — skipping the rebuild for good would
-        // leave windows bound to orphaned configs, and their next save writes stale data.
-        if (DateTime.UtcNow < _suppressSaveReload) return;
         _configDirty = false;
-        Log.Info("config hot-reload");
-        BuildWindows();
+        var wanted = ConfigStore.Widgets.Widgets.Where(w => w.Enabled).ToList();
+        var settings = ConfigStore.Settings;
+
+        for (int i = _windows.Count - 1; i >= 0; i--)
+        {
+            var win = _windows[i];
+            if (wanted.Any(w => w.Id == win.Config.Id)) continue;
+            Log.Info($"config: widget {win.Config.Id} removed — closing its window");
+            win.Dispose();
+            _windows.RemoveAt(i);
+        }
+
+        foreach (var inst in wanted)
+        {
+            var win = _windows.FirstOrDefault(w => w.Config.Id == inst.Id);
+            if (win == null)
+            {
+                var created = CreateWindow(inst);
+                if (created == null) continue;
+                created.NextDueQpc = Stopwatch.GetTimestamp();
+                _windows.Add(created);
+                Log.Info($"config: widget {inst.Id} added — new window");
+                _placementDirty = true;
+                continue;
+            }
+
+            string? rebuild = RebuildReason(win.Config, inst);
+            if (rebuild != null)
+            {
+                Log.Info($"config: widget {inst.Id} rebuilt ({rebuild})");
+                long due = win.NextDueQpc;
+                int index = _windows.IndexOf(win);
+                win.Dispose();
+                var created = CreateWindow(inst);
+                if (created == null) { _windows.RemoveAt(index); continue; }
+                created.NextDueQpc = due;
+                _windows[index] = created;
+                _placementDirty = true;
+                continue;
+            }
+
+            var (mon, missing) = ResolveMonitor(inst.Monitor);
+            double maxHz = MaxRateFor(inst);
+            win.ApplyInPlace(inst, settings, mon, missing, ResolveTheme(inst, mon, missing), maxHz);
+        }
+
+        // keep window order in step with the config so the packer and snapping are deterministic
+        _windows.Sort((a, b) => wanted.FindIndex(w => w.Id == a.Config.Id).CompareTo(wanted.FindIndex(w => w.Id == b.Config.Id)));
+        Log.Info($"config: applied in place to {_windows.Count} widget(s)");
+        _placementDirty = true;
+    }
+
+    /// <summary>Why this widget cannot be updated in place, or null when it can.</summary>
+    private static string? RebuildReason(WidgetInstance prev, WidgetInstance next)
+    {
+        if (prev.Type != next.Type) return "type changed";
+
+        var type = PanelCatalog.Find(next.Type);
+        if (type != null)
+            foreach (var opt in type.Options)
+            {
+                if (!opt.Structural) continue;
+                if (type.OptionValue(prev.Options, opt.Key) != type.OptionValue(next.Options, opt.Key))
+                    return $"structural option '{opt.Key}'";
+            }
+
+        // show / graph decide which rows and series exist, so they change the element tree
+        foreach (string key in prev.Metrics.Keys.Union(next.Metrics.Keys))
+        {
+            var a = prev.Metrics.GetValueOrDefault(key);
+            var b = next.Metrics.GetValueOrDefault(key);
+            if (a?.Show != b?.Show) return $"metrics.{key}.show";
+            if (a?.Graph != b?.Graph) return $"metrics.{key}.graph";
+        }
+
+        // these are baked into the element tree at build time (pill widths, cached text formats)
+        var pa = prev.Appearance;
+        var pb = next.Appearance;
+        if (pa.Width != pb.Width) return "appearance.width";
+        if (pa.ShowTitle != pb.ShowTitle) return "appearance.showTitle";
+        if (pa.FontFamily != pb.FontFamily) return "appearance.fontFamily";
+        return null;
     }
 
     private void RecoverDevice()
@@ -282,6 +416,9 @@ public sealed unsafe class App : IDisposable
         if (DateTime.UtcNow < _nextPositionCheck) return;
         _nextPositionCheck = DateTime.UtcNow.AddSeconds(5);
         RefreshMonitors();
+        // desktop-parented children don't reliably get WM_DISPLAYCHANGE / WM_DPICHANGED, so this
+        // is where a resolution, DPI or monitor-set change actually gets noticed
+        if (_placementDirty) RefreshPlacement();
         foreach (var w in _windows)
         {
             if (w.IsDragging) continue;
@@ -298,6 +435,36 @@ public sealed unsafe class App : IDisposable
                 w.ForceRedraw();
             }
         }
+    }
+
+    private bool _wasAttached;
+
+    /// <summary>
+    /// Two things change when the registry does. A provider that was not running when a widget
+    /// was built can register faster metrics later, so the refresh bound is re-evaluated (R2).
+    /// And the collector coming up for the first time is when hardware discovery finally has
+    /// answers — the core grid, volume list, fan channels and GPU count all read it at build
+    /// time — so that one transition rebuilds the windows.
+    /// </summary>
+    private void RateBoundGuard()
+    {
+        bool attached = Metrics.Attached;
+        if (attached && !_wasAttached)
+        {
+            _wasAttached = true;
+            _lastMetricCount = Metrics.MetricCount;
+            Log.Info("collector attached — rebuilding widgets from discovered hardware");
+            BuildWindows();
+            long now = Stopwatch.GetTimestamp();
+            foreach (var w in _windows) w.NextDueQpc = now;
+            return;
+        }
+        _wasAttached = attached;
+
+        int count = Metrics.MetricCount;
+        if (count == _lastMetricCount) return;
+        _lastMetricCount = count;
+        foreach (var w in _windows) w.ApplyRateBound(MaxRateFor(w.Config));
     }
 
     private bool? _collectorTaskExists;
@@ -349,17 +516,38 @@ public sealed unsafe class App : IDisposable
         {
             var mi = new MONITORINFOEXW { cbSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFOEXW>() };
             if (GetMonitorInfoW(mon, ref mi))
-                _monitors.Add((mi.szDevice, mi.rcWork));
+                _monitors.Add(new MonitorInfo(mi.szDevice, mi.rcWork.Left, mi.rcWork.Top, mi.rcWork.W, mi.rcWork.H,
+                    MonitorDpi(mon), (mi.dwFlags & MONITORINFOF_PRIMARY) != 0));
             return true;
         }, 0);
+
+        // Work area, DPI and the set of devices all feed scale and placement, so any change to
+        // them has to re-resolve every widget (hardware plan H5/H6).
+        string sig = string.Join(" · ", _monitors.Select(m =>
+            $"{m.Device} {m.W}x{m.H}+{m.X}+{m.Y} @{m.Dpi:0}dpi auto={AutoScale.For(m):0.00}{(m.Primary ? " primary" : "")}"));
+        if (sig != _monitorSignature)
+        {
+            Log.Info($"monitors: {sig}");
+            _monitorSignature = sig;
+            _placementDirty = true;
+        }
     }
 
-    public (int X, int Y, int W, int H) ResolveMonitorWorkArea(string device)
+    public MonitorInfo PrimaryMonitor
+        => _monitors.FirstOrDefault(m => m.Primary, _monitors.Count > 0 ? _monitors[0] : MonitorInfo.None);
+
+    /// <summary>
+    /// The monitor a widget should be drawn on, plus whether its configured one is missing.
+    /// v1 silently substituted monitor 0 here, which is what stacked a whole layout into one
+    /// corner when a display was unplugged; the caller now knows and can auto-arrange (H6).
+    /// </summary>
+    public (MonitorInfo Monitor, bool Missing) ResolveMonitor(string device)
     {
-        var m = _monitors.FirstOrDefault(m => m.Device.Equals(device, StringComparison.OrdinalIgnoreCase));
-        if (m.Device == null && _monitors.Count > 0) m = _monitors[0];
-        if (m.Device == null) return (0, 0, 1920, 1080);
-        return (m.Work.Left, m.Work.Top, m.Work.W, m.Work.H);
+        foreach (var m in _monitors)
+            if (m.Device.Equals(device, StringComparison.OrdinalIgnoreCase))
+                return (m, false);
+        // "" has always meant "the primary monitor", not a monitor that went away
+        return (PrimaryMonitor, device.Length > 0);
     }
 
     /// <summary>
@@ -370,29 +558,30 @@ public sealed unsafe class App : IDisposable
     /// </summary>
     public (string Device, int X, int Y, int W, int H) MonitorForRect(int x, int y, int w, int h)
     {
-        string? dev = null; RECT work = default;
+        MonitorInfo? best = null;
         long bestArea = 0;
-        foreach (var (d, r) in _monitors)
+        foreach (var m in _monitors)
         {
-            long ix = Math.Min(x + w, r.Right) - (long)Math.Max(x, r.Left);
-            long iy = Math.Min(y + h, r.Bottom) - (long)Math.Max(y, r.Top);
+            long ix = Math.Min(x + w, m.X + m.W) - (long)Math.Max(x, m.X);
+            long iy = Math.Min(y + h, m.Y + m.H) - (long)Math.Max(y, m.Y);
             long area = Math.Max(0, ix) * Math.Max(0, iy);
-            if (area > bestArea) { bestArea = area; dev = d; work = r; }
+            if (area > bestArea) { bestArea = area; best = m; }
         }
-        if (dev == null)
+        if (best == null)
         {
-            long best = long.MaxValue;
+            long nearest = long.MaxValue;
             int cx = x + w / 2, cy = y + h / 2;
-            foreach (var (d, r) in _monitors)
+            foreach (var m in _monitors)
             {
-                long dx = cx - Math.Clamp(cx, r.Left, r.Right);
-                long dy = cy - Math.Clamp(cy, r.Top, r.Bottom);
+                long dx = cx - Math.Clamp(cx, m.X, m.X + m.W);
+                long dy = cy - Math.Clamp(cy, m.Y, m.Y + m.H);
                 long dist = dx * dx + dy * dy;
-                if (dist < best) { best = dist; dev = d; work = r; }
+                if (dist < nearest) { nearest = dist; best = m; }
             }
         }
-        if (dev == null) return ("", 0, 0, 1920, 1080);
-        return (dev, work.Left, work.Top, work.W, work.H);
+        if (best == null) return ("", 0, 0, 1920, 1080);
+        var r = best.Value;
+        return (r.Device, r.X, r.Y, r.W, r.H);
     }
 
     /// <summary>Snap to screen edges + other widget edges, 8 px threshold (plan §9.3).</summary>
@@ -401,10 +590,10 @@ public sealed unsafe class App : IDisposable
         const int T = 8;
         var xCandidates = new List<int>();
         var yCandidates = new List<int>();
-        foreach (var (_, work) in _monitors)
+        foreach (var m in _monitors)
         {
-            xCandidates.Add(work.Left); xCandidates.Add(work.Right - w);
-            yCandidates.Add(work.Top); yCandidates.Add(work.Bottom - h);
+            xCandidates.Add(m.X); xCandidates.Add(m.X + m.W - w);
+            yCandidates.Add(m.Y); yCandidates.Add(m.Y + m.H - h);
         }
         foreach (var other in _windows)
         {
@@ -449,16 +638,98 @@ public sealed unsafe class App : IDisposable
 
     // ---- actions ----
 
-    public void SaveWidgetConfig()
+    /// <summary>
+    /// Write one widget's changed fields back to widgets.json without clobbering the Settings
+    /// app's concurrent edits: <see cref="ConfigStore.UpdateWidget"/> re-reads the file and only
+    /// applies <paramref name="mutate"/>.
+    /// </summary>
+    public void PatchWidget(string id, Action<WidgetInstance> mutate)
     {
-        _suppressSaveReload = DateTime.UtcNow.AddSeconds(2);
-        ConfigStore.SaveWidgets();
+        try
+        {
+            if (!ConfigStore.UpdateWidget(id, mutate))
+                Log.Warn($"widget {id} is no longer in widgets.json — change not saved");
+        }
+        catch (Exception ex) { Log.Error($"saving widget {id}", ex); }
     }
 
-    public void SaveGeneralSettings()
+    public void RequestPlacementRefresh() => _placementDirty = true;
+
+    /// <summary>Re-resolve every widget's monitor, DPI and scale, then re-run the packer for the
+    /// ones whose monitor is missing. Cheap and idempotent — called on display change, after a
+    /// drag, and every 5 s from the position guard.</summary>
+    public void RefreshPlacement()
     {
-        _suppressSaveReload = DateTime.UtcNow.AddSeconds(2);
-        ConfigStore.SaveSettings();
+        _placementDirty = false;
+        foreach (var win in _windows)
+        {
+            var (mon, missing) = ResolveMonitor(win.Config.Monitor);
+            bool displaced = missing || _firstRunPackPending;
+            win.ApplyMonitor(mon, displaced, ResolveTheme(win.Config, mon, displaced));
+        }
+        RunPacker();
+    }
+
+    /// <summary>
+    /// Column-pack the widgets that have nowhere of their own to be (hardware plan H6): a missing
+    /// monitor, or every widget on first run. Positions are memory-only unless this is the
+    /// first run, so unplugging a monitor never rewrites the user's layout.
+    /// </summary>
+    private void RunPacker()
+    {
+        var packed = _windows.Where(w => w.Displaced).ToList();
+        if (packed.Count == 0) { _packSignature = ""; return; }
+        // sizes only exist after a layout pass, so wait for the first tick of each window
+        foreach (var w in packed) if (w.PixelSize.H <= 0) return;
+
+        var target = PrimaryMonitor;
+        string sig = target.Device + "|" + target.W + "x" + target.H + "|"
+            + string.Join(',', packed.Select(w => $"{w.Config.Id}:{w.PixelSize.W}x{w.PixelSize.H}"));
+        if (sig == _packSignature) return;
+        _packSignature = sig;
+
+        var occupied = _windows.Where(w => !w.Displaced)
+            .Select(w => { var (x, y, ww, hh) = w.ScreenRect(); return new ColumnPacker.Box(x, y, ww, hh); })
+            .ToList();
+        var items = packed.Select(w => new ColumnPacker.Item(w.Config.Id, w.PixelSize.W, w.PixelSize.H)).ToList();
+
+        var placements = ColumnPacker.Pack(target, items, occupied);
+        foreach (var place in placements)
+        {
+            var win = packed.First(w => w.Config.Id == place.Id);
+            win.SetPackedPosition(place.X, place.Y);
+        }
+        Log.Info($"auto-arrange: packed {items.Count} widget(s) onto {target.Device} "
+            + $"({target.W}x{target.H} @{target.Dpi:0}dpi): "
+            + string.Join(", ", placements.Select(p =>
+            {
+                var w = packed.First(x => x.Config.Id == p.Id);
+                return $"{p.Id}@{p.X},{p.Y} {w.PixelSize.W}x{w.PixelSize.H} scale {w.Ctx.Theme.BaseScale:0.##}";
+            })));
+
+        if (_firstRunPackPending) PersistFirstRunLayout(target);
+    }
+
+    /// <summary>First run is the one case where the packed layout is written back: it becomes the
+    /// user's layout. <c>appearance.scale</c> is deliberately left "auto" so a later monitor swap
+    /// keeps adapting (H7).</summary>
+    private void PersistFirstRunLayout(MonitorInfo target)
+    {
+        _firstRunPackPending = false;
+        foreach (var win in _windows)
+        {
+            var (sx, sy, _, _) = win.ScreenRect();
+            win.Config.Monitor = target.Device;
+            win.Config.X = sx - target.X;
+            win.Config.Y = sy - target.Y;
+            win.MarkPlaced();
+        }
+        try
+        {
+            ConfigStore.SaveWidgets();
+            Log.Info($"first run: wrote the generated layout for {_windows.Count} widget(s) to widgets.json");
+        }
+        catch (Exception ex) { Log.Error("first run: saving the generated layout", ex); }
     }
 
     public void ResetPanelMax(string panelType)
@@ -485,16 +756,56 @@ public sealed unsafe class App : IDisposable
         catch (Exception ex) { Log.Error("open settings", ex); }
     }
 
+    /// <summary>Tray / context-menu lock toggle. settings.json has two writers as well, and the
+    /// widget process owns exactly this one field there.</summary>
     public void ToggleLockAll()
     {
-        ConfigStore.Settings.LockAll = !ConfigStore.Settings.LockAll;
-        SaveGeneralSettings();
+        bool next = !ConfigStore.Settings.LockAll;
+        ConfigStore.Settings.LockAll = next;
+        try { ConfigStore.UpdateSettings(s => s.LockAll = next); }
+        catch (Exception ex) { Log.Error("saving lockAll", ex); }
     }
 
-    /// <summary>The scale an "auto" appearance resolves to. Per-monitor DPI and the
-    /// screen-size rule (hardware plan H5/H7) land with the widgets ticket; until then "auto"
-    /// means the reference scale the layout was designed at.</summary>
-    public const double ReferenceScale = 1.7;
+    /// <summary>
+    /// Fresh install: generate one widget per type that has data on this PC, in the order the
+    /// hardware plan fixes (H6), and let the packer place them on the primary monitor. Scale is
+    /// left "auto" so the layout adapts if the user moves to another screen.
+    /// </summary>
+    private void GenerateFirstRunLayout()
+    {
+        Metrics.Tick();     // attach once so hardware discovery has something to read
+        var widgets = new List<WidgetInstance>();
+        void Add(string type, string idSuffix = "", Dictionary<string, string>? options = null)
+        {
+            var t = PanelCatalog.Find(type);
+            widgets.Add(new WidgetInstance
+            {
+                Id = type + (idSuffix.Length > 0 ? "-" + idSuffix : "-1"),
+                Type = type,
+                RateHz = t?.DefaultRateHz ?? 5,
+                Options = options ?? new Dictionary<string, string>(),
+            });
+        }
+
+        Add("clock");
+        Add("cpu-ram");
+        int gpus = (int)Math.Clamp(Metrics.Value(Halo.Metrics.MetricNames.GpuCount, 0), 0, 8);
+        for (int i = 0; i < gpus; i++) Add("gpu", i.ToString(), new() { ["gpuIndex"] = i.ToString() });
+        // only the presented stream: the displayed one needs a game running before it says anything
+        Add("fps", "presented", new() { ["stream"] = "presented" });
+        Add("latency");
+        Add("power");
+        Add("drives");
+        Add("network");
+        if (Metrics.Value(Halo.Metrics.MetricNames.FanCount, 0) > 0) Add("fans");
+        Add("topcpu");
+        Add("topram");
+
+        ConfigStore.Widgets.Widgets.Clear();
+        ConfigStore.Widgets.Widgets.AddRange(widgets);
+        _firstRunPackPending = true;
+        Log.Info($"first run: no widgets.json — generated {widgets.Count} widget(s) ({gpus} GPU(s) found)");
+    }
 
     public void RefreshAll()
     {

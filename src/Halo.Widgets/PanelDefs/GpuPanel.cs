@@ -17,8 +17,6 @@ public static class GpuPanel
     public static Panel Build(PanelContext ctx)
     {
         var p = new Panel();
-        var t = ctx.Theme;
-
         int gpu = ctx.OptionInt("gpuIndex", 0);
         string temp = MetricNames.GpuTempC(gpu);
         string usage = MetricNames.GpuUsagePct(gpu);
@@ -42,7 +40,7 @@ public static class GpuPanel
         // temp, centered at abs Y=30, staged warn colors
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(temp))}°C",
+            Text = c => c.TempText(c.Metrics.Value(temp)),
             ColorFn = c => CpuRamPanelImpl.WarnColor(c.Metrics.Value(temp), c.Warn("temp")),
             VisibleWhen = c => c.Shows("temp") && c.Metrics.TryValue(temp, out _),
             Style = TextStyle.Bold8,
@@ -52,10 +50,11 @@ public static class GpuPanel
         });
 
         // GPU usage row: label left, % right, full bar under
-        p.Elements.Add(new TextEl { Text = c => c.Label("usage", "GPU:"), Style = TextStyle.Bold8, Align = TextAlign.Left, AbsY = 32, FixedH = 11 });
+        p.Elements.Add(new TextEl { Text = c => c.Label("usage", "GPU:"), VisibleWhen = c => c.Shows("usage"), Style = TextStyle.Bold8, Align = TextAlign.Left, AbsY = 32, FixedH = 11 });
         p.Elements.Add(new TextEl
         {
             Text = c => $"{ValueFormat.Int0(c.Metrics.Value(usage))}%",
+            VisibleWhen = c => c.Shows("usage"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
@@ -64,15 +63,17 @@ public static class GpuPanel
         p.Elements.Add(new BarEl
         {
             Value = c => c.Metrics.Value(usage) / 100,
-            FillColorFn = c => CpuRamPanelImpl.Over(c.Metrics.Value(usage), c.Warn("usage")) ? "barWarn" : "gpuUsage",
+            VisibleWhen = c => c.Shows("usage"),
+            FillColorFn = c => CpuRamPanelImpl.Over(c.Metrics.Value(usage), c.Warn("usage")) ? "barWarn" : c.Color("usage", "gpuUsage"),
             Advance = 0,
         });
 
         // VRAM row: label left, used/total center, % right, bar under
-        p.Elements.Add(new TextEl { Text = c => c.Label("vram", "MEM:"), Style = TextStyle.Bold8, Align = TextAlign.Left, FixedH = 11, Advance = 1 });
+        p.Elements.Add(new TextEl { Text = c => c.Label("vram", "MEM:"), VisibleWhen = c => c.Shows("vram"), Style = TextStyle.Bold8, Align = TextAlign.Left, FixedH = 11, Advance = 1 });
         p.Elements.Add(new TextEl
         {
             Text = c => $"{ValueFormat.Int0(c.Metrics.Value(vramUsed))}MB/{ValueFormat.Int0(c.Metrics.Value(vramTotal))}MB",
+            VisibleWhen = c => c.Shows("vram"),
             Style = TextStyle.Text8,
             Color = "text2",
             Align = TextAlign.Center,
@@ -82,6 +83,7 @@ public static class GpuPanel
         p.Elements.Add(new TextEl
         {
             Text = c => $"{ValueFormat.Int0(c.Metrics.Value(vramPct))}%",
+            VisibleWhen = c => c.Shows("vram"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
@@ -90,15 +92,17 @@ public static class GpuPanel
         p.Elements.Add(new BarEl
         {
             Value = c => c.Metrics.Value(vramPct) / 100,
-            FillColorFn = c => CpuRamPanelImpl.Over(c.Metrics.Value(vramPct), c.Warn("vram")) ? "barWarn" : "gpuMemUsage",
+            VisibleWhen = c => c.Shows("vram"),
+            FillColorFn = c => CpuRamPanelImpl.Over(c.Metrics.Value(vramPct), c.Warn("vram")) ? "barWarn" : c.Color("vram", "gpuMemUsage"),
             Advance = 0,
         });
 
         // FAN row: label left, rpm center, % right, bar under (no gap after VRAM bar, per skin)
-        p.Elements.Add(new TextEl { Text = c => c.Label("fan", "FAN:"), Style = TextStyle.Bold8, Align = TextAlign.Left, FixedH = 11, Advance = 0 });
+        p.Elements.Add(new TextEl { Text = c => c.Label("fan", "FAN:"), VisibleWhen = c => c.Shows("fan"), Style = TextStyle.Bold8, Align = TextAlign.Left, FixedH = 11, Advance = 0 });
         p.Elements.Add(new TextEl
         {
             Text = c => $"{ValueFormat.Int0(c.Metrics.Value(fanRpm))} rpm",
+            VisibleWhen = c => c.Shows("fan"),
             Style = TextStyle.Text8,
             Color = "text2",
             Align = TextAlign.Center,
@@ -108,6 +112,7 @@ public static class GpuPanel
         p.Elements.Add(new TextEl
         {
             Text = c => $"{ValueFormat.Int0(c.Metrics.Value(fanPct))}%",
+            VisibleWhen = c => c.Shows("fan"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
@@ -116,7 +121,8 @@ public static class GpuPanel
         p.Elements.Add(new BarEl
         {
             Value = c => c.Metrics.Value(fanPct) / 100,
-            FillColorFn = c => CpuRamPanelImpl.Over(c.Metrics.Value(fanPct), c.Warn("fan")) ? "barWarn" : "gpuFan",
+            VisibleWhen = c => c.Shows("fan"),
+            FillColorFn = c => CpuRamPanelImpl.Over(c.Metrics.Value(fanPct), c.Warn("fan")) ? "barWarn" : c.Color("fan", "gpuFan"),
             Advance = 0,
         });
 
@@ -124,8 +130,9 @@ public static class GpuPanel
         p.Elements.Add(new TextEl
         {
             Text = c => $"{c.Label("clockCore", "CORE:")} {ValueFormat.Int0(c.Metrics.Value(clockCore))}MHz",
+            VisibleWhen = c => c.Shows("clockCore"),
             Style = TextStyle.Text8,
-            Color = "text2",
+            ColorFn = c => c.Color("clockCore", "text2"),
             Align = TextAlign.Left,
             SolidColor = "solidLabel",
             SolidW = ctx.Theme.ContentWidth,
@@ -136,29 +143,33 @@ public static class GpuPanel
         p.Elements.Add(new TextEl
         {
             Text = c => $"{c.Label("clockMem", "MEM:")} {ValueFormat.Int0(c.Metrics.Value(clockMem))}MHz",
+            VisibleWhen = c => c.Shows("clockMem"),
             Style = TextStyle.Text8,
-            Color = "text2",
+            ColorFn = c => c.Color("clockMem", "text2"),
             Align = TextAlign.Right,
             SameRow = true,
             FixedH = 11,
         });
 
-        // 4-series overlay graph (temp red / usage lavender / VRAM% green / fan% sky-blue), 5 Hz.
+        // 4-series overlay graph (temp red / usage lavender / VRAM% green / fan% sky-blue),
+        // one sample per tick drawn as time buckets over graph.historyS (R4).
         var graph = new GraphEl
         {
             Advance = 4,
             BgColor = "emptyBar",
             Start = GraphStart.Left,
-            SampleRateHz = 5,
+            H = ctx.GraphHeight,
+            HistoryS = ctx.GraphHistoryS,
+            Style = ctx.GraphStyle,
         };
         if (ctx.Graphs("temp"))
-            graph.Series.Add(new GraphSeries { Color = "gpuTemp", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(temp) });
+            graph.Series.Add(new GraphSeries { Color = ctx.Color("temp", "gpuTemp"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.Metrics.Value(temp) });
         if (ctx.Graphs("usage"))
-            graph.Series.Add(new GraphSeries { Color = "gpuUsage", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(usage) });
+            graph.Series.Add(new GraphSeries { Color = ctx.Color("usage", "gpuUsage"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.Metrics.Value(usage) });
         if (ctx.Graphs("vram"))
-            graph.Series.Add(new GraphSeries { Color = "gpuMemUsage", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(vramPct) });
+            graph.Series.Add(new GraphSeries { Color = ctx.Color("vram", "gpuMemUsage"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.Metrics.Value(vramPct) });
         if (ctx.Graphs("fan"))
-            graph.Series.Add(new GraphSeries { Color = "gpuFan", Ring = new HistoryRing(188), FixedMax = 100, Sample = c => c.Metrics.Value(fanPct) });
+            graph.Series.Add(new GraphSeries { Color = ctx.Color("fan", "gpuFan"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.Metrics.Value(fanPct) });
         p.Elements.Add(graph);
 
         return p;

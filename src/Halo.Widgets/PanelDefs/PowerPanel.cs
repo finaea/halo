@@ -37,6 +37,7 @@ public static class PowerPanel
         p.Elements.Add(new TextEl
         {
             Text = c => c.Label("vcore", "VCORE"),
+            VisibleWhen = c => c.Shows("vcore"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Left,
             Color = "text",
@@ -48,7 +49,7 @@ public static class PowerPanel
             Text = c => c.Metrics.TryValue(MetricNames.CpuVcoreV, out _)
                 ? $"Max: {ValueFormat.Fixed(c.Metrics.Value(MetricNames.CpuVcoreV + MetricNames.MaxSuffix), 3)} V"
                 : "Max: —",
-            VisibleWhen = _ => showMax,
+            VisibleWhen = c => showMax && c.Shows("vcore"),
             Style = TextStyle.Text8,
             Align = TextAlign.Center,
             Color = "maxLabelGray",
@@ -59,6 +60,7 @@ public static class PowerPanel
         {
             Text = c => c.Metrics.TryValue(MetricNames.CpuVcoreV, out double v) ? ValueFormat.Fixed(v, 3) + " V" : "N/A",
             ColorFn = c => c.Metrics.TryValue(MetricNames.CpuVcoreV, out double v) ? CpuRamPanelImpl.WarnColor(v, c.Warn("vcore")) : "text2",
+            VisibleWhen = c => c.Shows("vcore"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
@@ -69,6 +71,7 @@ public static class PowerPanel
         p.Elements.Add(new TextEl
         {
             Text = c => c.Label("gpuVolt", "GPU VOLT"),
+            VisibleWhen = c => c.Shows("gpuVolt"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Left,
             Color = "text",
@@ -78,7 +81,7 @@ public static class PowerPanel
         p.Elements.Add(new TextEl
         {
             Text = c => $"Max: {ValueFormat.Fixed(c.Metrics.Value(gpuVolt + MetricNames.MaxSuffix), 3)} V",
-            VisibleWhen = _ => showMax,
+            VisibleWhen = c => showMax && c.Shows("gpuVolt"),
             Style = TextStyle.Text8,
             Align = TextAlign.Center,
             Color = "maxLabelGray",
@@ -89,6 +92,7 @@ public static class PowerPanel
         {
             Text = c => ValueFormat.Fixed(c.Metrics.Value(gpuVolt), 3) + " V",
             ColorFn = c => CpuRamPanelImpl.WarnColor(c.Metrics.Value(gpuVolt), c.Warn("gpuVolt")),
+            VisibleWhen = c => c.Shows("gpuVolt"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
@@ -99,6 +103,7 @@ public static class PowerPanel
         p.Elements.Add(new TextEl
         {
             Text = c => c.Label("cpuPower", "CPU POWER"),
+            VisibleWhen = c => c.Shows("cpuPower"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Left,
             Color = "text",
@@ -110,7 +115,7 @@ public static class PowerPanel
             Text = c => c.Metrics.TryValue(MetricNames.CpuPackagePowerW, out _)
                 ? $"Max: {ValueFormat.Int0(c.Metrics.Value(MetricNames.CpuPackagePowerW + MetricNames.MaxSuffix))}W"
                 : "Max: —",
-            VisibleWhen = _ => showMax,
+            VisibleWhen = c => showMax && c.Shows("cpuPower"),
             Style = TextStyle.Text8,
             Align = TextAlign.Center,
             Color = "maxLabelGray",
@@ -121,6 +126,7 @@ public static class PowerPanel
         {
             Text = c => c.Metrics.TryValue(MetricNames.CpuPackagePowerW, out double v) ? ValueFormat.Int0(v) + "W" : "N/A",
             ColorFn = c => c.Metrics.TryValue(MetricNames.CpuPackagePowerW, out double v) ? CpuRamPanelImpl.WarnColor(v, c.Warn("cpuPower")) : "text2",
+            VisibleWhen = c => c.Shows("cpuPower"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,
@@ -131,6 +137,7 @@ public static class PowerPanel
         p.Elements.Add(new TextEl
         {
             Text = c => c.Label("gpuPower", "GPU POWER"),
+            VisibleWhen = c => c.Shows("gpuPower"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Left,
             Color = "text",
@@ -140,7 +147,7 @@ public static class PowerPanel
         p.Elements.Add(new TextEl
         {
             Text = c => $"Max: {ValueFormat.Int0(c.Metrics.Value(gpuPower + MetricNames.MaxSuffix))}W",
-            VisibleWhen = _ => showMax,
+            VisibleWhen = c => showMax && c.Shows("gpuPower"),
             Style = TextStyle.Text8,
             Align = TextAlign.Center,
             Color = "maxLabelGray",
@@ -151,6 +158,7 @@ public static class PowerPanel
         {
             Text = c => ValueFormat.Int0(c.Metrics.Value(gpuPower)) + "W",
             ColorFn = c => CpuRamPanelImpl.WarnColor(c.Metrics.Value(gpuPower), c.Warn("gpuPower")),
+            VisibleWhen = c => c.Shows("gpuPower"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             SameRow = true,

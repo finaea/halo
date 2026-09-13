@@ -44,7 +44,8 @@ public static class FpsPanel
         p.Elements.Add(new TextEl
         {
             Text = c => IsIdle(c) ? "NO 3D APP" : c.Metrics.Text(MetricNames.FpsAppName),
-            ColorFn = c => IsIdle(c) ? "inactiveButton" : "text2",
+            ColorFn = c => IsIdle(c) ? "inactiveButton" : c.Color("app", "text2"),
+            VisibleWhen = c => c.Shows("app"),
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
             WidthClip = ctx.Theme.ContentWidth,
@@ -53,10 +54,11 @@ public static class FpsPanel
         });
 
         // ---- "Framerate: <N>FPS … N%" row (FPS number beside the label), + 1px usage bar ----
-        p.Elements.Add(new TextEl { Text = c => c.Label("fps", "Framerate:"), Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", AbsY = 42, FixedH = 11 });
+        p.Elements.Add(new TextEl { Text = c => c.Label("fps", "Framerate:"), VisibleWhen = c => c.Shows("fps"), Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", AbsY = 42, FixedH = 11 });
         p.Elements.Add(new TextEl
         {
             Text = c => IsIdle(c) ? "—" : $"{ValueFormat.Int0(c.Metrics.Value(fpsMetric))}FPS",
+            VisibleWhen = c => c.Shows("fps"),
             // same five-stage ramp as the temperature rows, but the meaning is reversed here:
             // the "hottest" colour marks the highest framerate, not the worst reading
             ColorFn = c => IsIdle(c) ? "inactiveButton" : CpuRamPanelImpl.WarnColor(c.Metrics.Value(fpsMetric), c.Warn("fps")),
@@ -68,6 +70,7 @@ public static class FpsPanel
         p.Elements.Add(new TextEl
         {
             Text = c => IsIdle(c) ? "—" : $"{ValueFormat.Int0(RefreshPct(c, fpsMetric))}%",
+            VisibleWhen = c => c.Shows("fps"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
             Color = "text",
@@ -77,7 +80,8 @@ public static class FpsPanel
         p.Elements.Add(new BarEl
         {
             Value = c => IsIdle(c) ? 0 : c.Metrics.Value(fpsMetric) / Math.Max(1, c.Metrics.Value(MetricNames.FpsRefreshHz)),
-            FillColorFn = c => c.Metrics.Value(fpsMetric) > 75 ? "barWarn" : "gpuUsage",
+            VisibleWhen = c => c.Shows("fps"),
+            FillColorFn = c => c.Metrics.Value(fpsMetric) > 75 ? "barWarn" : c.Color("fps", "gpuUsage"),
             BgColor = "emptyBar",
             Advance = 0,
         });
@@ -86,9 +90,10 @@ public static class FpsPanel
         p.Elements.Add(new TextEl
         {
             Text = c => IsIdle(c) ? $"{c.Label("low1", "1p LOW:")} —" : $"{c.Label("low1", "1p LOW:")} {ValueFormat.Int0(c.Metrics.Value(low1))}FPS",
+            VisibleWhen = c => c.Shows("low1"),
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
-            Color = "text2",
+            ColorFn = c => c.Color("low1", "text2"),
             SolidColor = "solidLabel",
             SolidW = t.ContentWidth,
             SolidH = 11,
@@ -98,9 +103,10 @@ public static class FpsPanel
         p.Elements.Add(new TextEl
         {
             Text = c => IsIdle(c) ? $"{c.Label("low01", "0.1p:")} —" : $"{c.Label("low01", "0.1p:")} {ValueFormat.Int0(c.Metrics.Value(low01))}FPS",
+            VisibleWhen = c => c.Shows("low01"),
             Style = TextStyle.Text8,
             Align = TextAlign.Right,
-            Color = "text2",
+            ColorFn = c => c.Color("low01", "text2"),
             SameRow = true,
             FixedH = 11,
         });
@@ -108,10 +114,11 @@ public static class FpsPanel
         // ---- frametime row: "FRAMETIME: N.Nms" | "WORST: N.Nms" (white pill like the lows row) ----
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "FRAMETIME: —" : $"FRAMETIME: {ValueFormat.Fixed(c.Metrics.Value(ftMetric), 1)}ms",
+            Text = c => IsIdle(c) ? $"{c.Label("frametime", "FRAMETIME:")} —" : $"{c.Label("frametime", "FRAMETIME:")} {ValueFormat.Fixed(c.Metrics.Value(ftMetric), 1)}ms",
+            VisibleWhen = c => c.Shows("frametime"),
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
-            Color = "text2",
+            ColorFn = c => c.Color("frametime", "text2"),
             SolidColor = "solidLabel",
             SolidW = t.ContentWidth,
             SolidH = 11,
@@ -120,10 +127,11 @@ public static class FpsPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? "WORST: —" : $"WORST: {ValueFormat.Fixed(c.Metrics.Value(ftWorstMetric), 1)}ms",
+            Text = c => IsIdle(c) ? $"{c.Label("worst", "WORST:")} —" : $"{c.Label("worst", "WORST:")} {ValueFormat.Fixed(c.Metrics.Value(ftWorstMetric), 1)}ms",
+            VisibleWhen = c => c.Shows("worst"),
             Style = TextStyle.Text8,
             Align = TextAlign.Right,
-            Color = "text2",
+            ColorFn = c => c.Color("worst", "text2"),
             SameRow = true,
             FixedH = 11,
         });
@@ -136,21 +144,23 @@ public static class FpsPanel
         p.Elements.Add(new TextEl
         {
             Text = DlssText,
-            VisibleWhen = c => !IsIdle(c) && DlssActive(c),
+            VisibleWhen = c => c.Shows("dlss") && !IsIdle(c) && DlssActive(c),
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
-            Color = "text2",
+            ColorFn = c => c.Color("dlss", "text2"),
             FixedH = 11,
             Advance = 1,
         });
 
-        // ---- per-frame frametime sparkline (cyan, 50ms hard cap), fed from the shared frame ring ----
+        // ---- per-frame frametime sparkline (cyan, 50ms hard cap), fed from the shared frame ring.
+        // Frame graphs stay one bar per frame: their x axis is frames, not seconds (R4). ----
         p.Elements.Add(new GraphEl
         {
             Advance = 4,
             BgColor = "emptyBar",
             Start = GraphStart.Left,
-            H = 25,
+            H = ctx.GraphHeight,
+            VisibleWhen = c => c.Graphs("frametime"),
             FrameSample = f => presented ? f.FrametimeMs : f.DisplayedFtMs,
             FrameDisplayedOnly = !presented,
             // lane selection: the presented graph rides the door-1 tap when it's live (falling
@@ -164,10 +174,10 @@ public static class FpsPanel
             {
                 new GraphSeries
                 {
-                    Color = "gpuFan",                 // JSON frametime line = GpuFanColor 0,191,255 (cyan)
-                    Ring = new HistoryRing(188),
-                    FixedMax = 50,                    // JSON MaxValue=50 clip
-                    Sample = _ => 0,                  // unused: frame-driven graph pulls from FrameSample
+                    Color = ctx.Color("frametime", "gpuFan"),  // JSON frametime line = GpuFanColor 0,191,255 (cyan)
+                    Ring = new SampleRing(188),                // one slot per drawn frame bar
+                    FixedMax = 50,                             // JSON MaxValue=50 clip
+                    Sample = _ => 0,                           // unused: frame-driven graph pulls from FrameSample
                 },
             },
         });
