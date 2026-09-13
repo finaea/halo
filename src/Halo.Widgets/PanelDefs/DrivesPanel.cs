@@ -36,14 +36,10 @@ public static class DrivesPanel
         });
 
         var letters = SelectedVolumes(ctx);
-        var freeMode = new HashSet<char>(ctx.OptionList("freeMode")
-            .Where(s => s.Length > 0)
-            .Select(s => char.ToUpperInvariant(s[0])));
 
         foreach (char letter in letters)
         {
             char d = letter;                 // capture per-iteration
-            bool free = freeMode.Contains(d);
 
             // ---- Row 1: label (center) + temp (right) ----
             // Note: accent-tinting of the "(X:)" prefix (per-drive colorDrive) is omitted — the
@@ -78,11 +74,15 @@ public static class DrivesPanel
             // ---- Row 2: Used/Free (left) + Total (right) ----
             p.Elements.Add(new TextEl
             {
+                // freeMode is read per draw, never captured: the catalog does not mark it
+                // structural, so flipping a letter does not rebuild the element tree and a
+                // build-time capture left the row saying "Used:" until something else forced a
+                // rebuild — which is exactly "show free space does nothing".
                 Text = c =>
                 {
                     double used = c.Metrics.Value(MetricNames.DriveUsedB(d));
                     double total = c.Metrics.Value(MetricNames.DriveTotalB(d));
-                    return free
+                    return ShowsFree(c, d)
                         ? $"Free: {ValueFormat.AutoScale(total - used)}B"
                         : $"{c.Label("used", "Used:")} {ValueFormat.AutoScale(used)}B";
                 },
@@ -219,6 +219,26 @@ public static class DrivesPanel
         }
 
         return p;
+    }
+
+    /// <summary>
+    /// Does this volume's row show free space instead of used? Answered live, per draw, because
+    /// the option is not structural and so never costs a rebuild. Scans the raw "C,D,E" list
+    /// rather than splitting it — this runs in both the measure and the draw pass of every drive
+    /// row — and matches <see cref="SelectedVolumes"/>: an entry's first character is the letter.
+    /// </summary>
+    private static bool ShowsFree(PanelContext ctx, char drive)
+    {
+        string list = ctx.Option("freeMode");
+        for (int i = 0; i < list.Length;)
+        {
+            int end = list.IndexOf(',', i);
+            if (end < 0) end = list.Length;
+            var entry = list.AsSpan(i, end - i).Trim();
+            if (entry.Length > 0 && char.ToUpperInvariant(entry[0]) == drive) return true;
+            i = end + 1;
+        }
+        return false;
     }
 
     /// <summary>The widget's volume list, or every volume the collector published.</summary>

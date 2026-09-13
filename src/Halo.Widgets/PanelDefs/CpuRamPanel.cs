@@ -183,7 +183,17 @@ public static class CpuRamPanelImpl
         }
 
         bool perCore = view == "core" || (view == "auto" && threads > 48);
-        var ordered = logical.OrderBy(l => l.Class).ThenBy(l => l.Index).ToList();
+
+        // "Group P/E cores" (catalog key groupCoreTypes, default on). Read as "group unless the
+        // value is exactly false", never through OptionBool: ctx.Option returns "" for a key the
+        // catalog does not declare (Elements.cs:41-42), and OptionBool("") is false — which would
+        // silently flatten every user's core grid the moment this shipped ahead of the catalog
+        // entry. An unset value has to mean grouped.
+        bool group = !ctx.Option("groupCoreTypes").Equals("false", StringComparison.OrdinalIgnoreCase);
+
+        // Grouping also reorders: off is plain OS order, which is what v1 drew.
+        var ordered = (group ? logical.OrderBy(l => l.Class).ThenBy(l => l.Index)
+                             : logical.OrderBy(l => l.Index)).ToList();
         if (perCore)
         {
             // one row per physical core; the row reads the first logical CPU on that core
@@ -199,8 +209,9 @@ public static class CpuRamPanelImpl
             _ => ordered.Count <= 16 ? 1 : ordered.Count <= 32 ? 2 : 3,
         };
 
-        // group headings only when the part actually has both kinds of core
-        bool hybrid = ordered.Any(l => l.Class == 0) && ordered.Any(l => l.Class == 1);
+        // group headings only when grouping is on and the part actually has both kinds of core:
+        // in OS order the rows are interleaved, so a "P-cores" heading would be a lie
+        bool hybrid = group && ordered.Any(l => l.Class == 0) && ordered.Any(l => l.Class == 1);
         string template = ctx.UserLabel("cores") ?? (columns == 1 ? "Core {n}:" : "C{n}");
 
         var rows = new List<CoreRow>(ordered.Count + 2);

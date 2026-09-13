@@ -28,6 +28,9 @@ public sealed unsafe class App : IDisposable
     private volatile bool _deviceLost;
     private string _monitorSignature = "";
     private string _packSignature = "";
+    private long _nextPackRetryQpc;          // throttles the packer's forced re-measure
+    private long _packWaitSinceQpc;          // when the current wait-for-sizes started (0 = not waiting)
+    private bool _packWaitLogged;
     private int _lastMetricCount = -1;
 
     /// <summary>Someone asked for the whole layout to be arranged on the primary monitor — the
@@ -74,14 +77,24 @@ public sealed unsafe class App : IDisposable
         foreach (var w in _windows) w.Dispose();
         _windows.Clear();
 
-        foreach (var inst in ConfigStore.Widgets.Widgets.Where(w => w.Enabled))
+        var configured = ConfigStore.Widgets.Widgets;
+        foreach (var inst in configured.Where(w => w.Enabled))
         {
             var win = CreateWindow(inst);
             if (win != null) _windows.Add(win);
         }
         _packSignature = "";
         _placementDirty = true;
-        Log.Info($"{_windows.Count} widgets created");
+
+        // Name the disabled ones. The Settings app lists them alongside the enabled ones, so
+        // "it is in the list but not on the desktop" otherwise looks identical to a widget whose
+        // window failed to build — which is exactly how a disabled fps counter got reported as a
+        // missing window (release feedback item 11).
+        var skipped = configured.Where(w => !w.Enabled).Select(w => w.Id).ToList();
+        Log.Info($"{_windows.Count} widgets created"
+            + (skipped.Count > 0
+                ? $"; {skipped.Count} disabled in widgets.json, no window: {string.Join(", ", skipped)}"
+                : ""));
     }
 
     /// <summary>Build one widget window: resolve its monitor (and whether that monitor is
@@ -90,14 +103,13 @@ public sealed unsafe class App : IDisposable
     {
         try
         {
-            var (mon, missing) = ResolveMonitor(inst.Monitor);
-            bool displaced = missing || ArrangeRequested;
+            var (mon, missing, displaced) = ResolveHost(inst);
             double maxHz = MaxRateFor(inst);
             var ctx = new PanelContext
             {
                 Metrics = Metrics,
                 // one resolved theme per widget: global appearance + this widget's overrides
-                Theme = ResolveTheme(inst, mon, displaced),
+                Theme = ResolveTheme(inst, mon, missing),
                 Settings = ConfigStore.Settings,
                 Widget = inst,
                 Type = PanelCatalog.Find(inst.Type),
@@ -127,14 +139,26 @@ public sealed unsafe class App : IDisposable
         return PanelRates.MaxHz(type, PanelRates.MetricNamesFor(type, inst.Options), Metrics.NominalRateHz);
     }
 
-    /// <summary>Global appearance + this widget's overrides, with "auto" resolved for the monitor
-    /// it will live on. A displaced widget never renders larger than that monitor's auto scale,
-    /// so a 3.4× layout from a 4K screen still fits the 1080p one it falls back to (H7).</summary>
-    private Theme ResolveTheme(WidgetInstance inst, MonitorInfo mon, bool displaced)
+    /// <summary>
+    /// Global appearance + this widget's overrides, with "auto" resolved for the monitor it will
+    /// live on. A widget on a <b>missing</b> monitor never renders larger than the fallback
+    /// monitor's auto scale, so a 3.4× layout from a 4K screen still fits the 1080p one it lands
+    /// on (H7).
+    ///
+    /// That clamp is deliberately <b>not</b> applied to an arrange. The clamp is temporary — it
+    /// lasts only while the real monitor is away, and it is dropped the moment the widget stops
+    /// being displaced. An arrange is permanent: it writes the target monitor into the config, so
+    /// the very next reload re-resolves the widget as not-displaced and drops the clamp. Packing
+    /// at the clamped size and then rendering at the unclamped one is the same packed-size ≠
+    /// rendered-size mismatch that made an arrange overlap in the first place — it just needs a
+    /// per-widget <c>appearance.scale</c> above the target's auto scale to show up instead of a
+    /// DPI difference.
+    /// </summary>
+    private Theme ResolveTheme(WidgetInstance inst, MonitorInfo mon, bool missing)
     {
         double auto = AutoScale.For(mon);
         var theme = Theme.Resolve(ConfigStore.Settings.Appearance, inst, auto);
-        if (displaced) theme.BaseScale = Math.Min(theme.BaseScale, auto);
+        if (missing && !ArrangeRequested) theme.BaseScale = Math.Min(theme.BaseScale, auto);
         theme.Dpi = mon.Dpi;
         return theme;
     }
@@ -299,10 +323,9 @@ public sealed unsafe class App : IDisposable
                 continue;
             }
 
-            var (mon, missing) = ResolveMonitor(inst.Monitor);
-            bool displaced = missing || ArrangeRequested;
+            var (mon, missing, displaced) = ResolveHost(inst);
             double maxHz = MaxRateFor(inst);
-            win.ApplyInPlace(inst, settings, mon, displaced, ResolveTheme(inst, mon, displaced), maxHz);
+            win.ApplyInPlace(inst, settings, mon, displaced, ResolveTheme(inst, mon, missing), maxHz);
         }
 
         // keep window order in step with the config so the packer and snapping are deterministic
@@ -557,6 +580,22 @@ public sealed unsafe class App : IDisposable
     }
 
     /// <summary>
+    /// The monitor a widget is themed and drawn on, and whether that is a fallback rather than its
+    /// own. This must agree with the monitor <see cref="RunPacker"/> packs onto, because base
+    /// scale and DPI together decide the window's pixel size and the packer lays out boxes of
+    /// exactly that size. A missing monitor already resolves to the primary, so the two only
+    /// disagreed on an explicit arrange — which themed each widget for its configured monitor
+    /// while packing every one of them onto the primary. Measured 2026-09-13: ten widgets themed
+    /// for a 96 dpi display, packed onto the 120 dpi primary, gave 351 px-wide boxes for windows
+    /// that are really 438 px wide (1.25×), so the columns and the rows inside them overlapped.
+    /// </summary>
+    private (MonitorInfo Monitor, bool Missing, bool Displaced) ResolveHost(WidgetInstance inst)
+    {
+        var (mon, missing) = ResolveMonitor(inst.Monitor);
+        return ArrangeRequested ? (PrimaryMonitor, missing, true) : (mon, missing, missing);
+    }
+
+    /// <summary>
     /// Monitor whose work area best contains the rect (max overlap; nearest when the rect
     /// lies in a dead zone of the virtual desktop). KeepOnScreen clamps against THIS, not
     /// the configured monitor — a widget placed on a secondary monitor must not be yanked
@@ -669,9 +708,8 @@ public sealed unsafe class App : IDisposable
         _placementDirty = false;
         foreach (var win in _windows)
         {
-            var (mon, missing) = ResolveMonitor(win.Config.Monitor);
-            bool displaced = missing || ArrangeRequested;
-            win.ApplyMonitor(mon, displaced, ResolveTheme(win.Config, mon, displaced));
+            var (mon, missing, displaced) = ResolveHost(win.Config);
+            win.ApplyMonitor(mon, displaced, ResolveTheme(win.Config, mon, missing));
         }
         RunPacker();
     }
@@ -685,8 +723,40 @@ public sealed unsafe class App : IDisposable
     {
         var packed = _windows.Where(w => w.Displaced).ToList();
         if (packed.Count == 0) { _packSignature = ""; return; }
-        // sizes only exist after a layout pass, so wait for the first tick of each window
-        foreach (var w in packed) if (w.PixelSize.H <= 0) return;
+
+        // A pack is all-or-nothing, and it lays out boxes of exactly PixelSize — so it may only
+        // run once EVERY packed window has laid out at the scale it will actually be drawn at.
+        // Sizes exist only after a tick, and re-theming a widget (an arrange moves it to the
+        // primary monitor's DPI) invalidates the one it has until its next tick. Packing against
+        // a stale size is precisely how widgets end up on top of each other, so bail — before the
+        // signature is stored, which is what guarantees the retry — and pull the windows' ticks
+        // forward so the retry lands on the next pass instead of at their own refresh rate.
+        if (packed.Any(w => w.SizeStale))
+        {
+            long stamp = Stopwatch.GetTimestamp();
+            if (_packWaitSinceQpc == 0) _packWaitSinceQpc = stamp;
+            if (stamp < _nextPackRetryQpc) return;     // a window that never measures must not spin
+            _nextPackRetryQpc = stamp + Stopwatch.Frequency / 10;
+            // Packing around a widget that will not measure is the overlap bug itself, so that is
+            // never the answer — but a widget whose layout keeps throwing would otherwise hold the
+            // arrange forever with nothing in the log to say why. Nothing has moved and nothing was
+            // written, so the state is simply "not arranged yet"; name it once and keep retrying.
+            if (!_packWaitLogged && stamp - _packWaitSinceQpc > 5 * Stopwatch.Frequency)
+            {
+                _packWaitLogged = true;
+                Log.Warn("auto-arrange: still no laid-out size from "
+                    + string.Join(", ", packed.Where(w => w.SizeStale).Select(w => w.Config.Id))
+                    + " — no widget has been moved and the arrange stays pending");
+            }
+            foreach (var w in packed)
+            {
+                w.RemeasureSoon();
+                if (w.NextDueQpc > stamp) w.NextDueQpc = stamp;
+            }
+            return;
+        }
+        _packWaitSinceQpc = 0;
+        _packWaitLogged = false;
 
         var target = PrimaryMonitor;
         // the arrange flag is part of the signature: a fresh request must re-pack even when the

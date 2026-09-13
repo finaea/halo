@@ -57,10 +57,20 @@ public static class ColumnPacker
     {
         var result = new List<Placed>(items.Count);
         int top = monitor.Y + Gap;
-        int bottom = monitor.Y + monitor.H;
+        // Inset from the bottom to match the top and right. Flush with the work area a widget sits
+        // against the taskbar, and KeepOnScreen then pulls it back up into the one above it.
+        int bottom = monitor.Y + monitor.H - Gap;
+        int left = monitor.X + Gap;
         int colRight = monitor.X + monitor.W - Gap;
         int colWidth = 0;
         int y = top;
+
+        // Is there room for another column of width w to the left of the current one? When there
+        // is not, the pass keeps stacking downward instead: a column running past the bottom of
+        // the work area is recoverable (drag it back), two panels drawn on top of each other are
+        // not, and marching columns off the left edge only feeds them back to KeepOnScreen, which
+        // clamps them all to the same edge — overlap again.
+        bool CanWrap(int w) => colRight - colWidth - Gap - w >= left;
 
         foreach (var item in items)
         {
@@ -68,7 +78,7 @@ public static class ColumnPacker
             int h = Math.Max(1, item.H);
 
             // no room left in this column → start a new one to the left
-            if (y + h > bottom && y > top)
+            if (y + h > bottom && y > top && CanWrap(w))
             {
                 colRight -= colWidth + Gap;
                 colWidth = 0;
@@ -87,6 +97,7 @@ public static class ColumnPacker
                 y = hit.Value.Y + hit.Value.H + Gap;
                 if (y + h > bottom)
                 {
+                    if (!CanWrap(w)) break;   // out of monitor: stack past the bottom, never overlap
                     colRight -= Math.Max(colWidth, w) + Gap;
                     colWidth = 0;
                     y = top;

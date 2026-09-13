@@ -54,6 +54,18 @@ public sealed unsafe class WidgetWindow : IDisposable
 
     public (int W, int H) PixelSize => (_pxW, _pxH);
 
+    /// <summary>
+    /// True while <see cref="PixelSize"/> still describes a scale this widget is no longer drawn
+    /// at. The size is measured in <see cref="Tick"/> from the theme's effective scale, so
+    /// re-theming the widget — moving it to a monitor with a different DPI or auto scale —
+    /// invalidates it until the next tick redraws. The packer lays out boxes of exactly this size,
+    /// so it must never pack a window whose size still describes the old scale.
+    /// </summary>
+    public bool SizeStale => _pxH <= 0 || Math.Abs(_measuredScale - Ctx.Theme.EffectiveScale) > 1e-9;
+
+    /// <summary>Make the next tick re-measure whatever the panel thinks about dirtiness.</summary>
+    public void RemeasureSoon() => _needsFullRedraw = true;
+
     private readonly Dx _dx;
     private readonly App _app;
     private IDXGISwapChain1? _swapChain;
@@ -62,6 +74,7 @@ public sealed unsafe class WidgetWindow : IDisposable
     private ID2D1DeviceContext? _d2dDc;
     private RenderContext? _rc;
     private int _pxW, _pxH;
+    private double _measuredScale = -1;      // effective scale _pxW/_pxH were measured at
     private float _dcDpi;
     private bool _needsFullRedraw = true;
 
@@ -192,6 +205,7 @@ public sealed unsafe class WidgetWindow : IDisposable
         int pxW = (int)Math.Ceiling(Ctx.Theme.BgWidth * scale);
         int pxH = (int)Math.Ceiling(logicalH * scale);
         if (pxH < 8) pxH = 8;
+        _measuredScale = scale;
 
         bool sizeChanged = pxW != _pxW || pxH != _pxH;
         if (sizeChanged)

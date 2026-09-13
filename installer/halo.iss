@@ -70,6 +70,25 @@ Name: "pawnio"; Description: "PawnIO driver for CPU temps, fans, drive temps"; T
     Check: not PawnIoInstalled
 Name: "autostart"; Description: "Start with Windows"; Types: full
 
+[InstallDelete]
+; Fonts that earlier builds shipped and the public release deliberately removed: SegMDL2.ttf is
+; Microsoft proprietary and MaterialIcons.ttf was unreferenced (THIRD-PARTY-NOTICES.md).
+;
+; This is not tidiness. The payload below is copied with "ignoreversion", which overwrites but
+; never DELETES, and there is nothing else in this script that removes a file during an install -
+; so upgrading over a build that shipped these leaves both on disk for good. Dx.LoadFonts adds
+; every *.ttf in the folder to the private font collection by glob (src\Halo.Widgets\Dx.cs:58),
+; so a leftover font is still LOADED, not merely present: an upgraded install keeps a proprietary
+; Microsoft font in Halo's own font collection. Verified 2026-09-14 by planting files a newer
+; version does not ship and upgrading over the top - all of them survived.
+;
+; Deliberately two exact paths and "Type: files", not a recursive sweep of assets\: a wrong path
+; in a recursive delete is worse than a stale file, and the exposure is specifically these fonts.
+; [InstallDelete] runs BEFORE [Files] copies anything, which is what makes this safe - a font the
+; current version still ships is deleted here and restored by the copy a moment later.
+Type: files; Name: "{app}\assets\fonts\SegMDL2.ttf"
+Type: files; Name: "{app}\assets\fonts\MaterialIcons.ttf"
+
 [Files]
 ; dist\app is the layout contract, shipped verbatim: three exes over one shared
 ; self-contained runtime, plus assets\, presentmon\, redist\ and the licence files.
