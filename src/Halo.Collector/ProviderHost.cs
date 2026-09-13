@@ -31,11 +31,21 @@ public sealed class ProviderHost : IDisposable
     public IReadOnlyList<(string Name, bool Available, double RateHz, double LastPollMs)> Status()
         => _runners.Select(r => (r.Provider.Name, r.Available, r.RateHz, r.LastPollMs)).ToList();
 
+    /// <summary>
+    /// Handle a <c>rescan</c> command: every provider whose Initialize enumerates hardware is
+    /// woken and re-initialised on its own thread, so a GPU, fan channel or volume that appeared
+    /// since start-up gets registered without restarting the collector. Returns how many were
+    /// asked (the work itself happens asynchronously on the provider threads).
+    /// </summary>
+    public int Rescan() => _runners.Count(r => r.RequestRescan());
+
     public void Dispose()
     {
         _cts.Cancel();
+        foreach (var r in _runners) r.Wake();   // cut short a long sleep (lhm-storage waits 10 s)
         foreach (var r in _runners) r.Join(2000);
         foreach (var r in _runners) { try { r.Provider.Dispose(); } catch { } }
+        foreach (var r in _runners) r.DisposeWake();
     }
 
     private sealed class Runner(ISensorProvider provider, MetricSink sink, CancellationToken ct)
@@ -50,13 +60,32 @@ public sealed class ProviderHost : IDisposable
         private string? _lastErrorSig;
         private DateTime _nextErrorLog;
 
+        /// <summary>Lets the host interrupt the inter-poll sleep — a rescan or a shutdown should
+        /// not have to wait out lhm-storage's 10 s period.</summary>
+        private readonly AutoResetEvent _wake = new(false);
+        private volatile bool _rescanRequested;
+
         public void Start()
         {
             _thread = new Thread(Run) { IsBackground = true, Name = $"halo-{Provider.Name}" };
             _thread.Start();
         }
 
+        /// <summary>Ask this provider to re-enumerate. False = it opted out (see
+        /// <see cref="ISensorProvider.RescanReinitialises"/>).</summary>
+        public bool RequestRescan()
+        {
+            if (!Provider.RescanReinitialises) return false;
+            _rescanRequested = true;
+            _wake.Set();
+            return true;
+        }
+
+        public void Wake() => _wake.Set();
+
         public void Join(int ms) => _thread?.Join(ms);
+
+        public void DisposeWake() => _wake.Dispose();
 
         private void Run()
         {
@@ -82,7 +111,10 @@ public sealed class ProviderHost : IDisposable
                     int delay = initFailures switch { 0 => 1000, 1 => 5000, 2 => 30000, _ => 60000 };
                     initFailures++;
                     if (initFailures <= 3) Log.Warn($"{Provider.Name}: unavailable, retry in {delay} ms");
-                    if (ct.WaitHandle.WaitOne(delay)) return;
+                    // A rescan cuts the backoff short — that is exactly the case where the user
+                    // just plugged in the hardware this provider was waiting for.
+                    if (WaitHandle.WaitAny([ct.WaitHandle, _wake], delay) == 0) return;
+                    _rescanRequested = false;
                     continue;
                 }
 
@@ -98,6 +130,13 @@ public sealed class ProviderHost : IDisposable
 
                 while (!ct.IsCancellationRequested)
                 {
+                    if (_rescanRequested)
+                    {
+                        _rescanRequested = false;
+                        Log.Info($"{Provider.Name}: re-enumerating hardware (rescan)");
+                        break;  // Available stays true, so the outer loop re-runs Initialize now
+                    }
+
                     sw.Restart();
                     try
                     {
@@ -142,7 +181,12 @@ public sealed class ProviderHost : IDisposable
                         continue;
                     }
                     int sleepMs = (int)((next - now) * 1000 / Stopwatch.Frequency);
-                    if (sleepMs > 0 && ct.WaitHandle.WaitOne(sleepMs)) return;
+                    if (sleepMs > 0)
+                    {
+                        int woke = WaitHandle.WaitAny([ct.WaitHandle, _wake], sleepMs);
+                        if (woke == 0) return;                              // cancelled
+                        if (woke == 1) next = Stopwatch.GetTimestamp();     // woken early: re-base the cadence
+                    }
                 }
             }
         }

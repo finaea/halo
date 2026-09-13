@@ -24,7 +24,7 @@ public sealed class NetworkProvider(ConfigStore config) : ISensorProvider
 {
     public string Name => "network";
     public double MaxRateHz => 64;
-    public double DefaultRateHz => 5;
+    public double DefaultRateHz => CollectorRates.Network;
 
     private static volatile bool _resetRequested;
     public static void RequestTotalsReset() => _resetRequested = true;

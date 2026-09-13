@@ -25,6 +25,14 @@ public interface ISensorProvider : IDisposable
     string? UnavailableReason => null;
 
     /// <summary>
+    /// True when <see cref="Initialize"/> is what enumerates this provider's hardware, so the
+    /// control pipe's <c>rescan</c> command re-runs it. Opting in costs one extra Initialize per
+    /// rescan; providers that own an ETW session or a counter baseline stay out, because tearing
+    /// those down to look for a new fan would lose frame data or reset the session totals.
+    /// </summary>
+    bool RescanReinitialises => false;
+
+    /// <summary>
     /// Initialise hardware access and register metrics via the sink.
     /// Returning false marks the provider unavailable (its metrics read N/A); the host
     /// retries Initialize with backoff so hot-plug / service-start recovers it.

@@ -31,7 +31,18 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
 
     public string Name => "presentmon";
     public double MaxRateHz => 120;    // frame drain + stats publish; lows cached at 2 Hz inside FrameStats
-    public double DefaultRateHz => 40; // frames reach the ring in ≤25 ms batches; stats publish per poll
+    public double DefaultRateHz => CollectorRates.PresentMon; // frames reach the ring in ≤25 ms batches; stats publish per poll
+
+    /// <summary>The 1% / 0.1% lows are recomputed at 2 Hz and cached between (the sort over the
+    /// full window dominates), so that — not the poll rate — is their nominal cadence.</summary>
+    private const double LowsRateHz = 2;
+
+    /// <summary>Owning an ETW session needs admin. Attaching to an already-installed running
+    /// PresentMon service works unelevated, which is why this is a flag and not a hard gate.</summary>
+    public bool NeedsElevation => true;
+
+    public string? UnavailableReason => _unavailableReason;
+    private string? _unavailableReason;
 
     private Process? _proc;
     private Thread? _pumpThread;
@@ -80,26 +91,29 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
         _idleSinceQpc = 0;
 
         // registration is idempotent and must precede the elevation gate: the sdk transport
-        // can attach to an already-installed running service without admin
-        sink.Register(MetricNames.FpsPresented, MetricType.Double, MetricUnit.Fps, Name, MaxRateHz);
-        sink.Register(MetricNames.FpsDisplayed, MetricType.Double, MetricUnit.Fps, Name, MaxRateHz);
-        sink.Register(MetricNames.FpsFrametimePresentedMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
-        sink.Register(MetricNames.FpsFrametimePresentedWorstMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
-        sink.Register(MetricNames.FpsFrametimeDisplayedMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
-        sink.Register(MetricNames.FpsFrametimeDisplayedWorstMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
+        // can attach to an already-installed running service without admin.
+        // Each metric registers the cadence it really changes at, not the provider's ceiling:
+        // stats publish once per poll, the lows are recomputed at LowsRateHz inside FrameStats,
+        // and the app name / refresh rate / DLSS scan run on their own slower timers.
+        sink.Register(MetricNames.FpsPresented, MetricType.Double, MetricUnit.Fps, Name, DefaultRateHz);
+        sink.Register(MetricNames.FpsDisplayed, MetricType.Double, MetricUnit.Fps, Name, DefaultRateHz);
+        sink.Register(MetricNames.FpsFrametimePresentedMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz);
+        sink.Register(MetricNames.FpsFrametimePresentedWorstMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz);
+        sink.Register(MetricNames.FpsFrametimeDisplayedMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz);
+        sink.Register(MetricNames.FpsFrametimeDisplayedWorstMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz);
         sink.Register(MetricNames.FpsTapActive, MetricType.Double, MetricUnit.None, Name, 1);
-        sink.Register(MetricNames.FpsLow1Presented, MetricType.Double, MetricUnit.Fps, Name, MaxRateHz);
-        sink.Register(MetricNames.FpsLow01Presented, MetricType.Double, MetricUnit.Fps, Name, MaxRateHz);
-        sink.Register(MetricNames.FpsLow1Displayed, MetricType.Double, MetricUnit.Fps, Name, MaxRateHz);
-        sink.Register(MetricNames.FpsLow01Displayed, MetricType.Double, MetricUnit.Fps, Name, MaxRateHz);
-        sink.Register(MetricNames.FpsFgRatio, MetricType.Double, MetricUnit.None, Name, MaxRateHz);
+        sink.Register(MetricNames.FpsLow1Presented, MetricType.Double, MetricUnit.Fps, Name, LowsRateHz);
+        sink.Register(MetricNames.FpsLow01Presented, MetricType.Double, MetricUnit.Fps, Name, LowsRateHz);
+        sink.Register(MetricNames.FpsLow1Displayed, MetricType.Double, MetricUnit.Fps, Name, LowsRateHz);
+        sink.Register(MetricNames.FpsLow01Displayed, MetricType.Double, MetricUnit.Fps, Name, LowsRateHz);
+        sink.Register(MetricNames.FpsFgRatio, MetricType.Double, MetricUnit.None, Name, DefaultRateHz);
         sink.Register(MetricNames.FpsRefreshHz, MetricType.Double, MetricUnit.Hertz, Name, 1);
         sink.Register(MetricNames.FpsAppName, MetricType.String, MetricUnit.Text, Name, 1);
-        sink.Register(MetricNames.LatencyClickMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
-        sink.Register(MetricNames.LatencyAllInputMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
+        sink.Register(MetricNames.LatencyClickMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz);
+        sink.Register(MetricNames.LatencyAllInputMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz);
         // latency.pcl.ms is owned by PclStatsProvider (true marker-based). PresentMon only
         // contributes the present->displayed (P2D) span it uniquely measures.
-        sink.Register(MetricNames.FpsDisplayLatencyMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
+        sink.Register(MetricNames.FpsDisplayLatencyMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz);
         sink.Register(MetricNames.DlssModel, MetricType.String, MetricUnit.Text, Name, 0.5);
         sink.Register(MetricNames.DlssSrPresent, MetricType.Double, MetricUnit.None, Name, 0.5);
         sink.Register(MetricNames.DlssFgPresent, MetricType.Double, MetricUnit.None, Name, 0.5);
@@ -109,25 +123,37 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
         Stats.SetWindow(Settings.FrameLowsWindowS);
 
         bool elevated = Elevation.IsElevated;
+        // Documented values are "auto" and "sdk" (the console capture app is an internal
+        // fallback, not something a user picks any more). Anything else means auto.
         string transport = Settings.PresentMonTransport.Trim().ToLowerInvariant();
-
-        if (transport is "auto" or "sdk")
+        if (transport is not ("auto" or "sdk"))
         {
-            var sdk = new PresentMonSdkSource();
-            if (sdk.Start(Paths.PresentMonDir, elevated, Settings.PresentMonEtwFlushMs))
-            {
-                _sdk = sdk;
-                Log.Info($"presentmon transport: sdk ({sdk.Detail})");
-                StartTap(sink, elevated);
-                return true;
-            }
-            sdk.Dispose();
-            if (transport == "sdk") return false;
+            Log.Warn($"collector.presentMonTransport '{transport}' is not a value Halo knows — using \"auto\"");
+            transport = "auto";
+        }
+        _unavailableReason = null;
+
+        var sdk = new PresentMonSdkSource();
+        if (sdk.Start(Paths.PresentMonDir, elevated, Settings.PresentMonEtwFlushMs))
+        {
+            _sdk = sdk;
+            Log.Info($"presentmon transport: sdk ({sdk.Detail})");
+            StartTap(sink, elevated);
+            return true;
+        }
+        sdk.Dispose();
+        if (transport == "sdk")
+        {
+            _unavailableReason = elevated ? ProviderError.NoSdk : ProviderError.Unelevated;
+            return false;
         }
 
         if (!elevated)
         {
-            return false; // console transport needs admin (ETW); host retries with backoff
+            // The console transport owns its own ETW session, so without admin there is nothing
+            // left to try. The host retries with backoff in case a service appears later.
+            _unavailableReason = ProviderError.Unelevated;
+            return false;
         }
 
         string? exe = Directory.Exists(Paths.PresentMonDir)
@@ -136,6 +162,7 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
         if (exe == null)
         {
             Log.Warn("presentmon: binary not found under tools\\presentmon");
+            _unavailableReason = ProviderError.NoSdk;
             return false;
         }
 
@@ -155,6 +182,7 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
             Log.Info("presentmon transport: console app");
             StartTap(sink, elevated: true);
         }
+        else _unavailableReason = ProviderError.Failed;
         return started;
     }
 

@@ -189,6 +189,25 @@ public sealed unsafe class MetricsWriter : IDisposable
         Volatile.Write(ref *(long*)(v + 8), Stopwatch.GetTimestamp()); // release: timestamp last
     }
 
+    /// <summary>
+    /// Read back a value this writer published. Not a substitute for <see cref="MetricsReader"/> —
+    /// it exists so the collector can compute a Calc metric from metrics another provider owns
+    /// (latency.pc.ms sums a PCL-marker value and a PresentMon one) without a second mapping of
+    /// the section. Returns false for a slot that was never written or is marked N/A.
+    /// </summary>
+    public bool TryRead(int index, out double value, out double ageSeconds)
+    {
+        value = 0;
+        ageSeconds = double.MaxValue;
+        if (index < 0 || index >= SharedMemoryLayout.MaxMetrics) return false;
+        byte* v = B + SharedMemoryLayout.ValuesOffset + index * SharedMemoryLayout.ValueEntrySize;
+        long ts = Volatile.Read(ref *(long*)(v + 8));
+        if (ts == 0) return false;
+        value = *(double*)v;
+        ageSeconds = (double)(Stopwatch.GetTimestamp() - ts) / Stopwatch.Frequency;
+        return true;
+    }
+
     /// <summary>Mark a metric stale/N-A without touching the last value.</summary>
     public void MarkStale(int index)
     {

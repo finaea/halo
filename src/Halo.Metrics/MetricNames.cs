@@ -107,6 +107,9 @@ public static class MetricNames
     public const string LatencyAllInputMs = "latency.allinput.ms";       // All-Input-to-Photon
     public const string LatencyQueueMs = "latency.queue.ms";             // input queue wait: PCLStatsInput post → ping consume (I2FS, ②a)
     public const string LatencyRenderMs = "latency.render.ms";           // ping consume → present (render pipeline, FS2P)
+    /// <summary>Overlay-equivalent PC latency: queue + render + display, summed by the collector.
+    /// Calc — needs the render component; the other two add on when their providers have them.</summary>
+    public const string LatencyPcMs = "latency.pc.ms";
     public const string RenderRateHz = "render.rate.hz";                 // game-rendered (pre-frame-gen) rate from PCL simulation markers
     public const string FpsDisplayLatencyMs = "fps.displaylatency.ms";   // present→displayed (P2D) from PresentMon MsUntilDisplayed
 

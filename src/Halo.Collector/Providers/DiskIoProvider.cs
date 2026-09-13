@@ -19,7 +19,10 @@ public sealed class DiskIoProvider : ISensorProvider
 {
     public string Name => "disk-io";
     public double MaxRateHz => 64;
-    public double DefaultRateHz => 5;
+    public double DefaultRateHz => CollectorRates.DiskIo;
+
+    /// <summary>Initialize binds a PDH counter per volume, so `rescan` rebuilds the query.</summary>
+    public bool RescanReinitialises => true;
 
     private nint _query;
     private readonly List<(char Letter, nint Read, nint Write)> _counters = new();

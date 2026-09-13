@@ -17,7 +17,10 @@ public sealed class BuiltinProvider(ConfigStore config, bool elevated) : ISensor
 {
     public string Name => "builtin";
     public double MaxRateHz => 4;
-    public double DefaultRateHz => 1;
+    public double DefaultRateHz => CollectorRates.Builtin;
+
+    /// <summary>Initialize enumerates the volumes and probes PawnIO, so `rescan` re-runs it.</summary>
+    public bool RescanReinitialises => true;
 
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(5) };
     private DateTime _nextExternalIp = DateTime.MinValue;
@@ -25,6 +28,7 @@ public sealed class BuiltinProvider(ConfigStore config, bool elevated) : ISensor
     private string _externalIp = "N/A";
     private List<char> _drives = new();
     private bool _ramTotalPublished;
+    private bool _netSubscribed;
 
     public bool Initialize(MetricSink sink)
     {
@@ -39,10 +43,16 @@ public sealed class BuiltinProvider(ConfigStore config, bool elevated) : ISensor
 
         PublishCapabilities(sink);
 
+        // Re-running Initialize (retry or rescan) re-discovers the volumes, which re-publishes
+        // each one's Static capacity and label — that is how a renamed drive refreshes.
         _drives = new();
         SyncDrives(sink);
 
-        NetworkChange.NetworkAddressChanged += (_, _) => { _netChanged = true; };
+        if (!_netSubscribed)
+        {
+            _netSubscribed = true;   // once per process: Initialize can run again
+            NetworkChange.NetworkAddressChanged += (_, _) => { _netChanged = true; };
+        }
         return true;
     }
 

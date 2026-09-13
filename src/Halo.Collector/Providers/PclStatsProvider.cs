@@ -26,7 +26,13 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
 {
     public string Name => "pclstats";
     public double MaxRateHz => 20;
-    public double DefaultRateHz => 5;
+    public double DefaultRateHz => CollectorRates.PclStats;
+
+    /// <summary>Owns a real-time ETW session, which is admin-only. No unelevated path exists.</summary>
+    public bool NeedsElevation => true;
+
+    public string? UnavailableReason => _unavailableReason;
+    private string? _unavailableReason;
 
     // marker enum (PCLSTATS_LATENCY_MARKER_TYPE); confirmed values filled in from the header.
     private const int SIMULATION_START = 0;
@@ -61,11 +67,20 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
 
     public bool Initialize(MetricSink sink)
     {
-        if (!IsElevated()) return false; // ETW real-time session needs admin
+        if (!IsElevated())
+        {
+            _unavailableReason = ProviderError.Unelevated; // ETW real-time session needs admin
+            return false;
+        }
+        _unavailableReason = null;
 
-        sink.Register(MetricNames.LatencyQueueMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
-        sink.Register(MetricNames.LatencyRenderMs, MetricType.Double, MetricUnit.Milliseconds, Name, MaxRateHz);
-        sink.Register(MetricNames.RenderRateHz, MetricType.Double, MetricUnit.Hertz, Name, MaxRateHz);
+        sink.Register(MetricNames.LatencyQueueMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz);
+        sink.Register(MetricNames.LatencyRenderMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz);
+        sink.Register(MetricNames.RenderRateHz, MetricType.Double, MetricUnit.Hertz, Name, DefaultRateHz);
+        // The headline number every latency panel shows. Published here rather than computed in
+        // each consumer so a third-party tool gets the same value Halo's own widget draws.
+        sink.Register(MetricNames.LatencyPcMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz,
+            MetricSemantics.Calc, MetricFlags.Derived);
 
         Guid guid = providerGuidOverride != Guid.Empty
             ? providerGuidOverride
@@ -96,6 +111,7 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
         catch (Exception ex)
         {
             Log.Error("pclstats init", ex);
+            _unavailableReason = ProviderError.Failed;
             Dispose();
             return false;
         }
@@ -213,6 +229,7 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
         else sink.MarkStale(MetricNames.LatencyRenderMs);
         if (eventsFresh && haveQueue) sink.Set(MetricNames.LatencyQueueMs, queue);
         else sink.MarkStale(MetricNames.LatencyQueueMs);
+        PublishPcLatency(sink, eventsFresh && haveRender && render > 0, render, haveQueue ? queue : 0);
         if (renderHz > 0) sink.Set(MetricNames.RenderRateHz, renderHz);
         else if (!eventsFresh) sink.MarkStale(MetricNames.RenderRateHz);
 
@@ -223,6 +240,28 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
             lock (_lock) hist = string.Join(" ", _markerHist.OrderBy(k => k.Key).Select(k => $"m{k.Key}={k.Value}"));
             Log.Info($"pcl-hist: {hist} | render={render:0.0} queue={queue:0.0} renderN={_renderWin.Count} inputPost={(_lastInputPostMs >= 0 ? "y" : "n")}");
         }
+    }
+
+    /// <summary>
+    /// PC latency the way the NVIDIA overlay counts it: queue wait (input post → ping consume)
+    /// + render (consume → present) + display (present → photons, from PresentMon's
+    /// MsUntilDisplayed). Render is the mandatory component — without a marker-tagged frame there
+    /// is no PC latency to report — and the other two add on when their provider has them, so a
+    /// machine without the PresentMon service still gets the two-segment number.
+    ///
+    /// The display segment belongs to another provider, so it is read back out of the section
+    /// with a freshness bound rather than cached here: a frozen component would otherwise keep
+    /// inflating the sum after the game stopped presenting.
+    /// </summary>
+    private static void PublishPcLatency(MetricSink sink, bool haveRender, double render, double queue)
+    {
+        if (!haveRender)
+        {
+            sink.MarkStale(MetricNames.LatencyPcMs);
+            return;
+        }
+        double display = sink.TryGet(MetricNames.FpsDisplayLatencyMs, out double d, maxAgeS: 3) ? d : 0;
+        sink.Set(MetricNames.LatencyPcMs, queue + render + display);
     }
 
     /// <summary>Mean of samples newer than cutoff; trims older ones from the front. Caller holds _lock.</summary>

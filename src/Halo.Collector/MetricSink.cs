@@ -78,6 +78,21 @@ public sealed class MetricSink(MetricsWriter writer)
 
     public bool IsRegistered(string name) => _indexByName.ContainsKey(name);
 
+    /// <summary>
+    /// Read back a metric another provider published, for Calc metrics that combine sources
+    /// (latency.pc.ms adds PresentMon's display latency to PCL's queue and render times).
+    /// False when the metric is not registered yet, was never written, is N/A, or is older than
+    /// <paramref name="maxAgeS"/> — so a Calc never quietly keeps summing a frozen component.
+    /// </summary>
+    public bool TryGet(string name, out double value, double maxAgeS = double.MaxValue)
+    {
+        value = 0;
+        if (!_indexByName.TryGetValue(name, out int idx)) return false;
+        if (!Writer.TryRead(idx, out value, out double age)) return false;
+        if (age > maxAgeS) { value = 0; return false; }
+        return true;
+    }
+
     public void SetEffectiveRate(string name, double hz)
     {
         if (_indexByName.TryGetValue(name, out int idx)) Writer.SetEffectiveRate(idx, (float)hz);

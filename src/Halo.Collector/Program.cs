@@ -162,9 +162,10 @@ using var commands = new CommandServer(cmd =>
         case ControlPipe.ResetNet: NetworkProvider.RequestTotalsReset(); break;
         case ControlPipe.ReloadConfig: configStore.Reload(); Log.Info("config reloaded on request"); break;
         case ControlPipe.Rescan:
-            // Hardware sets are reconciled by each provider on its own poll, so this only means
-            // "don't wait for the slow ones". Forcing a re-enumeration lands with ticket 02.
-            Log.Info("rescan requested");
+            // Re-runs Initialize on every provider that enumerates hardware there (GPUs, fans,
+            // volumes, CPU topology), on each provider's own thread. Providers that own an ETW
+            // session or a counter baseline are skipped — see ISensorProvider.RescanReinitialises.
+            Log.Info($"rescan requested: re-enumerating {host.Rescan()} provider(s)");
             break;
         case ControlPipe.Ping: break;
         default: Log.Warn($"unknown command: {cmd}"); break;

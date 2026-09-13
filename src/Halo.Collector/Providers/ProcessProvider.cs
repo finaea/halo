@@ -15,7 +15,7 @@ public sealed unsafe class ProcessProvider : ISensorProvider
 {
     public string Name => "process";
     public double MaxRateHz => 2;
-    public double DefaultRateHz => 1;
+    public double DefaultRateHz => CollectorRates.Process;
 
     /// <summary>Ranks published per ranking. Widgets show between 1 and this many rows; the
     /// collector always publishes the full set so changing a widget's row count is instant

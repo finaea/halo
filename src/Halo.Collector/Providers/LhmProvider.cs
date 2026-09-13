@@ -28,6 +28,10 @@ public sealed class LhmProvider : ISensorProvider
 
     public string? UnavailableReason => _unavailableReason;
 
+    /// <summary>Initialize opens the LHM Computer, which is where the hardware tree — fans, GPUs,
+    /// disks — is enumerated. A `rescan` re-runs it.</summary>
+    public bool RescanReinitialises => true;
+
     public double MaxRateHz => _part switch
     {
         Part.Cpu => 20,
@@ -39,12 +43,10 @@ public sealed class LhmProvider : ISensorProvider
 
     public double DefaultRateHz => _part switch
     {
-        // 5 Hz, not 10: at 10 Hz the MSR sweep overruns its period on 2.78 % of polls
-        // (docs\current-metrics-inventory.md § Provider cost measurement, rates plan R1).
-        Part.Cpu => 5,
-        Part.SuperIo => 1,
-        Part.Storage => 1.0 / 30,
-        Part.Gpu => 1,
+        Part.Cpu => CollectorRates.LhmCpu,
+        Part.SuperIo => CollectorRates.LhmSuperIo,
+        Part.Storage => CollectorRates.LhmStorage,
+        Part.Gpu => CollectorRates.LhmGpu,
         _ => 1,
     };
 
@@ -99,18 +101,33 @@ public sealed class LhmProvider : ISensorProvider
                 // is a property of the board, not a constant (hardware plan H1).
                 break;
             case Part.Storage:
-                foreach (char c in Volumes.Local())
+                // Re-init (retry or rescan) re-enumerated the disks, so the letter→model map and
+                // the "no match" log suppressor start over with the fresh tree.
+                _letterToModel = null;
+                _unmatchedLogged.Clear();
+                var vols = Volumes.Local();
+                _storageLetters = Volumes.Key(vols);
+                foreach (char c in vols)
                     sink.Register(MetricNames.DriveTempC(c), MetricType.Double, MetricUnit.Celsius, Name, DefaultRateHz,
                         flags: MetricFlags.NeedsElevation);
                 break;
             case Part.Gpu:
-                sink.RegisterWithMax(MetricNames.GpuVoltageV(0), MetricUnit.Volts, Name, DefaultRateHz);
-                sink.Register(MetricNames.GpuFanRpm(0), MetricType.Double, MetricUnit.Rpm, Name, DefaultRateHz);
+                InitGpu(sink);
                 break;
         }
 
         Log.Info($"{Name}: hardware = {string.Join("; ", AllHardware().Select(h => $"{h.HardwareType}:{h.Name}"))}");
         return true;
+    }
+
+    /// <summary>Close and re-open the LHM Computer so its hardware tree is enumerated again.
+    /// Runs on this provider's own poll thread, so nothing else is touching _computer.</summary>
+    private void ReopenComputer()
+    {
+        if (_computer == null) return;
+        try { _computer.Close(); } catch (Exception ex) { Log.Warn($"{Name}: close before re-open: {ex.Message}"); }
+        _computer.Open();
+        foreach (var hw in AllHardware()) hw.Update();
     }
 
     private IEnumerable<IHardware> AllHardware()
@@ -172,49 +189,52 @@ public sealed class LhmProvider : ISensorProvider
     }
 
     /// <summary>
-    /// Publishes every fan channel the board exposes (v1 stopped at 8 and needed a config list).
-    /// A fan's percentage is no longer computed here: the duty cycle the chip itself reports
+    /// Publishes every fan channel the board exposes — all of them, in LHM identifier order, with
+    /// no cap and no name matching (v1 stopped at 8 and needed a per-board config list). Which
+    /// channels are worth showing is the widget's decision, not the collector's (plan H1).
+    ///
+    /// A fan's percentage is not computed here: the duty cycle the chip itself reports
     /// (<c>fan.&lt;n&gt;.control.pct</c>) is published when a paired Control sensor exists, and
     /// widgets fall back to rpm ÷ max otherwise — no board-specific max table in the collector
     /// (hardware plan H4).
     /// </summary>
     private void PollSuperIo(MetricSink sink)
     {
+        // Channel numbering runs across every SuperIO chip on the board, so a second controller
+        // continues the range instead of overwriting channel 0.
+        int fanIdx = 0;
         foreach (var hw in AllHardware().Where(h => h.HardwareType == HardwareType.SuperIO))
         {
             // LHM names them "Fan #N" / "Fan Control #N"; pair on the trailing number, else by order.
             var controls = hw.Sensors.Where(s => s.SensorType == SensorType.Control)
                                      .OrderBy(s => s.Identifier.ToString()).ToList();
 
-            int fanIdx = 0;
+            int chipOrdinal = 0;
             foreach (var s in hw.Sensors.Where(s => s.SensorType == SensorType.Fan).OrderBy(s => s.Identifier.ToString()))
             {
-                if (fanIdx >= MaxFanChannels) break;
-                if (!_registeredFans.Contains(fanIdx))
+                if (_registeredFans.Add(fanIdx))
                 {
                     sink.RegisterWithMax(MetricNames.FanRpm(fanIdx), MetricUnit.Rpm, Name, DefaultRateHz,
                         flags: MetricFlags.NeedsElevation);
                     sink.Register(MetricNames.FanName(fanIdx), MetricType.String, MetricUnit.Text, Name, 0, MetricSemantics.Static);
-                    _registeredFans.Add(fanIdx);
+                    // Static: the channel's name is written when the channel is discovered.
+                    sink.SetString(MetricNames.FanName(fanIdx), s.Name);
                     sink.Set(MetricNames.FanCount, _registeredFans.Count);
                 }
 
                 double rpm = s.Value is { } v && !float.IsNaN((float)v) ? v : 0;
                 sink.Set(MetricNames.FanRpm(fanIdx), rpm);
-                sink.SetString(MetricNames.FanName(fanIdx), s.Name);
 
-                var control = MatchControl(controls, s, fanIdx);
+                var control = MatchControl(controls, s, chipOrdinal);
                 if (control?.Value is { } duty && !float.IsNaN((float)duty))
                 {
-                    if (!_registeredControls.Contains(fanIdx))
-                    {
+                    if (_registeredControls.Add(fanIdx))
                         sink.Register(MetricNames.FanControlPct(fanIdx), MetricType.Double, MetricUnit.Percent, Name,
                             DefaultRateHz, flags: MetricFlags.NeedsElevation);
-                        _registeredControls.Add(fanIdx);
-                    }
                     sink.Set(MetricNames.FanControlPct(fanIdx), Math.Clamp(duty, 0, 100));
                 }
                 fanIdx++;
+                chipOrdinal++;
             }
 
             var vcore = hw.Sensors.FirstOrDefault(s => s.SensorType == SensorType.Voltage &&
@@ -224,11 +244,10 @@ public sealed class LhmProvider : ISensorProvider
         }
     }
 
-    private const int MaxFanChannels = 16;
     private readonly HashSet<int> _registeredFans = new();
     private readonly HashSet<int> _registeredControls = new();
 
-    private static ISensor? MatchControl(List<ISensor> controls, ISensor fan, int fanIdx)
+    private static ISensor? MatchControl(List<ISensor> controls, ISensor fan, int chipOrdinal)
     {
         int? fanNumber = TrailingNumber(fan.Name) ?? TrailingNumber(fan.Identifier.ToString());
         if (fanNumber is { } n)
@@ -237,7 +256,7 @@ public sealed class LhmProvider : ISensorProvider
                 (TrailingNumber(c.Name) ?? TrailingNumber(c.Identifier.ToString())) == n);
             if (byNumber != null) return byNumber;
         }
-        return fanIdx < controls.Count ? controls[fanIdx] : null;
+        return chipOrdinal < controls.Count ? controls[chipOrdinal] : null;
     }
 
     private static int? TrailingNumber(string s)
@@ -255,16 +274,24 @@ public sealed class LhmProvider : ISensorProvider
 
     private void PollStorage(MetricSink sink)
     {
-        // Hot-plug: when the set of volumes changes, register temp metrics for any newly-seen
-        // volume and invalidate the letter→disk-model map so it is rebuilt to include the new
-        // drive (temps otherwise stay N/A until the collector restarts).
+        // Hot-plug: when the set of volumes changes, re-open LHM (its Computer enumerates disks
+        // at Open(), so a drive attached afterwards is simply not in the tree), register temp
+        // metrics for any newly-seen volume, and invalidate the letter→disk-model map so it is
+        // rebuilt to include the new drive. Without this the temps stay N/A until a restart.
         var volumes = Volumes.Local();
         string live = Volumes.Key(volumes);
         if (live != _storageLetters)
         {
+            if (_storageLetters.Length > 0)
+            {
+                Log.Info($"{Name}: volumes changed ({_storageLetters} -> {live}) — re-opening LHM storage");
+                ReopenComputer();
+            }
             foreach (char c in volumes)
                 sink.Register(MetricNames.DriveTempC(c), MetricType.Double, MetricUnit.Celsius, Name, DefaultRateHz,
                     flags: MetricFlags.NeedsElevation);
+            foreach (char c in _storageLetters.Where(c => !volumes.Contains(c)))
+                sink.MarkStale(MetricNames.DriveTempC(c));
             _letterToModel = null;
             _unmatchedLogged.Clear();
             _storageLetters = live;
@@ -319,17 +346,129 @@ public sealed class LhmProvider : ISensorProvider
 
     private readonly HashSet<char> _unmatchedLogged = new();
 
+    // ---- GPUs (hardware plan H2) ----
+
+    /// <summary>LHM hardware identifier → halo gpu index.</summary>
+    private readonly Dictionary<string, int> _gpuIndex = new();
+    /// <summary>Identifiers of LHM GPUs that NVML already publishes; for those this part only
+    /// adds the two sensors NVML has no API for.</summary>
+    private readonly HashSet<string> _gpuOwnedByNvml = new();
+    /// <summary>Metric names this part has registered, so sensors can register on first sight
+    /// (a GPU that never reports power simply has no <c>gpu.i.power.w</c> and the widget row
+    /// hides itself).</summary>
+    private readonly HashSet<string> _lazyRegistered = new();
+
+    private static bool IsGpu(IHardware h) =>
+        h.HardwareType is HardwareType.GpuNvidia or HardwareType.GpuAmd or HardwareType.GpuIntel;
+
+    private static string VendorOf(IHardware h) => h.HardwareType switch
+    {
+        HardwareType.GpuNvidia => "nvidia",
+        HardwareType.GpuAmd => "amd",
+        HardwareType.GpuIntel => "intel",
+        _ => "",
+    };
+
+    /// <summary>
+    /// Claim an index per GPU LHM can see. NVIDIA cards match the NVML device already publishing
+    /// that index and only gain voltage + fan RPM (NVML exposes neither); AMD and Intel cards get
+    /// a fresh index and LHM becomes the only source for the whole <c>gpu.&lt;i&gt;.*</c> family.
+    /// </summary>
+    private void InitGpu(MetricSink sink)
+    {
+        _gpuIndex.Clear();
+        _gpuOwnedByNvml.Clear();
+        sink.Register(MetricNames.GpuCount, MetricType.Double, MetricUnit.Count, Name, 0, MetricSemantics.Static);
+
+        foreach (var hw in AllHardware().Where(IsGpu))
+        {
+            string id = hw.Identifier.ToString();
+            int idx = GpuIndexSpace.IndexForLhm(hw.Name, hw.HardwareType == HardwareType.GpuNvidia, out bool matched);
+            _gpuIndex[id] = idx;
+            if (matched) _gpuOwnedByNvml.Add(id);
+
+            // Voltage and fan RPM (the two NVML has no API for) register on the first real
+            // reading in PollGpu — a passively-cooled card then has no gpu.<i>.fan.rpm at all and
+            // the widget row hides itself instead of showing a permanent N/A.
+            if (!matched)
+            {
+                sink.Register(MetricNames.GpuName(idx), MetricType.String, MetricUnit.Text, Name, 0, MetricSemantics.Static);
+                sink.Register(MetricNames.GpuVendor(idx), MetricType.String, MetricUnit.Text, Name, 0, MetricSemantics.Static);
+                sink.SetString(MetricNames.GpuName(idx), hw.Name);
+                sink.SetString(MetricNames.GpuVendor(idx), VendorOf(hw));
+                Log.Info($"{Name}: gpu.{idx} = {hw.Name} ({VendorOf(hw)}), LHM is the only source");
+            }
+        }
+        sink.Set(MetricNames.GpuCount, GpuIndexSpace.Count);
+    }
+
+    private void RegisterLazy(MetricSink sink, string metric, MetricUnit unit, bool withMax = false)
+    {
+        if (!_lazyRegistered.Add(metric)) return;
+        if (withMax) sink.RegisterWithMax(metric, unit, Name, DefaultRateHz);
+        else sink.Register(metric, MetricType.Double, unit, Name, DefaultRateHz);
+    }
+
+    /// <summary>Publish a sensor value, registering the metric the first time the sensor is seen.</summary>
+    private void Publish(MetricSink sink, string metric, MetricUnit unit, ISensor? s, bool withMax = false)
+    {
+        if (s?.Value is not { } v || float.IsNaN((float)v)) return;
+        RegisterLazy(sink, metric, unit, withMax);
+        sink.Set(metric, v);
+    }
+
+    private static ISensor? Pick(IHardware hw, SensorType type, params string[] nameContains)
+    {
+        var of = hw.Sensors.Where(s => s.SensorType == type).ToList();
+        foreach (string want in nameContains)
+        {
+            var hit = of.FirstOrDefault(s => s.Name.Contains(want, StringComparison.OrdinalIgnoreCase));
+            if (hit != null) return hit;
+        }
+        return nameContains.Length == 0 ? of.FirstOrDefault() : null;
+    }
+
     private void PollGpu(MetricSink sink)
     {
-        foreach (var hw in AllHardware().Where(h => h.HardwareType == HardwareType.GpuNvidia))
+        foreach (var hw in AllHardware().Where(IsGpu))
         {
-            var volt = hw.Sensors.FirstOrDefault(s => s.SensorType == SensorType.Voltage);
-            if (volt?.Value is { } v && !float.IsNaN((float)v))
-                sink.Set(MetricNames.GpuVoltageV(0), v);
+            string id = hw.Identifier.ToString();
+            if (!_gpuIndex.TryGetValue(id, out int idx)) continue;
 
-            var fan = hw.Sensors.FirstOrDefault(s => s.SensorType == SensorType.Fan);
-            if (fan?.Value is { } f && !float.IsNaN((float)f))
-                sink.Set(MetricNames.GpuFanRpm(0), f);
+            // Every vendor: the two NVML has no API for.
+            Publish(sink, MetricNames.GpuVoltageV(idx), MetricUnit.Volts, Pick(hw, SensorType.Voltage, "GPU Core", "Core"), withMax: true);
+            Publish(sink, MetricNames.GpuFanRpm(idx), MetricUnit.Rpm, Pick(hw, SensorType.Fan));
+
+            if (_gpuOwnedByNvml.Contains(id)) continue;   // NVML owns the rest of this index
+
+            // AMD / Intel: LHM is the whole story. Sensor names are English literals that differ
+            // between vendors and LHM versions, so match on containment with fallbacks; anything
+            // this card does not report simply never registers and its widget row hides itself.
+            Publish(sink, MetricNames.GpuTempC(idx), MetricUnit.Celsius, Pick(hw, SensorType.Temperature, "GPU Core", "GPU Hot Spot", "GPU"));
+            Publish(sink, MetricNames.GpuUsagePct(idx), MetricUnit.Percent, Pick(hw, SensorType.Load, "GPU Core", "D3D 3D", "GPU"));
+            Publish(sink, MetricNames.GpuClockCoreMhz(idx), MetricUnit.Megahertz, Pick(hw, SensorType.Clock, "GPU Core", "GPU Graphics"));
+            Publish(sink, MetricNames.GpuClockMemMhz(idx), MetricUnit.Megahertz, Pick(hw, SensorType.Clock, "GPU Memory"));
+            Publish(sink, MetricNames.GpuPowerW(idx), MetricUnit.Watts, Pick(hw, SensorType.Power, "GPU Package", "GPU Total", "GPU PPT", "GPU"), withMax: true);
+            Publish(sink, MetricNames.GpuFanPct(idx), MetricUnit.Percent, Pick(hw, SensorType.Control, "GPU Fan", "Fan"));
+
+            // VRAM: LHM reports it as SmallData in MB.
+            var used = Pick(hw, SensorType.SmallData, "GPU Memory Used", "D3D Dedicated Memory Used");
+            var total = Pick(hw, SensorType.SmallData, "GPU Memory Total");
+            Publish(sink, MetricNames.GpuVramUsedMb(idx), MetricUnit.Megabytes, used);
+            if (total?.Value is { } t && t > 0)
+            {
+                // Static: the board's VRAM size, written once.
+                if (_lazyRegistered.Add(MetricNames.GpuVramTotalMb(idx)))
+                {
+                    sink.Register(MetricNames.GpuVramTotalMb(idx), MetricType.Double, MetricUnit.Megabytes, Name, 0, MetricSemantics.Static);
+                    sink.Set(MetricNames.GpuVramTotalMb(idx), t);
+                }
+                if (used?.Value is { } u && !float.IsNaN((float)u))
+                {
+                    RegisterLazy(sink, MetricNames.GpuVramPct(idx), MetricUnit.Percent);
+                    sink.Set(MetricNames.GpuVramPct(idx), u / t * 100);
+                }
+            }
         }
     }
 

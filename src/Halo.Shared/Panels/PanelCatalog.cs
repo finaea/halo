@@ -188,7 +188,9 @@ public static class PanelCatalog
         new PanelType("latency", "Latency / DLSS",
             Metrics:
             [
-                new MetricSpec("pclat", "PC LAT:", MetricNames.LatencyRenderMs, MetricUnit.Milliseconds,
+                // The headline is the collector's summed queue + render + display, not the render
+                // segment alone — "render" below is the component row.
+                new MetricSpec("pclat", "PC LAT:", MetricNames.LatencyPcMs, MetricUnit.Milliseconds,
                     Graphable: true, GraphDefaultOn: true, ColorToken: "histogram", WarnDefaults: [20, 35, 50, 70]),
                 new MetricSpec("queue", "QUEUE", MetricNames.LatencyQueueMs, MetricUnit.Milliseconds, ColorToken: "text2"),
                 new MetricSpec("render", "REND", MetricNames.LatencyRenderMs, MetricUnit.Milliseconds, ColorToken: "text2"),
@@ -243,7 +245,8 @@ public static class PanelCatalog
             Options:
             [
                 new OptionSpec("volumes", OptionKind.List, "", "Volumes",
-                    "Drive letters to show, comma separated. Empty = every fixed volume found.",
+                    "Drive letters to show, comma separated. Empty = every local volume the "
+                    + "collector found — fixed and removable, but not network or optical drives.",
                     Structural: true),
                 new OptionSpec("freeMode", OptionKind.List, "", "Show free space for",
                     "Drive letters that show \"Free:\" instead of \"Used:\", comma separated."),
