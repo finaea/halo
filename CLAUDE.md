@@ -32,11 +32,13 @@ Portable-first policy (docs/global-installs.md): the NuGet cache is project-loca
 ## Architecture (three processes)
 
 - **Halo.Collector** (elevated at install; degrades gracefully unelevated): `ISensorProvider`
-  implementations polled on per-class cadences by `ProviderHost` (rate caps per plan §5).
+  implementations polled by `ProviderHost`, one thread each, at the fixed cadences in
+  `CollectorRates.cs` — engineering constants, never user settings (`MaxRateHz` is the safety cap).
   Publishes to shared memory `Local\Halo.Metrics.v2` via `MetricsWriter` (lock-free: atomic
   8-byte value slots, seqlock strings, append-only frame ring, provider health table). Session
   maxima = `.max` metrics via `MetricSink`. Control channel: named pipe `Halo.Control.v2`
-  (`reset-max`, `reset-net`, `rescan`, `reload-config`, `ping`).
+  (`reset-max`, `reset-net`, `rescan`, `reload-config`, `ping`); `rescan` re-runs `Initialize` on
+  every provider whose `RescanReinitialises` is true (the ones that enumerate hardware).
 - **Halo.Widgets**: one WS_EX_NOREDIRECTIONBITMAP HWND per widget, DirectComposition +
   D2D on a shared D3D11 device (`Dx`). Panels are element trees (`Render\Elements.cs`)
   in a Rainmeter-like flow layout (`Render\Panel.cs`), built per type in `PanelDefs\`.
@@ -58,7 +60,13 @@ Portable-first policy (docs/global-installs.md): the NuGet cache is project-loca
   Staged warn colors: `CpuRamPanelImpl.WarnColor`.
 - Metric names: `Halo.Metrics\MetricNames.cs`; `.max` suffix = session maximum. Indexed families
   (`gpu.<i>.*`, `cpu.core.<i>.*`, `fan.<n>.*`, `drive.<x>.*`) are discovered at runtime — read
-  `gpu.count` / `cpu.logical.count` / `fan.count`, never assume one of anything.
+  `gpu.count` / `cpu.logical.count` / `fan.count`, never assume one of anything. The GPU index
+  space is owned by `GpuIndexSpace` (NVML by PCI bus id first, then LHM's AMD/Intel cards) and is
+  append-only: an index, once published, is that card's for the life of the process.
+- Every metric registers its **real** cadence as `nominalRateHz`, not the provider's ceiling —
+  a sub-cadence metric says so (presentmon's lows are 2 Hz inside a 40 Hz poll). `Static`
+  semantics means nominal 0 Hz and a single write at discovery; `MetricSink.Register` enforces
+  the 0. Never re-write a Static metric every poll.
 - What each panel shows, which options it takes and which theme tokens it paints with is declared
   once in `Halo.Shared\Panels\PanelCatalog.cs`; the renderer and the Settings app both read it.
   Per-widget overrides live in `widgets.json` (`metrics`, `options`, `appearance`).
@@ -84,7 +92,11 @@ Portable-first policy (docs/global-installs.md): the NuGet cache is project-loca
   `Trojan:Win32/Bearfoos.A!ml`. If a file vanishes, check `Get-MpThreatDetection`,
   restore from git. Folder exclusion is available via `install-halo.ps1 -AddDefenderExclusion`
   (off by default — user decision).
-- LHM CPU/SuperIO/Storage parts and PresentMon (ETW) need elevation; unelevated they mark
-  metrics N/A and the widgets render "N/A"/idle states.
+- LHM CPU/SuperIO/Storage parts and PresentMon/PCL Stats (ETW) need elevation; unelevated they
+  mark metrics N/A (or never register them at all) and the widgets render "N/A"/idle states.
+  The provider table's `lastError` says which — `unelevated`, `no-driver`, `no-hw`, `no-nvml`,
+  `no-sdk`, `failed`.
+- Only one process can own the PresentMon ETW session, so a second collector's fps metrics read
+  N/A while the production one runs. Expected, not a bug.
 - PawnIO (`C:\Program Files\PawnIO`) belongs to FanControl — never uninstall with Halo.
 - The 3 icon fonts in `assets\fonts` are copied from the Rainformer skin (personal use).

@@ -45,7 +45,8 @@ public sealed class ProviderHost : IDisposable
         foreach (var r in _runners) r.Wake();   // cut short a long sleep (lhm-storage waits 10 s)
         foreach (var r in _runners) r.Join(2000);
         foreach (var r in _runners) { try { r.Provider.Dispose(); } catch { } }
-        foreach (var r in _runners) r.DisposeWake();
+        // The wake handles are deliberately not disposed: a runner that missed its 2 s join would
+        // then throw ObjectDisposedException out of its wait, on a thread with no handler.
     }
 
     private sealed class Runner(ISensorProvider provider, MetricSink sink, CancellationToken ct)
@@ -85,7 +86,20 @@ public sealed class ProviderHost : IDisposable
 
         public void Join(int ms) => _thread?.Join(ms);
 
-        public void DisposeWake() => _wake.Dispose();
+        /// <summary>
+        /// Publish the state of a provider whose poll just worked. A provider that needs admin and
+        /// did not get it is <b>degraded</b>, not ok: LibreHardwareMonitor happily initialises and
+        /// finds the CPU object unelevated, then reads nothing off it, so reporting "ok" would have
+        /// the System check tell the user their sensors are fine while every value reads N/A.
+        /// </summary>
+        private void PublishHealthy()
+        {
+            bool unelevated = Provider.NeedsElevation && !Elevation.IsElevated;
+            sink.SetProviderState(_providerIndex,
+                unelevated ? ProviderState.Degraded : ProviderState.Ok,
+                RateHz,
+                unelevated ? ProviderError.Unelevated : ProviderError.None);
+        }
 
         private void Run()
         {
@@ -119,7 +133,7 @@ public sealed class ProviderHost : IDisposable
                 }
 
                 initFailures = 0;
-                sink.SetProviderState(_providerIndex, ProviderState.Ok, RateHz);
+                PublishHealthy();
                 Log.Info($"{Provider.Name}: initialised, polling at {RateHz:0.##} Hz (cap {Provider.MaxRateHz} Hz)");
 
                 // ---- poll loop ----
@@ -127,6 +141,12 @@ public sealed class ProviderHost : IDisposable
                 long next = Stopwatch.GetTimestamp();
                 int consecutiveErrors = 0;
                 var sw = new Stopwatch();
+
+                // Live rate accounting. The window is long enough for at least five polls, so a
+                // 0.1 Hz provider is measured over ~50 s rather than reported as 0 every 2 s.
+                long rateWindowTicks = (long)Math.Max(2.0, 5.0 / RateHz) * Stopwatch.Frequency;
+                long rateMarkQpc = Stopwatch.GetTimestamp();
+                int pollsInWindow = 0;
 
                 while (!ct.IsCancellationRequested)
                 {
@@ -141,7 +161,7 @@ public sealed class ProviderHost : IDisposable
                     try
                     {
                         Provider.Poll(sink);
-                        if (consecutiveErrors > 0) sink.SetProviderState(_providerIndex, ProviderState.Ok, RateHz);
+                        if (consecutiveErrors > 0) PublishHealthy();
                         consecutiveErrors = 0;
                     }
                     catch (Exception ex)
@@ -171,7 +191,19 @@ public sealed class ProviderHost : IDisposable
                         }
                     }
                     LastPollMs = sw.Elapsed.TotalMilliseconds;
-                    sink.SetProviderPoll(_providerIndex, Stopwatch.GetTimestamp(), LastPollMs);
+                    long polledQpc = Stopwatch.GetTimestamp();
+                    sink.SetProviderPoll(_providerIndex, polledQpc, LastPollMs);
+
+                    // effectiveRateHz in the registry: what this provider is really managing, so a
+                    // consumer can see an overrunning provider instead of trusting the constant.
+                    pollsInWindow++;
+                    if (polledQpc - rateMarkQpc >= rateWindowTicks)
+                    {
+                        double measured = pollsInWindow * (double)Stopwatch.Frequency / (polledQpc - rateMarkQpc);
+                        sink.SetEffectiveRateScale(Provider.Name, measured / RateHz);
+                        rateMarkQpc = polledQpc;
+                        pollsInWindow = 0;
+                    }
 
                     next += periodTicks;
                     long now = Stopwatch.GetTimestamp();

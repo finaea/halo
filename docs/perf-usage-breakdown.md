@@ -250,6 +250,79 @@ Context stamp: `Halo.Collector.exe --dump | Select-String "fps.app.name|fps.pres
 
 ---
 
+## Collector rates after R1 (2026-09-13, ticket 02)
+
+Ticket 02 turned the provider cadences into code constants and raised three of them:
+**disk-io 5 → 10 Hz · network 5 → 10 Hz · drive temps every 30 s → every 10 s** (`cpu-kernel` and
+`nvml` were already at 10 Hz after ticket 01). The isolated harness in
+[current-metrics-inventory.md § Provider cost measurement](current-metrics-inventory.md#provider-cost-measurement)
+predicted the five R1 raises would cost **+0.809 points of one core** in total. This is the
+whole-process check of that prediction.
+
+**Method** (as documented above): `TotalProcessorTime` delta over a fixed window, per process.
+Two builds of the same commit — one with the R1 rates, one with the pre-ticket-02 ones, differing
+in nothing but `CollectorRates.cs` — were run **interleaved** (new, old, new, old, …) so machine
+drift across the ~20-minute run cancels between the arms. 25 s of settling, then a 120 s window,
+4 repetitions each. Unelevated, idle desktop, Jack's production v1 stack running throughout.
+
+| Arm | % of one core, per rep | mean | sd | RAM |
+|---|---|---|---|---|
+| **R1 rates** | 3.763 · 3.958 · 3.672 · 4.075 | **3.867** | 0.183 | 125.0 MB |
+| pre-ticket-02 rates | 3.203 · 3.437 · 3.555 · 4.492 | **3.672** | 0.566 | 125.4 MB |
+| **paired delta** | +0.560 · +0.521 · +0.117 · **−0.417** | **+0.195** | 0.455 | −0.4 MB |
+
+### Reading it honestly: the change is below this method's noise floor
+
+Two of the five raises are dormant on an unelevated run (`lhm-storage` never initialises without
+admin; `cpu-kernel` and `nvml` were already at 10 Hz), so what this A/B could actually see is
+**disk-io +0.255 and network +0.037 = +0.29 points**. The paired standard deviation is **±0.46** —
+larger than the effect. The fourth pair even came out negative, because that `old` run (4.49 %) was
+the busiest sample of the whole set.
+
+So the result is *consistent with* +0.29 and cannot confirm it. That is not a failure of the change;
+it is the honest limit of a process-level `TotalProcessorTime` delta on a machine doing other work.
+**The per-sweep harness remains the precise instrument** for questions this size; this method is
+for whole-process comparisons in the 1-point-and-up range, which is what it was built for.
+
+### The cross-check that does work
+
+Per-provider occupancy from the live provider table, 25 samples over 50 s at the R1 rates
+(`occupancy = median lastPollMs × rateHz ÷ 10`, i.e. % of one core of *thread* time):
+
+| Provider | rate | median ms | p90 ms | occupancy (% of one core) |
+|---|---|---|---|---|
+| `builtin` | 1 Hz | 0.83 | 1.05 | 0.083 |
+| `cpu-kernel` | 10 Hz | 0.18 | 0.28 | 0.180 |
+| `process` | 1 Hz | 6.35 | 7.41 | 0.635 |
+| `disk-io` | 10 Hz | 0.39 | 0.49 | 0.392 |
+| `network` | 10 Hz | 0.17 | 0.29 | 0.171 |
+| `nvml` | 10 Hz | 0.40 | 0.67 | 0.400 |
+| `lhm-cpu` | 5 Hz | 7.21 | 16.16 | 3.604 |
+| `lhm-superio` | 1 Hz | 0.01 | 0.03 | 0.001 |
+| `lhm-gpu` | 1 Hz | 77.75 | 93.48 | 7.775 |
+| `lhm-storage`, `presentmon`, `pclstats` | — | — | — | unavailable unelevated |
+| **total occupancy** | | | | **13.24** |
+
+Occupancy is 13.2 % of a core but the process measures **3.87 %** — which is exactly the point the
+per-sweep measurement made: most of the LHM parts' wall time is *waiting*, not computing. Applying
+the measured CPU:wall ratios (`lhm-gpu` 29 %, `lhm-cpu` 1.1 %, everything else ~100 %) to the table
+above predicts **4.06 % of one core**. The measured mean is **3.867 %** — a 5 % gap between two
+completely independent methods, which is the best evidence available that both are right.
+
+`lhm-gpu` alone is 7.8 points of occupancy and ~2.2 points of the CPU, for two metrics. It stays at
+1 Hz only because on an AMD or Intel machine it *is* the entire GPU panel (hardware plan H2).
+
+### What this leaves open
+
+- **Elevated cost is unmeasured.** No UAC was available. `lhm-storage` (the +0.233 of the
+  prediction), `lhm-cpu`'s real MSR sweep and the PresentMon lane never ran. An elevated
+  repetition of this same A/B is the missing datum.
+- **Widget-side cost is unchanged by this ticket** and still the expensive half. The extra
+  resolution from 10 Hz disk/network does not reach the screen until the per-widget Hz slider
+  lands in ticket 03 — the graphs still sample once per widget tick.
+
+---
+
 ## fps-displayed widget disabled (2026-07-20) — same game, uncapped ~231 fps
 
 User disabled the DISPLAYED fps panel in Settings (one fps widget remains: PRESENTED).

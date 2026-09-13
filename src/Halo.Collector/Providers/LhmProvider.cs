@@ -6,9 +6,10 @@ namespace Halo.Collector.Providers;
 
 /// <summary>
 /// LibreHardwareMonitorLib-backed sensors, split into independently-scheduled parts
-/// (plan §5): Cpu = MSR (fast ioctl, cap 20 Hz) · SuperIo = NCT6687D fans + Vcore
-/// (~ms port I/O behind the ISA mutex, cap 2 Hz) · Storage = SMART/NVMe temps (10s of ms
-/// per drive, cap 0.2 Hz) · Gpu = NVAPI extras NVML can't provide (voltage, fan RPM).
+/// (plan §5): Cpu = MSR (fast ioctl, cap 20 Hz) · SuperIo = every fan channel the board exposes,
+/// plus Vcore (~ms port I/O behind the ISA mutex, cap 2 Hz) · Storage = SMART/NVMe temps (10s of
+/// ms per drive, cap 0.2 Hz) · Gpu = the NVAPI/ADL extras NVML cannot provide on an NVIDIA card,
+/// and the whole gpu.&lt;i&gt;.* family on an AMD or Intel one (hardware plan H2).
 /// Requires elevation for Cpu/SuperIo/Storage (PawnIO/ring0); Gpu works unelevated.
 /// </summary>
 public sealed class LhmProvider : ISensorProvider
@@ -417,7 +418,14 @@ public sealed class LhmProvider : ISensorProvider
         sink.Set(metric, v);
     }
 
-    private static ISensor? Pick(IHardware hw, SensorType type, params string[] nameContains)
+    /// <summary>
+    /// First sensor of a type whose name contains one of the candidates, in preference order.
+    /// LHM's sensor names are English literals that differ by vendor and library version, so every
+    /// lookup lists the spellings seen in the wild rather than one exact string. No candidates at
+    /// all (or <paramref name="orAny"/>) means "take whatever sensor of that type exists" — right
+    /// when a card only ever has one of them.
+    /// </summary>
+    private static ISensor? Pick(IHardware hw, SensorType type, bool orAny, params string[] nameContains)
     {
         var of = hw.Sensors.Where(s => s.SensorType == type).ToList();
         foreach (string want in nameContains)
@@ -425,7 +433,7 @@ public sealed class LhmProvider : ISensorProvider
             var hit = of.FirstOrDefault(s => s.Name.Contains(want, StringComparison.OrdinalIgnoreCase));
             if (hit != null) return hit;
         }
-        return nameContains.Length == 0 ? of.FirstOrDefault() : null;
+        return orAny || nameContains.Length == 0 ? of.FirstOrDefault() : null;
     }
 
     private void PollGpu(MetricSink sink)
@@ -436,24 +444,24 @@ public sealed class LhmProvider : ISensorProvider
             if (!_gpuIndex.TryGetValue(id, out int idx)) continue;
 
             // Every vendor: the two NVML has no API for.
-            Publish(sink, MetricNames.GpuVoltageV(idx), MetricUnit.Volts, Pick(hw, SensorType.Voltage, "GPU Core", "Core"), withMax: true);
-            Publish(sink, MetricNames.GpuFanRpm(idx), MetricUnit.Rpm, Pick(hw, SensorType.Fan));
+            Publish(sink, MetricNames.GpuVoltageV(idx), MetricUnit.Volts, Pick(hw, SensorType.Voltage, orAny: true, "GPU Core", "Core"), withMax: true);
+            Publish(sink, MetricNames.GpuFanRpm(idx), MetricUnit.Rpm, Pick(hw, SensorType.Fan, orAny: true));
 
             if (_gpuOwnedByNvml.Contains(id)) continue;   // NVML owns the rest of this index
 
             // AMD / Intel: LHM is the whole story. Sensor names are English literals that differ
             // between vendors and LHM versions, so match on containment with fallbacks; anything
             // this card does not report simply never registers and its widget row hides itself.
-            Publish(sink, MetricNames.GpuTempC(idx), MetricUnit.Celsius, Pick(hw, SensorType.Temperature, "GPU Core", "GPU Hot Spot", "GPU"));
-            Publish(sink, MetricNames.GpuUsagePct(idx), MetricUnit.Percent, Pick(hw, SensorType.Load, "GPU Core", "D3D 3D", "GPU"));
-            Publish(sink, MetricNames.GpuClockCoreMhz(idx), MetricUnit.Megahertz, Pick(hw, SensorType.Clock, "GPU Core", "GPU Graphics"));
-            Publish(sink, MetricNames.GpuClockMemMhz(idx), MetricUnit.Megahertz, Pick(hw, SensorType.Clock, "GPU Memory"));
-            Publish(sink, MetricNames.GpuPowerW(idx), MetricUnit.Watts, Pick(hw, SensorType.Power, "GPU Package", "GPU Total", "GPU PPT", "GPU"), withMax: true);
-            Publish(sink, MetricNames.GpuFanPct(idx), MetricUnit.Percent, Pick(hw, SensorType.Control, "GPU Fan", "Fan"));
+            Publish(sink, MetricNames.GpuTempC(idx), MetricUnit.Celsius, Pick(hw, SensorType.Temperature, orAny: true, "GPU Core", "GPU Hot Spot", "GPU"));
+            Publish(sink, MetricNames.GpuUsagePct(idx), MetricUnit.Percent, Pick(hw, SensorType.Load, orAny: false, "GPU Core", "D3D 3D", "GPU"));
+            Publish(sink, MetricNames.GpuClockCoreMhz(idx), MetricUnit.Megahertz, Pick(hw, SensorType.Clock, orAny: false, "GPU Core", "GPU Graphics"));
+            Publish(sink, MetricNames.GpuClockMemMhz(idx), MetricUnit.Megahertz, Pick(hw, SensorType.Clock, orAny: false, "GPU Memory"));
+            Publish(sink, MetricNames.GpuPowerW(idx), MetricUnit.Watts, Pick(hw, SensorType.Power, orAny: true, "GPU Package", "GPU Total", "GPU PPT", "GPU"), withMax: true);
+            Publish(sink, MetricNames.GpuFanPct(idx), MetricUnit.Percent, Pick(hw, SensorType.Control, orAny: true, "GPU Fan", "Fan"));
 
             // VRAM: LHM reports it as SmallData in MB.
-            var used = Pick(hw, SensorType.SmallData, "GPU Memory Used", "D3D Dedicated Memory Used");
-            var total = Pick(hw, SensorType.SmallData, "GPU Memory Total");
+            var used = Pick(hw, SensorType.SmallData, orAny: false, "GPU Memory Used", "D3D Dedicated Memory Used");
+            var total = Pick(hw, SensorType.SmallData, orAny: false, "GPU Memory Total");
             Publish(sink, MetricNames.GpuVramUsedMb(idx), MetricUnit.Megabytes, used);
             if (total?.Value is { } t && t > 0)
             {

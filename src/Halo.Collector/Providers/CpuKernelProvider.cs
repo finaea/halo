@@ -72,7 +72,7 @@ public sealed unsafe class CpuKernelProvider : ISensorProvider
         }
         int perf = topology.Count(l => l.Class == 0);
         Log.Info($"cpu topology: {topology.Count} logical / {topology.Select(l => l.PhysicalCore).Distinct().Count()} physical" +
-                 $" across {_groupCount} group(s); {perf} performance, {topology.Count - perf} efficiency");
+                 $" across {_groupCount} group(s); {perf} logical on performance cores, {topology.Count - perf} on efficiency cores");
     }
 
     public void Poll(MetricSink sink)
@@ -156,7 +156,10 @@ public sealed unsafe class CpuKernelProvider : ISensorProvider
     [DllImport("ntdll")]
     private static extern int NtQuerySystemInformation(int infoClass, void* info, uint size, out uint returned);
 
+    // NTSTATUS NtQuerySystemInformationEx(SYSTEM_INFORMATION_CLASS, PVOID InputBuffer,
+    //   ULONG InputBufferLength, PVOID SystemInformation, ULONG SystemInformationLength,
+    //   PULONG ReturnLength) — the input buffer carries the processor group number (USHORT).
     [DllImport("ntdll")]
-    private static extern int NtQuerySystemInformationEx(int infoClass, void* inputBuffer, int inputBufferLength,
+    private static extern int NtQuerySystemInformationEx(int infoClass, void* inputBuffer, uint inputBufferLength,
         void* info, uint size, out uint returned);
 }

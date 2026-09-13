@@ -96,7 +96,7 @@ move or grow regions, and a reader that trusts the header keeps working.
 | 76 | u16 | `stringSlot` | index into Strings, `0xFFFF` = none |
 | 78 | u16 | `providerIndex` | index into the provider table, `0xFFFF` = none |
 | 80 | f32 | `nominalRateHz` | the cadence this number really changes at |
-| 84 | f32 | `effectiveRateHz` | live measured rate (starts equal to nominal) |
+| 84 | f32 | `effectiveRateHz` | live measured rate (starts equal to nominal; 0 while static) |
 | 88 | u32 | `windowMs` | averaging window for semantics 1 and 2, else 0 |
 | 92–127 | — | reserved |  |
 
@@ -106,6 +106,12 @@ polling a 1 Hz metric at 10 Hz just burns CPU. **`nominalRateHz == 0` means the 
 cadence at all**: it is written once when the hardware is discovered (semantics 6, `static`) and
 again only if that hardware is re-enumerated — re-reading it is pointless, and its age is expected
 to grow without bound. Everything the collector re-reads on each poll carries a non-zero rate.
+
+`effectiveRateHz` is that same number scaled by how well the provider is actually keeping up: the
+collector measures each provider's real poll rate over a rolling window (long enough for at least
+five polls) and republishes `nominal × measured ÷ configured` for every metric that provider owns.
+A healthy provider reads effective ≈ nominal; one whose sweep overruns its period reads lower, and
+that is the honest signal a consumer should trust over the constant.
 
 ### Value entry (16 B)
 

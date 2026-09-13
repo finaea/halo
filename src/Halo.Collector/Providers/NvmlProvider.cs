@@ -84,7 +84,12 @@ public sealed class NvmlProvider : ISensorProvider
             }
         }
         catch (DllNotFoundException) { /* no NVIDIA driver: not an error, just no devices */ }
-        catch (EntryPointNotFoundException ex) { Log.Warn($"nvml probe: {ex.Message}"); }
+        catch (Exception ex)
+        {
+            // Runs on whichever provider thread reaches the index space first, so it must never
+            // throw into that provider's Initialize — an unreadable NVML just means no NVIDIA GPUs.
+            Log.Warn($"nvml probe failed ({ex.GetType().Name}: {ex.Message}) — no NVIDIA GPUs published");
+        }
 
         // Devices whose bus id we could not read sort last but keep their relative NVML order.
         found.Sort((a, b) =>

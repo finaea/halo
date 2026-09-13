@@ -16,6 +16,10 @@ public sealed class MetricSink(MetricsWriter writer)
 {
     private readonly ConcurrentDictionary<string, int> _indexByName = new();
     private readonly ConcurrentDictionary<string, MaxState> _maxByName = new();
+    /// <summary>Registry slots each provider owns, with the nominal rate each one declared, so
+    /// the host can republish live rates without a second name→index map.</summary>
+    private readonly ConcurrentDictionary<string, List<(int Index, double NominalHz)>> _slotsByProvider =
+        new(StringComparer.OrdinalIgnoreCase);
 
     private sealed class MaxState
     {
@@ -32,9 +36,33 @@ public sealed class MetricSink(MetricsWriter writer)
         // cadence, so its nominal rate is 0 and a consumer's refresh slider ignores it. Anything
         // re-read on every poll is Latest (or IntervalAvg/RollingWindow) at the real poll rate.
         if (semantics == MetricSemantics.Static) nominalRateHz = 0;
+        // Two providers may register the same name (NVML and LHM both feed gpu.<i>.fan.rpm); the
+        // first one owns the descriptor, so only the first one accounts for its live rate — else
+        // the two would fight over effectiveRateHz at their different cadences.
+        bool firstRegistrant = !_indexByName.ContainsKey(name);
         int idx = Writer.Register(new MetricDescriptor(name, type, unit, provider, nominalRateHz, semantics, flags, windowMs));
         _indexByName[name] = idx;
+        if (firstRegistrant && provider.Length != 0 && nominalRateHz > 0)
+        {
+            var slots = _slotsByProvider.GetOrAdd(provider, _ => new List<(int, double)>());
+            lock (slots) slots.Add((idx, nominalRateHz));
+        }
         return idx;
+    }
+
+    /// <summary>
+    /// Republish the live rate of every metric a provider owns. <paramref name="scale"/> is that
+    /// provider's measured poll rate divided by its configured one, so a metric that publishes at
+    /// a sub-cadence (the frame lows at 2 Hz inside a 40 Hz drain) scales with the provider
+    /// instead of being overwritten by the poll rate. Static metrics have no cadence and are
+    /// left out of the list entirely.
+    /// </summary>
+    public void SetEffectiveRateScale(string provider, double scale)
+    {
+        if (!_slotsByProvider.TryGetValue(provider, out var slots)) return;
+        lock (slots)
+            foreach (var (idx, nominal) in slots)
+                Writer.SetEffectiveRate(idx, (float)(nominal * scale));
     }
 
     /// <summary>Register a double metric together with its ".max" session-extremum companion.</summary>
