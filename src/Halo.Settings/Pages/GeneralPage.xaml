@@ -3,6 +3,9 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
              xmlns:picker="clr-namespace:ColorPicker;assembly=ColorPicker">
+  <UserControl.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+  </UserControl.Resources>
   <Grid Background="{StaticResource HaloPageBackground}">
     <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="28,22">
       <StackPanel MaxWidth="860" HorizontalAlignment="Left">
@@ -12,10 +15,10 @@
 
         <ui:InfoBar x:Name="PageInfoBar" IsOpen="False" IsClosable="True" Margin="0,0,0,12" />
 
-        <Border x:Name="DesktopCard" Style="{StaticResource SettingsCard}" Tag="desktop start windows autostart lock snap">
+        <Border Style="{StaticResource SettingsCard}">
           <StackPanel>
             <TextBlock Text="Desktop behaviour" Style="{StaticResource SectionHeading}" />
-            <Grid x:Name="AutostartRow" Style="{StaticResource SettingsRow}" Tag="start windows autostart collector widgets scheduled tasks repair">
+            <Grid Style="{StaticResource SettingsRow}">
               <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
               <StackPanel VerticalAlignment="Center">
                 <TextBlock Text="Start with Windows" />
@@ -25,23 +28,23 @@
                                OnContent="On" OffContent="Off" Click="AutostartSwitch_Click" />
             </Grid>
             <Separator />
-            <Grid x:Name="LockRow" Style="{StaticResource SettingsRow}" Tag="lock all widgets position">
+            <Grid Style="{StaticResource SettingsRow}">
               <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
               <StackPanel VerticalAlignment="Center">
                 <TextBlock Text="Lock all widgets" />
                 <TextBlock Text="Blocks dragging without changing each widget's own lock setting." Style="{StaticResource Hint}" />
               </StackPanel>
-              <ui:ToggleSwitch x:Name="LockAllSwitch" Grid.Column="1" IsChecked="{Binding LockAll, Mode=TwoWay}"
+              <ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding LockAll, Mode=TwoWay}"
                                OnContent="On" OffContent="Off" AutomationProperties.Name="Lock all widgets" />
             </Grid>
             <Separator />
-            <Grid x:Name="SnapRow" Style="{StaticResource SettingsRow}" Tag="snap moving drag edges">
+            <Grid Style="{StaticResource SettingsRow}">
               <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
               <StackPanel VerticalAlignment="Center">
                 <TextBlock Text="Snap while moving" />
                 <TextBlock Text="Pulls widgets to screen and widget edges while you drag." Style="{StaticResource Hint}" />
               </StackPanel>
-              <ui:ToggleSwitch x:Name="SnapSwitch" Grid.Column="1" IsChecked="{Binding Snap, Mode=TwoWay}"
+              <ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding Snap, Mode=TwoWay}"
                                OnContent="On" OffContent="Off" AutomationProperties.Name="Snap while moving" />
             </Grid>
             <Button x:Name="RepairAutostartButton" Content="Repair autostart…  ⛨" HorizontalAlignment="Left"
@@ -50,17 +53,27 @@
           </StackPanel>
         </Border>
 
-        <Border x:Name="AppearanceCard" Style="{StaticResource SettingsCard}" Tag="appearance theme palette scale font text corner radius colours">
+        <Border Style="{StaticResource SettingsCard}">
           <StackPanel>
             <TextBlock Text="Appearance defaults" Style="{StaticResource SectionHeading}" />
             <TextBlock Text="Theme presets write ordinary colours; you can change any swatch afterward." Style="{StaticResource Hint}" Margin="0,0,0,8" />
-            <WrapPanel x:Name="PresetRow" Margin="0,0,0,8" Tag="theme presets Rainformer Light High contrast">
-              <Button Content="Rainformer" Tag="Rainformer" Click="Preset_Click" Style="{StaticResource SubtleButton}" />
-              <Button Content="Light" Tag="Light" Click="Preset_Click" Style="{StaticResource SubtleButton}" />
-              <Button Content="High contrast" Tag="High contrast" Click="Preset_Click" Style="{StaticResource SubtleButton}" />
+            <WrapPanel Margin="0,0,0,8">
+              <ToggleButton Content="Rainformer" Tag="Rainformer" Click="Preset_Click"
+                            Style="{StaticResource PresetChip}" IsChecked="{Binding IsRainformerPreset, Mode=OneWay}" />
+              <ToggleButton Content="Light" Tag="Light" Click="Preset_Click"
+                            Style="{StaticResource PresetChip}" IsChecked="{Binding IsLightPreset, Mode=OneWay}" />
+              <ToggleButton Content="High contrast" Tag="High contrast" Click="Preset_Click"
+                            Style="{StaticResource PresetChip}" IsChecked="{Binding IsHighContrastPreset, Mode=OneWay}" />
+              <!-- Not clickable: "Custom" is a state you arrive at by editing a swatch, not one you apply. -->
+              <Border Background="{StaticResource HaloPageBackground}" BorderBrush="{StaticResource HaloBorder}"
+                      BorderThickness="1" CornerRadius="4" Padding="14,6" VerticalAlignment="Center"
+                      Visibility="{Binding IsCustomPalette, Converter={StaticResource BoolToVisibility}}"
+                      ToolTip="These colours match none of the presets.">
+                <TextBlock Text="Custom" Foreground="{StaticResource HaloSubtleText}" />
+              </Border>
             </WrapPanel>
             <Separator />
-            <Grid x:Name="ScaleRow" Style="{StaticResource SettingsRow}" Tag="widget scale auto size primary monitor">
+            <Grid Style="{StaticResource SettingsRow}">
               <Grid.ColumnDefinitions><ColumnDefinition Width="220" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
               <StackPanel VerticalAlignment="Center">
                 <TextBlock Text="Scale" />
@@ -69,35 +82,35 @@
               <Slider Grid.Column="1" Minimum="1" Maximum="3.5" TickFrequency="0.05" IsSnapToTickEnabled="True"
                       Value="{Binding FixedScale, Mode=TwoWay}" IsEnabled="{Binding IsFixedScaleEnabled}" Margin="8,0" />
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                <ui:NumberBox Width="86" Minimum="1" Maximum="3.5" SmallChange="0.05" MaxDecimalPlaces="2"
+                <ui:NumberBox Style="{StaticResource SettingsNumberBox}" Minimum="1" Maximum="3.5" SmallChange="0.05" MaxDecimalPlaces="2"
                               Value="{Binding FixedScale, Mode=TwoWay}" IsEnabled="{Binding IsFixedScaleEnabled}" />
                 <ui:ToggleSwitch Margin="10,0,0,0" IsChecked="{Binding AutoScale, Mode=TwoWay}" OnContent="Auto" OffContent="Fixed" />
               </StackPanel>
             </Grid>
             <Separator />
-            <Grid x:Name="FontRow" Style="{StaticResource SettingsRow}" Tag="font family text size pt">
+            <Grid Style="{StaticResource SettingsRow}">
               <Grid.ColumnDefinitions><ColumnDefinition Width="220" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
               <TextBlock Text="Font and text size" VerticalAlignment="Center" />
-              <ComboBox Grid.Column="1" Width="280" HorizontalAlignment="Left" IsEditable="True"
+              <ComboBox Grid.Column="1" Width="260" HorizontalAlignment="Left" IsEditable="True"
                         ItemsSource="{Binding FontFamilies}" Text="{Binding FontFamily, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                <ui:NumberBox Width="86" Minimum="5" Maximum="24" SmallChange="0.5" MaxDecimalPlaces="1"
+                <ui:NumberBox Style="{StaticResource SettingsNumberBox}" Minimum="5" Maximum="24" SmallChange="0.5" MaxDecimalPlaces="1"
                               Value="{Binding TextSizePt, Mode=TwoWay}" />
                 <TextBlock Text="pt" Margin="6,0,0,0" VerticalAlignment="Center" />
               </StackPanel>
             </Grid>
             <Separator />
-            <Grid x:Name="CornerRow" Style="{StaticResource SettingsRow}" Tag="corner radius rounded panel">
+            <Grid Style="{StaticResource SettingsRow}">
               <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
               <TextBlock Text="Corner radius" VerticalAlignment="Center" />
               <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <ui:NumberBox Width="86" Minimum="0" Maximum="20" SmallChange="1" MaxDecimalPlaces="1"
+                <ui:NumberBox Style="{StaticResource SettingsNumberBox}" Minimum="0" Maximum="20" SmallChange="1" MaxDecimalPlaces="1"
                               Value="{Binding CornerRadius, Mode=TwoWay}" />
                 <TextBlock Text="px" Margin="6,0,0,0" VerticalAlignment="Center" />
               </StackPanel>
             </Grid>
             <Separator />
-            <Expander x:Name="ColorsRow" Header="Panel colours" Tag="panel colors colours swatches background title text warning graph">
+            <Expander Header="Panel colours">
               <ItemsControl ItemsSource="{Binding Colors}" Margin="0,8,0,0">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
@@ -112,13 +125,38 @@
                         <TextBlock Text="{Binding Description}" Style="{StaticResource Hint}" />
                       </StackPanel>
                       <Grid Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Center">
+                        <!-- The swatch Border has no child, so it has no desired size of its own and
+                             WPF-UI's centred content presenter measured it to nothing — that is the
+                             "dot" the button used to render as. Size it explicitly. -->
                         <Button Width="46" Height="30" Padding="3" Click="ColorButton_Click" ToolTip="Open colour picker"
+                                HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
                                 AutomationProperties.Name="{Binding Label, StringFormat=Edit {0} colour}">
-                          <Border Background="{Binding Swatch}" CornerRadius="4" BorderBrush="#55000000" BorderThickness="1" />
+                          <Border Width="36" Height="20" Background="{Binding Swatch}" CornerRadius="4"
+                                  BorderBrush="#55000000" BorderThickness="1" />
                         </Button>
-                        <Popup IsOpen="{Binding IsPickerOpen, Mode=TwoWay}" StaysOpen="False" Placement="Right">
+                        <Popup IsOpen="{Binding IsPickerOpen, Mode=TwoWay}" StaysOpen="False" Placement="Right"
+                               AllowsTransparency="True" PopupAnimation="Fade">
                           <Border Background="White" BorderBrush="#55000000" BorderThickness="1" CornerRadius="8" Padding="10">
-                            <picker:PortableColorPicker Width="340" SelectedColor="{Binding Color, Mode=TwoWay}" ShowAlpha="True" />
+                            <!-- PixiEditor 3.4.2.3 ships two different things: PortableColorPicker is the
+                                 collapsible launcher (a swatch button plus its own popup) and measures
+                                 340x1.6 when it is given a Width and no Height, i.e. a bare line; the real
+                                 picker surface is StandardColorPicker. Its own tight internal sizes (a 50px
+                                 combo, 40px value boxes, a 70px hex box) assume compact chrome, so WPF-UI's
+                                 implicit styles are reset to stock WPF inside this popup or those children
+                                 render empty the same way the NumberBox did. -->
+                            <Border.Resources>
+                              <Style TargetType="TextBox"><Setter Property="FontSize" Value="11" /><Setter Property="Padding" Value="1,0" /></Style>
+                              <Style TargetType="ComboBox"><Setter Property="FontSize" Value="11" /><Setter Property="Padding" Value="2,0" /></Style>
+                              <Style TargetType="ComboBoxItem"><Setter Property="FontSize" Value="11" /></Style>
+                              <Style TargetType="TextBlock"><Setter Property="FontSize" Value="11" /></Style>
+                              <Style TargetType="TabControl" />
+                              <Style TargetType="TabItem" />
+                              <Style TargetType="Slider" />
+                              <Style TargetType="Button" />
+                              <Style TargetType="ToggleButton" />
+                            </Border.Resources>
+                            <picker:StandardColorPicker Width="320" Height="430" ShowAlpha="True" ShowFractionalPart="False"
+                                                        SelectedColor="{Binding Color, Mode=TwoWay}" />
                           </Border>
                         </Popup>
                       </Grid>
@@ -134,70 +172,7 @@
           </StackPanel>
         </Border>
 
-        <Border x:Name="FrameCard" Style="{StaticResource SettingsCard}" Tag="collector fps frame data capture PresentMon lows ETW">
-          <StackPanel>
-            <TextBlock Text="FPS &amp; frame data" Style="{StaticResource SectionHeading}" />
-            <Grid x:Name="TransportRow" Style="{StaticResource SettingsRow}" Tag="capture transport PresentMon service sdk">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="260" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-              <StackPanel VerticalAlignment="Center"><TextBlock Text="Capture transport" /><TextBlock Text="PresentMon service connection mode." Style="{StaticResource Hint}" /></StackPanel>
-              <ComboBox Grid.Column="1" Width="310" HorizontalAlignment="Left" ItemsSource="{Binding Transports}" SelectedItem="{Binding Transport, Mode=TwoWay}" />
-            </Grid>
-            <Separator />
-            <Grid x:Name="TapRow" Style="{StaticResource SettingsRow}" Tag="presented tap DXGI D3D9 frame latency">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="260" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-              <StackPanel VerticalAlignment="Center"><TextBlock Text="Presented tap" /><TextBlock Text="Low-latency stream where the title supports it." Style="{StaticResource Hint}" /></StackPanel>
-              <ComboBox Grid.Column="1" Width="310" HorizontalAlignment="Left" ItemsSource="{Binding TapModes}" SelectedItem="{Binding PresentedTap, Mode=TwoWay}" />
-            </Grid>
-            <Separator />
-            <Grid x:Name="FlushRow" Style="{StaticResource SettingsRow}" Tag="event flush period ms freshness CPU">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-              <StackPanel VerticalAlignment="Center"><TextBlock Text="Event flush period" /><TextBlock Text="0 uses the service default; 1–1000 ms trades CPU for freshness." Style="{StaticResource Hint}" /></StackPanel>
-              <StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="96" Minimum="0" Maximum="1000" SmallChange="1" Value="{Binding EtwFlushMs, Mode=TwoWay}" /><TextBlock Text="ms" Margin="6,0,0,0" VerticalAlignment="Center" /></StackPanel>
-            </Grid>
-            <Separator />
-            <Grid x:Name="LowsRow" Style="{StaticResource SettingsRow}" Tag="one percent point one low rolling window seconds">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-              <StackPanel VerticalAlignment="Center"><TextBlock Text="1% / 0.1% lows window" /><TextBlock Text="Rolling sample window used for frame-rate lows." Style="{StaticResource Hint}" /></StackPanel>
-              <StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="96" Minimum="10" Maximum="600" SmallChange="5" Value="{Binding FrameLowsWindowS, Mode=TwoWay}" /><TextBlock Text="s" Margin="6,0,0,0" VerticalAlignment="Center" /></StackPanel>
-            </Grid>
-            <Button Content="Reset frame data settings" HorizontalAlignment="Left" Margin="0,8,0,0"
-                    Style="{StaticResource SubtleButton}" Click="ResetCollector_Click" />
-          </StackPanel>
-        </Border>
-
-        <Border x:Name="NetworkCard" Style="{StaticResource SettingsCard}" Tag="network adapter external IP internet privacy URL refresh">
-          <StackPanel>
-            <TextBlock Text="Network" Style="{StaticResource SectionHeading}" />
-            <Grid x:Name="AdapterRow" Style="{StaticResource SettingsRow}" Tag="network adapter interface Best route">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="260" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-              <StackPanel VerticalAlignment="Center"><TextBlock Text="Network adapter" /><TextBlock Text="Best follows the adapter with the default route." Style="{StaticResource Hint}" /></StackPanel>
-              <ComboBox Grid.Column="1" Width="330" HorizontalAlignment="Left" IsEditable="True"
-                        ItemsSource="{Binding NetworkInterfaces}" Text="{Binding NetworkInterface, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
-            </Grid>
-            <Separator />
-            <Grid x:Name="ExternalIpRow" Style="{StaticResource SettingsRow}" Tag="external public IP internet request privacy">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-              <StackPanel VerticalAlignment="Center"><TextBlock Text="Look up my external IP" /><TextBlock Text="Off by default. This is Halo's only outbound web request." Style="{StaticResource Hint}" /></StackPanel>
-              <ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding ExternalIpEnabled, Mode=TwoWay}" OnContent="On" OffContent="Off" />
-            </Grid>
-            <Separator />
-            <Grid x:Name="IpUrlRow" Style="{StaticResource SettingsRow}" Tag="external IP service URL ipify">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="260" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-              <TextBlock Text="External IP service" VerticalAlignment="Center" />
-              <TextBox Grid.Column="1" Text="{Binding ExternalIpUrl, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" Padding="7,5" />
-            </Grid>
-            <Separator />
-            <Grid x:Name="IpRefreshRow" Style="{StaticResource SettingsRow}" Tag="external IP refresh minutes interval">
-              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-              <TextBlock Text="External IP refresh" VerticalAlignment="Center" />
-              <StackPanel Grid.Column="1" Orientation="Horizontal"><ui:NumberBox Width="96" Minimum="1" Maximum="1440" SmallChange="1" Value="{Binding ExternalIpRefreshMinutes, Mode=TwoWay}" /><TextBlock Text="minutes" Margin="6,0,0,0" VerticalAlignment="Center" /></StackPanel>
-            </Grid>
-            <Button Content="Reset network settings" HorizontalAlignment="Left" Margin="0,8,0,0"
-                    Style="{StaticResource SubtleButton}" Click="ResetNetwork_Click" />
-          </StackPanel>
-        </Border>
-
-        <Border x:Name="FilesCard" Style="{StaticResource SettingsCard}" Tag="layout files data folder export import reset settings widgets json">
+        <Border Style="{StaticResource SettingsCard}">
           <StackPanel>
             <TextBlock Text="Layout files" Style="{StaticResource SectionHeading}" />
             <TextBlock Text="Export or import both settings.json and widgets.json as one Halo layout file." Style="{StaticResource Hint}" Margin="0,0,0,10" />
@@ -210,9 +185,6 @@
                     Margin="0,8,0,0" Style="{StaticResource SubtleButton}" Click="ResetEverything_Click" />
           </StackPanel>
         </Border>
-
-        <TextBlock x:Name="NoSearchResults" Text="No settings match this search." Visibility="Collapsed"
-                   Foreground="{StaticResource HaloSubtleText}" FontSize="14" Margin="0,8,0,24" />
       </StackPanel>
     </ScrollViewer>
   </Grid>

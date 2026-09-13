@@ -38,8 +38,7 @@
         </Border>
 
         <TextBlock Text="At a glance" Style="{StaticResource SectionHeading}" />
-        <ItemsControl x:Name="SummarySection" ItemsSource="{Binding SummaryCards}"
-                      Tag="summary collector administrator elevation pawnio driver autostart widget readiness status">
+        <ItemsControl ItemsSource="{Binding SummaryCards}">
           <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="2" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate>
@@ -60,8 +59,7 @@
           </ItemsControl.ItemTemplate>
         </ItemsControl>
 
-        <Border x:Name="ActionsSection" Style="{StaticResource SettingsCard}"
-                Tag="actions install pawnio driver repair autostart scheduled tasks rescan hardware copy report generate default layout arrange widgets primary monitor repack">
+        <Border Style="{StaticResource SettingsCard}">
           <StackPanel>
             <TextBlock Text="Fixes and setup" Style="{StaticResource SectionHeading}" />
             <WrapPanel>
@@ -82,8 +80,7 @@
           </StackPanel>
         </Border>
 
-        <Border x:Name="HardwareSection" Style="{StaticResource SettingsCard}"
-                Tag="hardware detected windows os cpu gpu graphics volume drive disk fan sensors">
+        <Border Style="{StaticResource SettingsCard}">
           <StackPanel>
             <TextBlock Text="Detected hardware" Style="{StaticResource SectionHeading}" />
             <ItemsControl ItemsSource="{Binding Hardware}">
@@ -103,8 +100,7 @@
           </StackPanel>
         </Border>
 
-        <Border x:Name="ProvidersSection" Style="{StaticResource SettingsCard}"
-                Tag="providers status collector builtin kernel process disk io network nvml lhm presentmon pclstats error polling rate">
+        <Border Style="{StaticResource SettingsCard}">
           <StackPanel>
             <TextBlock Text="Data providers" Style="{StaticResource SectionHeading}" />
             <Grid Margin="0,3,0,5">
@@ -139,8 +135,7 @@
           </StackPanel>
         </Border>
 
-        <Border x:Name="ReadinessSection" Style="{StaticResource SettingsCard}"
-                Tag="widget readiness available partial unavailable clock cpu ram gpu fps network drives fans power latency top processes">
+        <Border Style="{StaticResource SettingsCard}">
           <StackPanel>
             <TextBlock Text="Widget readiness" Style="{StaticResource SectionHeading}" />
             <ItemsControl ItemsSource="{Binding PanelStatuses}">
@@ -165,8 +160,6 @@
           </StackPanel>
         </Border>
 
-        <TextBlock x:Name="NoSearchResults" Text="No System check settings match this search."
-                   Style="{StaticResource Hint}" FontSize="14" Visibility="Collapsed" Margin="0,12" />
       </StackPanel>
     </ScrollViewer>
   </Grid>

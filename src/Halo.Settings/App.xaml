@@ -53,6 +53,40 @@
         <Setter Property="Padding" Value="12,6" />
         <Setter Property="Margin" Value="0,0,8,0" />
       </Style>
+
+      <!-- WPF-UI 4.3 lays the inline spin buttons out INSIDE the NumberBox's content area: two
+           24-unit RepeatButtons plus the (still measured) compact flyout make 76 units, and the
+           control's own 10,8,10,7 padding adds 20 more. Give the control a hard Width and that
+           chrome wins: at Width="86" the text host measures 0 and the box renders empty even
+           though Value and Text are both correct.
+
+           So the rule is NEVER GIVE A NumberBox A HARD Width. Left to size itself it measures 128
+           and can never clip. MinWidth below 128 therefore does nothing; 132 is the first value
+           that binds, and it only earns its keep if someone later drops a NumberBox into a
+           constrained Grid column where the control cannot grow. For reference, a 4-character
+           value ("3.45", "23.5") needs 25.7 units of text area; a hard Width of 116 leaves 17.6
+           and 120 leaves 22.4, so both of those clip.
+
+           ClearButtonEnabled=False is not about clipping: the clear button appears on focus and
+           makes the box jump 128 -> 155, visibly shoving the row as you click into it. It is also
+           meaningless on a spinner that has a Minimum. Off keeps the width stable.
+
+           Keyed, not implicit: an implicit style keyed {x:Type ui:NumberBox} sitting next to
+           ui:ControlsDictionary in this same dictionary shadows WPF-UI's own entry, and its
+           BasedOn then resolves to itself, so the control loses the Fluent template and the spin
+           buttons with it. -->
+      <Style x:Key="SettingsNumberBox" TargetType="{x:Type ui:NumberBox}"
+             BasedOn="{StaticResource {x:Type ui:NumberBox}}">
+        <Setter Property="MinWidth" Value="132" />
+        <Setter Property="ClearButtonEnabled" Value="False" />
+      </Style>
+
+      <!-- Appearance preset chips: checked state comes from the view model, clicking applies. -->
+      <Style x:Key="PresetChip" TargetType="ToggleButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
+        <Setter Property="Padding" Value="14,6" />
+        <Setter Property="Margin" Value="0,0,8,0" />
+        <Setter Property="MinWidth" Value="0" />
+      </Style>
     </ResourceDictionary>
   </Application.Resources>
 </Application>

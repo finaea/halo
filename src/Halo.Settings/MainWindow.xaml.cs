@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Windows.Controls;
 using Halo.Settings.Pages;
 using Halo.Settings.Services;
@@ -48,7 +49,6 @@ public partial class MainWindow : FluentWindow
         PageHost.Content = page;
         _current = page;
         page.OnEnter();
-        if (page is ISearchableSettingsPage searchable) searchable.ApplyFilter(SearchBox.Text);
     }
 
     private void OpenWidgets()
@@ -59,14 +59,12 @@ public partial class MainWindow : FluentWindow
             widgets.ShowReadyBanner();
     }
 
-    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
-    {
-        if (_current is ISearchableSettingsPage searchable) searchable.ApplyFilter(SearchBox.Text);
-    }
-
     private void Config_StatusChanged(object? sender, ConfigWriteStatus e)
     {
-        SaveStatusText.Text = e.IsError ? "⚠ " + e.Message : e.IsSaving ? e.Message : "✓ " + e.Message;
+        // The timestamp is stamped when the write completes, not here, so a late repaint of the
+        // footer cannot claim a time the file was not written at.
+        string suffix = e.At is { } at ? $" · {at.ToString("d MMM yyyy, HH:mm", CultureInfo.CurrentCulture)}" : "";
+        SaveStatusText.Text = e.IsError ? "⚠ " + e.Message : e.IsSaving ? e.Message : "✓ " + e.Message + suffix;
         SaveStatusText.Foreground = (System.Windows.Media.Brush)FindResource(e.IsError ? "HaloDanger" : "HaloSuccess");
     }
 

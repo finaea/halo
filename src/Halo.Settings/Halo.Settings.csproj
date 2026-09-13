@@ -25,5 +25,8 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="..\..\assets\halo.ico" Link="assets\halo.ico" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Also embedded, so the window and title-bar icons resolve through
+         pack://application:,,,/assets/halo.ico instead of a loose file next to the exe. -->
+    <Resource Include="..\..\assets\halo.ico" Link="assets\halo.ico" />
   </ItemGroup>
 </Project>

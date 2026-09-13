@@ -14,7 +14,9 @@ public enum ConfigFileKind
 
 public sealed record ConfigChangedEventArgs(ConfigFileKind File, IReadOnlySet<string> DirtyPaths);
 
-public sealed record ConfigWriteStatus(string Message, bool IsError = false, bool IsSaving = false);
+/// <param name="At">Local time the write actually completed, for statuses that describe one.
+/// Stamped where the status is raised so a late footer repaint cannot report a stale time.</param>
+public sealed record ConfigWriteStatus(string Message, bool IsError = false, bool IsSaving = false, DateTime? At = null);
 
 /// <summary>
 /// Settings-side live editing around the shared ConfigStore. Mutations are keyed by JSON path,
@@ -173,7 +175,7 @@ public sealed class LiveConfigService : IDisposable
                     RemoveCommitted(_widgetsPending, widgetsBatch);
             }
 
-            PublishStatus(new($"Saved {DateTime.Now:HH:mm:ss}"));
+            PublishStatus(new("Saved", At: DateTime.Now));
         }
         catch (Exception ex)
         {
