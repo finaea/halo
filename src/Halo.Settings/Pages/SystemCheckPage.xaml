@@ -18,7 +18,7 @@
                 Visibility="{Binding IsFirstRun, Converter={StaticResource BoolToVisibility}}">
           <StackPanel>
             <TextBlock Text="Let’s set up your widgets" FontSize="17" FontWeight="SemiBold" />
-            <TextBlock Text="Nothing has been written yet. Review the checks below, then generate a sensible starting layout."
+            <TextBlock Text="{Binding FirstRunMessage}"
                        Style="{StaticResource Hint}" Margin="0,4,0,0" />
           </StackPanel>
         </Border>
@@ -73,7 +73,7 @@
                       ToolTip="Re-enumerates GPUs, fans and volumes. Available once every 10 seconds."
                       Padding="12,6" Margin="0,0,8,8" Click="Rescan_Click" />
               <Button Content="Copy hardware report" Padding="12,6" Margin="0,0,8,8" Click="CopyReport_Click" />
-              <Button Content="Generate default layout" Padding="12,6" Margin="0,0,0,8" Click="GenerateLayout_Click" />
+              <Button Content="{Binding LayoutButtonText}" Padding="12,6" Margin="0,0,0,8" Click="GenerateLayout_Click" />
             </WrapPanel>
             <TextBlock Text="{Binding ActionStatus}" Style="{StaticResource Hint}" Margin="0,2,0,0" />
           </StackPanel>

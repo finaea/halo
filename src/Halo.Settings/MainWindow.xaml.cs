@@ -1,5 +1,4 @@
 using System.Windows.Controls;
-using System.IO;
 using Halo.Settings.Pages;
 using Halo.Settings.Services;
 using Halo.Shared;
@@ -16,7 +15,7 @@ public partial class MainWindow : FluentWindow
 
     public MainWindow()
     {
-        _firstRun = !File.Exists(Path.Combine(Paths.ConfigDir, "widgets.json"));
+        _firstRun = FirstRunState.IsPending;
         InitializeComponent();
         _config = new LiveConfigService(Paths.ConfigDir);
         _config.StatusChanged += Config_StatusChanged;

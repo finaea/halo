@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.IO;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows.Media;
@@ -153,6 +154,7 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
     private string _actionStatus = "";
     private string _collectorVersion = "Not connected";
     private bool _pawnInstalled;
+    private bool _hasExistingLayout;
     private DateTimeOffset _rescanBlockedUntilUtc;
     private IReadOnlyList<MetricInfo> _metrics = [];
     private IReadOnlyList<ProviderInfo> _providerInfos = [];
@@ -172,11 +174,28 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
     public string AutostartButtonToolTip { get => _autostartButtonToolTip; private set => Set(ref _autostartButtonToolTip, value); }
     public string ActionStatus { get => _actionStatus; set => Set(ref _actionStatus, value); }
     public string CollectorVersion { get => _collectorVersion; private set => Set(ref _collectorVersion, value); }
+    public bool HasExistingLayout
+    {
+        get => _hasExistingLayout;
+        private set
+        {
+            if (Set(ref _hasExistingLayout, value))
+            {
+                Raise(nameof(LayoutButtonText));
+                Raise(nameof(FirstRunMessage));
+            }
+        }
+    }
+    public string LayoutButtonText => HasExistingLayout ? "Regenerate default layout…" : "Generate default layout";
+    public string FirstRunMessage => HasExistingLayout
+        ? "Halo already created a starting layout. Review the checks below; you can regenerate it for the hardware found here."
+        : "Nothing has been written yet. Review the checks below, then generate a sensible starting layout.";
 
     public SystemCheckViewModel(LiveConfigService config, bool firstRun)
     {
         _config = config;
         _isFirstRun = firstRun;
+        _hasExistingLayout = File.Exists(Path.Combine(_config.ConfigDir, "widgets.json"));
         foreach (string key in new[] { "collector", "pawnio", "autostart", "readiness" })
         {
             var card = new CheckCardViewModel(key);
@@ -191,6 +210,7 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
         _refreshing = true;
         try
         {
+            HasExistingLayout = File.Exists(Path.Combine(_config.ConfigDir, "widgets.json"));
             _session.Poll();
             bool connected = _session.Attached && !_session.Stale;
             Offline = !connected;
@@ -290,8 +310,9 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
         }
         string names = string.Join(", ", widgets.Select(widget => widget.Type == "gpu"
             ? $"GPU {widget.Options.GetValueOrDefault("gpuIndex", "0")}" : PanelCatalog.Find(widget.Type)?.DisplayName ?? widget.Type));
+        string action = HasExistingLayout ? "replace your current widgets with" : "create";
         return new(widgets,
-            $"Halo will replace widgets.json with {widgets.Count} widgets on the primary monitor: {names}. FPS is omitted until a game supplies frame data.", false);
+            $"Halo will {action} {widgets.Count} widgets on the primary monitor: {names}. FPS is omitted until a game supplies frame data.", false);
     }
 
     public async Task SaveLayoutAsync(LayoutPlan plan)
@@ -299,6 +320,7 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
         List<WidgetInstance> saved = plan.Widgets.Select(CloneWidget).ToList();
         _config.QueueWidgets("$", config => config.Widgets = saved.Select(CloneWidget).ToList(), flushImmediately: true);
         await _config.FlushAllAsync();
+        HasExistingLayout = true;
         IsFirstRun = false;
         ActionStatus = $"Created {saved.Count} widgets.";
     }
