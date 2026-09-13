@@ -16,18 +16,25 @@ src\Halo.Settings\bin\Debug\net10.0-windows\win-x64\Halo.Settings.exe
 Halo.Collector.exe --dump [--json]
 # one-time upgrade of a pre-v2 config folder:
 Halo.Collector.exe --migrate-config <old config dir> [--to <dir>]
-# publish self-contained into bin\: tools\publish-halo.ps1
-# autostart registration (elevates): tools\install-halo.ps1 · removal: tools\uninstall-halo.ps1
+# release build: all three exes over ONE shared self-contained runtime, into dist\app
+tools\build.ps1 [-Clean] [-Installer] [-Zip] [-NoReadyToRun]   # -Installer needs Inno Setup 6
+# dev autostart against dist\app (one UAC prompt): tools\install-dev.ps1 · tools\uninstall-dev.ps1
+# stop -> build -> start, in the only order that works: tools\redeploy-halo.ps1
 ```
 
 **Paths** come from `Halo.Shared.Paths`, never from walking up to `Halo.sln`. Assets, fonts and the
 bundled PresentMon SDK are read from the exe's own folder (the build copies them there); config and
 logs live in `%LOCALAPPDATA%\Halo`, or `<app root>\data` when a `portable.marker` file sits next to
-the exe. The repo's `config\` is the reference layout, not what a running Halo reads.
+the exe. `config\reference\` is the documented v2 layout, not what a running Halo reads.
 
 Portable-first policy (docs/global-installs.md): the NuGet cache is project-local
-(`tools\nuget-cache`). Only global footprints: scheduled task `\Halo\Collector`, HKCU Run
-`HaloWidgets` — both created only by `tools\install-halo.ps1`, removed by uninstall.
+(`tools\nuget-cache`); so is the PawnIO redist (`installer\redist\`, fetched by `build.ps1` against
+a pinned SHA-256, gitignored). Only global footprints: scheduled tasks `\Halo\Collector` (Highest)
+and `\Halo\Widgets` (Limited), created by `Halo.Settings.exe --register-autostart` — which the
+installer, `install-dev.ps1` and the System check "Repair autostart" button all call, so the task
+definition lives in exactly one place (`AutostartManager`). **No HKCU Run value any more**; the verb
+deletes a leftover `HaloWidgets` one. An installed copy adds `Program Files\Halo`, two Start-menu
+shortcuts and an ARP entry, and leaves PawnIO behind on uninstall (shared driver).
 
 ## Architecture (three processes)
 
@@ -79,8 +86,9 @@ Portable-first policy (docs/global-installs.md): the NuGet cache is project-loca
   40 Hz provider poll with stats published every poll (lows cached at 2 Hz); feeds the
   DISPLAYED panel + all fate-dependent metrics. The fps pipeline is idle-aware: 10 s
   without frames → service flush 100 ms + tap providers muted; frames re-arm it (~150 ms). FRAMETIME means on both panels are rolling
-  100 ms; WORST is the 1 s max. Console capture app is the fallback
-  (`collector.presentMonTransport`). **Tap lane** (`PresentTap`, `collector.presentedTap`):
+  100 ms; WORST is the 1 s max. There is no fallback transport — `collector.presentMonTransport`
+  still takes `auto|sdk` and both mean the SDK (the console capture app is gone; its binary was
+  never on disk). **Tap lane** (`PresentTap`, `collector.presentedTap`):
   own ETW session on the DXGI/D3D9 present-start events — no fate wait — feeding the
   PRESENTED panel live (1 s FPS, 100 ms frametime mean, `FrameFlags.Provisional` ring
   entries); Vulkan/OpenGL titles fall back to the resolved lane (`fps.tap.active`).
@@ -104,5 +112,13 @@ Portable-first policy (docs/global-installs.md): the NuGet cache is project-loca
   access-violates (`0xC0000005`) inside `CpuId..ctor` — an AV, so uncatchable, process gone
   (measured 2026-09-13). Tens of seconds apart it survives, which is why the host's poll-failure
   retry is fine. `LhmProvider.Part.Cpu` therefore opts out of `rescan`.
-- PawnIO (`C:\Program Files\PawnIO`) belongs to FanControl — never uninstall with Halo.
-- The 3 icon fonts in `assets\fonts` are copied from the Rainformer skin (personal use).
+- PawnIO (`C:\Program Files\PawnIO`) is a **shared** driver — FanControl, LHM and HWiNFO use the
+  same one. Halo's installer offers it (`Halo.Settings.exe --install-pawnio`, exit 3010 = reboot
+  needed) and never removes it on uninstall.
+- `assets\fonts` has exactly one font left: `ElegantIcons.ttf` (GPL-2.0/MIT dual, MIT taken),
+  loaded by the `*.ttf` glob in `Dx.LoadFonts` and used by name for the Drives/Network arrows.
+  `SegMDL2.ttf` (Microsoft proprietary) and `MaterialIcons.ttf` (unreferenced) were deleted for the
+  public release — see `THIRD-PARTY-NOTICES.md`.
+- Licensing lives in three files at the root: `LICENSE` (MIT, Halo's code), `NOTICE.md` (the
+  Rainformer design is CC BY-NC 3.0 — **non-commercial**), `THIRD-PARTY-NOTICES.md` (a row per
+  shipped component, plus the GPL-2.0 text for PawnIO). Anything new that ships needs a row.

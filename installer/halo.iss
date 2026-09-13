@@ -42,8 +42,10 @@ SolidCompression=yes
 WizardStyle=modern
 
 ; The collector's scheduled task runs at RunLevel Highest and the files land in Program
-; Files, so this is an admin install: x64 only, Windows 10 1809+ (10.0.17763), the floor
-; the .NET 10 runtime itself supports.
+; Files, so this is an admin install: x64 only, Windows 10 1809+ (10.0.17763). 1809 is
+; Halo's floor, not .NET's — .NET 10 also lists Windows 10 1607/21H2 Enterprise
+; (https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md) — it is
+; simply the oldest Windows 10 servicing branch still getting updates (LTSC 2019).
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible

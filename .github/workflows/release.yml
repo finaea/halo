@@ -1,0 +1,92 @@
+name: Release
+
+# Tag a commit v<version> and push the tag; this builds the same two artefacts
+# tools\build.ps1 builds locally and attaches them to a GitHub release.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# The tag has to match <Version> in Directory.Build.props - the job checks and fails
+# loudly rather than shipping a setup exe whose file name lies about its contents.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Check the tag against Directory.Build.props
+        id: version
+        shell: pwsh
+        run: |
+          $props = Get-Content Directory.Build.props -Raw
+          if ($props -notmatch '<Version>([^<]+)</Version>') { throw 'No <Version> in Directory.Build.props' }
+          $version = $Matches[1].Trim()
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+            if ($tagVersion -ne $version) {
+              throw "Tag $env:GITHUB_REF_NAME says $tagVersion, Directory.Build.props says $version. Bump one of them."
+            }
+          }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      # Per-user install, no admin, same command the README gives contributors.
+      # ISCC lands in %LOCALAPPDATA%\Programs\Inno Setup 6, which build.ps1 looks in.
+      - name: Install Inno Setup 6
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.3.exe'
+          Invoke-WebRequest -Uri 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $exe -UseBasicParsing
+          $p = Start-Process -FilePath $exe -ArgumentList '/VERYSILENT','/CURRENTUSER','/NORESTART','/SUPPRESSMSGBOXES' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Inno Setup install failed (exit $($p.ExitCode))" }
+
+      # Publishes dist\app, downloads and hash-verifies PawnIO_setup.exe, compiles the
+      # installer, packs the portable zip.
+      - name: Build
+        shell: pwsh
+        run: .\tools\build.ps1 -Clean -Installer -Zip
+
+      - name: Upload build artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: halo-${{ steps.version.outputs.version }}
+          path: |
+            dist/Halo-Setup-${{ steps.version.outputs.version }}.exe
+            dist/Halo-${{ steps.version.outputs.version }}-win-x64.zip
+          if-no-files-found: error
+
+      - name: Create the release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $v = '${{ steps.version.outputs.version }}'
+          # Single-quoted here-string: nothing in here is escaped or interpolated, so the
+          # markdown backticks survive. VERSION is substituted afterwards.
+          $notes = @'
+          Halo VERSION
+
+          - `Halo-Setup-VERSION.exe` - installer. One UAC prompt; offers the PawnIO driver and autostart.
+          - `Halo-VERSION-win-x64.zip` - portable. Unzip and run; config and logs stay in `.\data`.
+
+          Both are **unsigned**, so SmartScreen warns on first run (More info -> Run anyway).
+          Requirements, what works without PawnIO or without an NVIDIA GPU, and the licences are in
+          the README.
+          '@
+          ($notes -replace 'VERSION', $v) | Out-File release-notes.md -Encoding utf8
+          gh release create $env:GITHUB_REF_NAME "dist/Halo-Setup-$v.exe" "dist/Halo-$v-win-x64.zip" --title "Halo $v" --notes-file release-notes.md

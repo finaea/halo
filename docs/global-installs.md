@@ -1,113 +1,92 @@
-# Halo — Global Installs, Dependencies & New-PC Setup
+# Halo — what it puts on your machine
 
-**Policy:** everything for Halo lives inside this project folder (`c:\Users\final\Desktop\WIP\CodeProj\HALO\`).
-**Relocating that folder:** follow [moving-the-project.md](private/moving-the-project.md) — the §3 table
-below is the complete set of absolute paths, and `tools\install-halo.ps1` rewrites all of them.
-Deleting the folder + running the uninstall script removes Halo completely. Anything that *must*
-touch the system outside this folder is listed here — nothing global gets added without a row in
-this file.
+Everything Halo touches outside its own program folder, what removes it, and what it deliberately
+leaves behind. Nothing global gets added without a row in this file.
 
-**Baseline audited:** 2026-07-19 · last updated 2026-07-20.
+Two ways to run Halo, two footprints:
+
+- **Installed** (`Halo-Setup-<version>.exe`) — program files under `Program Files\Halo`, data under
+  `%LOCALAPPDATA%\Halo`, two scheduled tasks, an ARP (Add/Remove Programs) entry.
+- **Portable** (`Halo-<version>-win-x64.zip`, or a `dist\app` you built yourself with a
+  `portable.marker` next to the exes) — everything including config and logs stays in the folder.
+  No registry, no tasks, nothing to uninstall. Autostart is the only thing you give up.
+
+Last updated 2026-09-13 for the v2 layout.
 
 ---
 
-## 1. Dependencies (everything Halo needs to run)
+## 1. Added by the installer
 
-### Bundled in the repo / build output — nothing to install
+| Item | Where | Created by | Removed by |
+| --- | --- | --- | --- |
+| Program files | `C:\Program Files\Halo` (three exes over one shared .NET runtime, `assets\`, `presentmon\`, `redist\`, licences) | Inno Setup `[Files]` | uninstall |
+| Start menu shortcuts | `Halo Settings`, `Halo Widgets` | `[Icons]` | uninstall |
+| ARP / uninstall entry | `HKLM\...\Uninstall\{D05EF3BB-...}_is1` | Inno Setup | uninstall |
+| Collector autostart | scheduled task `\Halo\Collector` — RunLevel **Highest**, at logon of the interactive user | `Halo.Settings.exe --register-autostart` | `--unregister-autostart`, run by `[UninstallRun]` |
+| Widgets autostart | scheduled task `\Halo\Widgets` — RunLevel **Limited** (medium integrity), at logon | same | same |
+| Config + logs | `%LOCALAPPDATA%\Halo\config\*.json`, `%LOCALAPPDATA%\Halo\logs\*.log` | the apps, at first run | uninstall **asks**; keep them and a re-install picks up where you left off |
+| PawnIO driver *(optional component, ticked by default)* | `C:\Program Files\PawnIO` + its own ARP entry and kernel service | `Halo.Settings.exe --install-pawnio` → `redist\PawnIO_setup.exe -install -silent` | **not removed** — see below |
 
-| Dependency | Where | Used for |
-|---|---|---|
-| .NET 9 runtime | published **self-contained** into `bin\Halo.*\` | no system .NET needed at run time |
-| PresentMon 2 **service + SDK** (`PresentMonService.exe`, `PresentMonAPI2.dll`, Intel) | `tools\presentmon\sdk\` | frame capture, resolved lane (DISPLAYED panel, lows). Run as a plain console-mode **child process** of the collector — never registered as a Windows service |
-| PresentMon 2 **console app** (`PresentMon-2.5.1-x64.exe`) | `tools\presentmon\` | fallback transport (`settings.PresentMonTransport`) |
-| LibreHardwareMonitorLib 0.9.6 (NuGet) | project-local NuGet cache → build output | CPU/SuperIO/storage/GPU-extra sensors (needs the collector elevated for ring0 access) |
-| Microsoft.Diagnostics.Tracing.TraceEvent 3.2.5 (NuGet) | build output | own ETW sessions: present tap (`HaloTap`), NVIDIA Reflex/PCL latency markers |
-| Vortice.* 3.8.3 (NuGet) | build output | Direct3D11 / Direct2D / DirectComposition / DXGI bindings for the widget renderer |
-| 3 icon fonts (`ElegantIcons`, `MaterialIcons`, `SegMDL2`) | `assets\fonts\` | widget glyphs (copied from the Rainformer skin — personal use) |
-| `halo.ico` | `assets\` | exe / window / tray icon |
+Both tasks are created through the Task Scheduler API, not `schtasks`, with
+`DisallowStartIfOnBatteries=false`, `StopIfGoingOnBatteries=false`, `ExecutionTimeLimit=PT0S`,
+`StartWhenAvailable=true`, `RestartCount=3` and priority 5
+(`src/Halo.Settings/Services/AutostartManager.cs:182-188`). `schtasks /Create` defaults to stopping
+on battery, which is why none of this goes through it.
 
-### Expected on the machine
+There is **no** `HKCU\...\Run` value any more. `--register-autostart` deletes a leftover
+`HaloWidgets` one from the pre-installer days if it finds it
+(`AutostartManager.cs:254-268`).
 
-| Dependency | Needed for | If missing |
-|---|---|---|
-| Windows 11 x64 (Win10 21H2+ works) | everything | — |
-| Administrator elevation for the **collector** | LHM ring0 sensors (CPU temp, fans, storage), ETW frame capture, Reflex markers | collector degrades gracefully: those metrics render "N/A", clock/disk-space/network still work |
-| NVIDIA GPU + driver (for NVML) | GPU panel, DLSS/frame-gen detection, Reflex latency panel | metrics show N/A; everything else unaffected |
-| **Trebuchet MS** font (ships with Windows) | widget text | any font can be set in Settings → General |
-| .NET **SDK** 9 | **building from source only** | not needed if you copy a published `bin\` |
-| Internet access, once, at first build | NuGet restore into `tools\nuget-cache` | not needed at run time (external-IP lookup is optional and off-path) |
+### Why PawnIO is left behind
 
-### Explicitly NOT dependencies
+PawnIO is a **shared** kernel driver. FanControl, LibreHardwareMonitor and HWiNFO installs all use
+the same one, and Halo has no way to know whether it was there first. Uninstalling Halo therefore
+leaves it installed and says so. Remove it yourself from Settings → Apps if nothing else needs it.
 
-- **PawnIO** (`C:\Program Files\PawnIO`) — belongs to **FanControl** on this machine; LHM coexists
-  with it. ⚠️ Never uninstall it when removing Halo, and never install it for Halo on a new PC.
-- HWiNFO, MSI Afterburner, RTSS, NVIDIA App overlay, Rainmeter — the stack Halo **replaces**;
-  none are read or required (decommissioned on this machine 2026-07-20).
+## 2. Runtime-only, cleans itself up
 
-## 2. Pre-existing on this system (NOT ours, never remove)
+| Thing | Lifetime |
+| --- | --- |
+| `Local\Halo.Metrics.v2` shared section, `Local\Halo.FramesReady.v2` event, `\\.\pipe\Halo.Control.v2` | die with the collector process |
+| ETW sessions `HaloPMSvc`, `HaloTap`, the PCL Stats session | stopped by the collector; a stale one from a hard kill is cleaned at the next start |
+| `PresentMonService.exe` | a plain console-mode **child process** of the collector — never registered with the Windows service manager, so it has no service entry to leave behind |
+| LibreHardwareMonitor's global ISA-bus mutex | process lifetime |
 
-| Item | Location | Owner | Notes |
-|---|---|---|---|
-| .NET SDK 9.0.301 + runtimes | `C:\Program Files\dotnet` | User (pre-existing) | used only to build; published output is self-contained |
-| PawnIO driver | `C:\Program Files\PawnIO` | **FanControl** | see above |
-| FanControl | `C:\Program Files (x86)\FanControl` | User | untouched; Halo is monitor-only, coexists via LHM's global ISA mutex |
+## 3. Kept project-local on purpose (would normally be global)
 
-## 3. Added by Halo — global registrations (binaries stay in the project folder)
-
-| Item | Global footprint | Points to | Cleanup | Status |
-|---|---|---|---|---|
-| Collector autostart | Scheduled task `\Halo\Collector` (highest privileges, at logon) | `bin\Halo.Collector\Halo.Collector.exe` (Debug fallback), resolved by `tools\install-halo.ps1` | `schtasks /Delete /TN "\Halo\Collector" /F` (done by `tools\uninstall-halo.ps1`) | ☑ installed |
-| Widgets autostart | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` → `HaloWidgets` | `bin\Halo.Widgets\Halo.Widgets.exe` (Debug fallback), resolved by `tools\install-halo.ps1` | `reg delete HKCU\...\Run /v HaloWidgets /f` (done by `tools\uninstall-halo.ps1`) | ☑ installed |
-| Windows Defender exclusion *(optional, off by default)* | exclusion path for the project folder | `<project>` | `Remove-MpPreference -ExclusionPath <project>` (done by uninstall) | opt-in via `install-halo.ps1 -AddDefenderExclusion` |
-
-*PresentMon has **no** global footprint: both the service and the console app run as child
-processes launched and killed by the collector (console mode — never registered with SCM).*
-
-## 4. Kept project-local by design (would normally be global)
+For anyone building from source:
 
 | Item | Normal location | Halo location |
-|---|---|---|
+| --- | --- | --- |
 | NuGet package cache | `%USERPROFILE%\.nuget\packages` | `tools\nuget-cache` (via `nuget.config` `globalPackagesFolder`) |
-| App config + widget layouts | `%AppData%` | `config\` |
-| Logs (7-day retention, 64 MB/session cap) | `%LocalAppData%` | `logs\` |
-| PresentMon service + SDK + console binaries | `Program Files\Intel\PresentMon` | `tools\presentmon\` |
-| Build outputs | — | `bin\`, `obj\` (git-ignored) |
+| PresentMon SDK | `Program Files\Intel\PresentMon` | `tools\presentmon\sdk\`, committed to git (MIT), copied into the build output |
+| PawnIO installer payload | — | `installer\redist\PawnIO_setup.exe`, downloaded by `tools\build.ps1` against a pinned SHA-256, gitignored |
+| Build outputs | — | `dist\`, `bin\`, `obj\` (all gitignored) |
 
-## 5. Setting up Halo on a new PC
+## 4. Full removal
 
-Everything except `bin\`, `logs\` and the NuGet cache is in git — including the PresentMon
-binaries, fonts, icon, and `config\` (widget layout + settings travel with the repo).
+1. **Settings → Apps → Halo → Uninstall** (or `unins000.exe` in the program folder). It stops both
+   tasks, kills any `Halo.*` / `PresentMon*` process whose image path is inside the install folder,
+   removes the tasks, deletes `Program Files\Halo`, and asks whether to delete
+   `%LOCALAPPDATA%\Halo`.
+2. PawnIO stays. Remove it from Settings → Apps if you want it gone and nothing else uses it.
 
-**Option A — copy the working folder (no SDK needed):**
-1. Copy the whole project folder (including `bin\`) to the new machine.
-2. Run `tools\install-halo.ps1` (self-elevates): registers the collector scheduled task +
-   widgets Run key and starts both. Done.
+Silent uninstall, if you need it:
 
-**Option B — from git (build machine):**
-1. Install the .NET SDK 9.x (`winget install Microsoft.DotNet.SDK.9`).
-2. Clone the repo; run `tools\publish-halo.ps1` (first run restores NuGet into
-   `tools\nuget-cache` — needs internet once) → self-contained builds land in `bin\`.
-3. Run `tools\install-halo.ps1`.
+```powershell
+& "C:\Program Files\Halo\unins000.exe" /VERYSILENT /NORESTART
+```
 
-**After either option:**
-- **Widget positions:** stored per monitor device id — on different monitor hardware, drag each
-  widget where you want it once (drops save instantly, including which monitor).
-- **Fans:** channel names / max RPM are motherboard-specific — re-map in Settings → General →
-  Fans (channels are the SuperIO "System Fan #N" numbers).
-- **Drives / network adapter:** re-tick in Settings → General.
-- **Defender:** if a project file vanishes, check `Get-MpThreatDetection` — a 2026-07-19 ML
-  false-positive (`Trojan:Win32/Bearfoos.A!ml`) once quarantined a csproj; restore from git and
-  consider `install-halo.ps1 -AddDefenderExclusion`.
-- **No NVIDIA GPU:** GPU/latency/DLSS panels show N/A — disable those widgets in Settings.
+Built from source instead? `tools\uninstall-dev.ps1` does the same for a `dist\app` layout: stops
+everything in the right order (widgets first — it owns the watchdog that restarts the collector),
+then calls `--unregister-autostart`. It never touches `%LOCALAPPDATA%\Halo` or PawnIO.
 
-## 6. Full removal
+## 5. Known limitation: which user the tasks belong to
 
-1. Run `tools\uninstall-halo.ps1` — stops all processes (including PresentMon children),
-   deletes the registrations in §3, verifies nothing global remains. Self-elevates.
-2. Delete the folder.
-3. Leave `C:\Program Files\dotnet`, PawnIO, FanControl untouched (pre-existing, §2).
-
-*Runtime-only footprints that clean themselves: ETW sessions (`HaloPMSvc`, `HaloTap`, PCL —
-stopped by the collector; stale ones from a hard kill are cleaned at next collector start),
-`Local\Halo.Metrics.v1` shared memory + `Local\Halo.FramesReady.v1` event (vanish with the
-processes), LHM ISA-bus mutex (process-lifetime).*
+The installer runs elevated, so Windows would normally hand it the elevating account. The tasks are
+registered for the **interactive console user** instead, resolved at install time by
+`WTSGetActiveConsoleSessionId` inside the `--register-autostart` verb
+(`AutostartManager.cs:270-279`), which is right in the case that actually bites: a standard user
+installing with an admin's credentials. If it still lands on the wrong account — multiple
+simultaneous sessions, say — Settings → System check → **Repair autostart** re-registers them for
+whoever is running it.
