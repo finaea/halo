@@ -141,6 +141,23 @@ public sealed class ConfigStore : IDisposable
         }
     }
 
+    /// <summary>
+    /// Same merge rule as <see cref="UpdateWidget"/>, for a change that spans the whole document:
+    /// the arrange flag, or writing every widget's new position in one pass after the packer has
+    /// run. Still a re-read of the file, so a concurrent Settings edit to fields the caller does
+    /// not touch survives.
+    /// </summary>
+    public void UpdateWidgets(Action<WidgetsConfig> mutate)
+    {
+        lock (_writeLock)
+        {
+            var fresh = Load("widgets.json", ConfigJsonContext.Default.WidgetsConfig);
+            if (fresh == null) { mutate(Widgets); SaveWidgets(); return; }
+            mutate(fresh);
+            Save("widgets.json", fresh, ConfigJsonContext.Default.WidgetsConfig);
+        }
+    }
+
     /// <summary>Same merge rule as <see cref="UpdateWidget"/> for settings.json — the widget
     /// process owns only <c>lockAll</c> there, Settings owns everything else.</summary>
     public void UpdateSettings(Action<AppSettings> mutate)

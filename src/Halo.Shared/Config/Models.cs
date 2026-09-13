@@ -161,6 +161,20 @@ public sealed class WidgetsConfig
 {
     public int SchemaVersion { get; set; } = AppSettings.CurrentSchemaVersion;
     public List<WidgetInstance> Widgets { get; set; } = new();
+
+    /// <summary>
+    /// <c>"pending"</c> asks the widget process to place every widget on the primary monitor with
+    /// the column packer and write the result back, then clear this. Anyone can request a layout
+    /// — the Settings app's "Generate default layout", or the widget process's own first run —
+    /// but only the renderer can actually do it, because packing needs each panel's laid-out
+    /// pixel size and only the renderer has one (hardware plan H6).
+    /// </summary>
+    public string? Arrange { get; set; }
+
+    public const string ArrangePending = "pending";
+
+    public bool ArrangeRequested
+        => string.Equals(Arrange, ArrangePending, StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>
