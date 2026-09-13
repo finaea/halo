@@ -63,7 +63,10 @@ public sealed record PanelType(
     // a refresh-rate slider (rates plan R2).
     bool EventDriven = false,
     // Requires: hardware this panel needs, for the System check's per-widget verdict.
-    string? Requires = null)
+    string? Requires = null,
+    // LocalContent: the headline is produced in the widget process (the clock's time), so no
+    // collector metric bounds this panel's refresh rate — its slider stays 0.5–10 Hz (R2).
+    bool LocalContent = false)
 {
     public MetricSpec? Metric(string key) => Metrics.FirstOrDefault(m => m.Key == key);
     public OptionSpec? Option(string key) => Options.FirstOrDefault(o => o.Key == key);
@@ -103,7 +106,8 @@ public static class PanelCatalog
             ],
             Options: [],
             Tokens: [.. Frame, "solidLabel"],
-            DefaultRateHz: 5),
+            DefaultRateHz: 5,
+            LocalContent: true),
 
         new PanelType("cpu-ram", "CPU / RAM",
             Metrics:

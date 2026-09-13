@@ -66,8 +66,16 @@ public sealed class ConfigStore : IDisposable
 
     private void OnFsEvent(object? s, FileSystemEventArgs e)
     {
-        if (DateTime.UtcNow.Ticks < Interlocked.Read(ref _suppressUntilTicks)) return;
-        _debounce.Change(200, Timeout.Infinite);
+        // Our own save must not trigger a reload storm, but it must not swallow someone else's
+        // write either: two processes edit these files now (Settings while a user drags a slider,
+        // the widget process on drag-end), and a dropped event leaves us on a stale copy until
+        // the next unrelated change. So a suppressed event is deferred past the window, never lost.
+        long suppressUntil = Interlocked.Read(ref _suppressUntilTicks);
+        long now = DateTime.UtcNow.Ticks;
+        int delayMs = now < suppressUntil
+            ? (int)Math.Min(2000, (suppressUntil - now) / TimeSpan.TicksPerMillisecond) + 50
+            : 200;
+        _debounce.Change(delayMs, Timeout.Infinite);
     }
 
     public void Reload()
@@ -95,6 +103,56 @@ public sealed class ConfigStore : IDisposable
 
     public void SaveSettings() => Save("settings.json", Settings, ConfigJsonContext.Default.AppSettings);
     public void SaveWidgets() => Save("widgets.json", Widgets, ConfigJsonContext.Default.WidgetsConfig);
+
+    private readonly Lock _writeLock = new();
+
+    /// <summary>
+    /// Change one widget's fields on disk without clobbering anyone else's.
+    /// <para>
+    /// Both the Settings app and the widget process write widgets.json: Settings every ~200 ms
+    /// while a user edits, the widget process on drag-end and on a context-menu toggle. A
+    /// whole-file <see cref="SaveWidgets"/> from a stale in-memory copy would silently revert
+    /// whatever the other process wrote since the last reload. This re-reads the file, applies
+    /// <paramref name="mutate"/> to that fresh copy, and writes it back atomically — so only the
+    /// fields the caller touches move.
+    /// </para>
+    /// The caller's own in-memory <see cref="WidgetInstance"/> is NOT replaced: live widget
+    /// windows hold references to it, and swapping the object under them is exactly the orphaned
+    /// -config bug the hot-reload path is careful to avoid. Apply the same change there first.
+    /// </summary>
+    /// <returns>False when the id is not in the file (removed by the other writer).</returns>
+    public bool UpdateWidget(string id, Action<WidgetInstance> mutate)
+    {
+        lock (_writeLock)
+        {
+            var fresh = Load("widgets.json", ConfigJsonContext.Default.WidgetsConfig);
+            if (fresh == null)
+            {
+                // No file yet (first run, or it was deleted): our in-memory copy is all there is.
+                mutate(Widgets.Widgets.FirstOrDefault(w => w.Id == id) ?? new WidgetInstance());
+                SaveWidgets();
+                return true;
+            }
+            var target = fresh.Widgets.FirstOrDefault(w => w.Id == id);
+            if (target == null) return false;
+            mutate(target);
+            Save("widgets.json", fresh, ConfigJsonContext.Default.WidgetsConfig);
+            return true;
+        }
+    }
+
+    /// <summary>Same merge rule as <see cref="UpdateWidget"/> for settings.json — the widget
+    /// process owns only <c>lockAll</c> there, Settings owns everything else.</summary>
+    public void UpdateSettings(Action<AppSettings> mutate)
+    {
+        lock (_writeLock)
+        {
+            var fresh = Load("settings.json", ConfigJsonContext.Default.AppSettings);
+            if (fresh == null) { mutate(Settings); SaveSettings(); return; }
+            mutate(fresh);
+            Save("settings.json", fresh, ConfigJsonContext.Default.AppSettings);
+        }
+    }
 
     private void Save<T>(string file, T value, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> ti)
     {
