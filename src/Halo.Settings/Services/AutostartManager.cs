@@ -110,7 +110,7 @@ public static class AutostartManager
         }
     }
 
-    public static int Unregister()
+    public static int Unregister(bool all = false)
     {
         if (!Elevation.IsElevated) return 740;
         object? service = null;
@@ -123,11 +123,12 @@ public static class AutostartManager
             root = ((dynamic)service).GetFolder(@"\");
             try { folder = ((dynamic)service).GetFolder(TaskFolderPath); }
             catch { return 0; }
-            TryDeleteTask((dynamic)folder, CollectorTaskName);
-            TryDeleteTask((dynamic)folder, WidgetsTaskName);
+            RemoveTaskIfOwned((dynamic)folder, CollectorTaskName, all);
+            RemoveTaskIfOwned((dynamic)folder, WidgetsTaskName, all);
+            bool folderIsEmpty = IsFolderEmpty((dynamic)folder);
             ReleaseCom(folder);
             folder = null;
-            try { ((dynamic)root).DeleteFolder("Halo", 0); } catch { /* Leave a non-empty folder intact. */ }
+            if (folderIsEmpty) ((dynamic)root).DeleteFolder("Halo", 0);
             return 0;
         }
         catch (Exception ex)
@@ -202,25 +203,15 @@ public static class AutostartManager
     private static ScheduledTaskState ReadTaskState(dynamic folder, string name, string expectedPath)
     {
         object? task = null;
-        object? definition = null;
-        object? actions = null;
-        object? action = null;
         try
         {
             task = folder.GetTask(name);
-            definition = ((dynamic)task).Definition;
-            actions = ((dynamic)definition).Actions;
-            if (((dynamic)actions).Count < 1) return ScheduledTaskState.WrongPath;
-            action = ((dynamic)actions).Item(1);
-            string configured = (string?)((dynamic)action).Path ?? "";
+            string configured = ReadTaskExecutablePath((dynamic)task);
             return SamePath(configured, expectedPath) ? ScheduledTaskState.Present : ScheduledTaskState.WrongPath;
         }
         catch { return ScheduledTaskState.Missing; }
         finally
         {
-            ReleaseCom(action);
-            ReleaseCom(actions);
-            ReleaseCom(definition);
             ReleaseCom(task);
         }
     }
@@ -237,8 +228,10 @@ public static class AutostartManager
 
     private static bool SamePath(string first, string second)
     {
-        try { return Path.GetFullPath(first).Equals(Path.GetFullPath(second), StringComparison.OrdinalIgnoreCase); }
-        catch { return false; }
+        string? normalizedFirst = NormalizeTaskPath(first);
+        string? normalizedSecond = NormalizeTaskPath(second);
+        return normalizedFirst is not null && normalizedSecond is not null
+            && normalizedFirst.Equals(normalizedSecond, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool HasLegacyRunValue()
@@ -286,9 +279,85 @@ public static class AutostartManager
         finally { WTSFreeMemory(buffer); }
     }
 
-    private static void TryDeleteTask(dynamic folder, string name)
+    private static void RemoveTaskIfOwned(dynamic folder, string name, bool all)
     {
-        try { folder.DeleteTask(name, 0); } catch { }
+        object? task = null;
+        try { task = folder.GetTask(name); }
+        catch { return; }
+
+        try
+        {
+            string configuredPath = ReadTaskExecutablePath((dynamic)task);
+            string? normalizedPath = NormalizeTaskPath(configuredPath);
+            bool owned = normalizedPath is not null && IsUnderAppRoot(normalizedPath);
+            bool stale = normalizedPath is null || !File.Exists(normalizedPath);
+            if (!all && !owned && !stale)
+            {
+                Console.Error.WriteLine($@"left {TaskFolderPath}\{name} alone: it points at {configuredPath}");
+                return;
+            }
+
+            try { ((dynamic)task).Stop(0); } catch { /* The task may not be running. */ }
+            folder.DeleteTask(name, 0);
+        }
+        finally
+        {
+            ReleaseCom(task);
+        }
+    }
+
+    private static string ReadTaskExecutablePath(dynamic task)
+    {
+        object? definition = null;
+        object? actions = null;
+        object? action = null;
+        try
+        {
+            definition = task.Definition;
+            actions = ((dynamic)definition).Actions;
+            if (((dynamic)actions).Count < 1) return "";
+            action = ((dynamic)actions).Item(1);
+            return (string?)((dynamic)action).Path ?? "";
+        }
+        finally
+        {
+            ReleaseCom(action);
+            ReleaseCom(actions);
+            ReleaseCom(definition);
+        }
+    }
+
+    private static bool IsUnderAppRoot(string normalizedPath)
+    {
+        string? normalizedRoot = NormalizeTaskPath(Paths.AppRoot);
+        if (normalizedRoot is null) return false;
+        string rootPrefix = Path.TrimEndingDirectorySeparator(normalizedRoot) + Path.DirectorySeparatorChar;
+        return normalizedPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? NormalizeTaskPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+        string expanded = Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'));
+        try { return Path.GetFullPath(expanded); }
+        catch { return null; }
+    }
+
+    private static bool IsFolderEmpty(dynamic folder)
+    {
+        object? tasks = null;
+        object? folders = null;
+        try
+        {
+            tasks = folder.GetTasks(0);
+            folders = folder.GetFolders(0);
+            return ((dynamic)tasks).Count == 0 && ((dynamic)folders).Count == 0;
+        }
+        finally
+        {
+            ReleaseCom(folders);
+            ReleaseCom(tasks);
+        }
     }
 
     private static Exception Unwrap(Exception ex)

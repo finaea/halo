@@ -38,8 +38,14 @@ public static class CommandLineDispatcher
                 if (exitCode == 740) Console.Error.WriteLine("Administrator rights are required.");
                 return true;
             case "--unregister-autostart":
-                if (args.Count != 1) return Usage(args[0], out exitCode);
-                exitCode = AutostartManager.Unregister();
+                bool all = args.Count == 2 && args[1].Equals("--all", StringComparison.OrdinalIgnoreCase);
+                if (args.Count != 1 && !all)
+                {
+                    Console.Error.WriteLine("Usage: Halo.Settings.exe --unregister-autostart [--all]");
+                    exitCode = 1;
+                    return true;
+                }
+                exitCode = AutostartManager.Unregister(all);
                 if (exitCode == 740) Console.Error.WriteLine("Administrator rights are required.");
                 return true;
             case "--install-pawnio":
@@ -106,6 +112,7 @@ public static class CommandLineDispatcher
 
     private static void AttachToParentConsole()
     {
+        if (Console.IsOutputRedirected) return;
         if (!AttachConsole(uint.MaxValue)) return;
         try
         {
