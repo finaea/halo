@@ -28,7 +28,7 @@ refresh rate, monitor, z-order, click-through, opacity.
 | --- | --- | --- |
 | **Windows 10 1809 (build 17763) or newer, 64-bit** | everything | the installer refuses to run (`installer/halo.iss` `MinVersion`) |
 | **Admin, once, at install** | the collector runs as a scheduled task at highest privileges | — |
-| **PawnIO** (offered by the installer, checked by default) | CPU temp / package power / Vcore, fan RPM, drive temps | those rows read `N/A`; everything else works |
+| **PawnIO** (offered by the installer when none is installed yet, ticked by default) | CPU temp / package power / Vcore, fan RPM, drive temps | those rows read `N/A`; everything else works |
 | **NVIDIA GPU + driver** | full GPU panel via NVML, DLSS detection, Reflex/PCL latency | AMD and Intel GPUs fall back to what LibreHardwareMonitor exposes; latency and DLSS read `N/A` |
 | **Nothing else** | — | no .NET install, no Visual C++ redist, no HWiNFO, no Rainmeter. The download is self-contained. |
 
@@ -43,12 +43,14 @@ integrity, so nothing you interact with is elevated.
 
 1. Grab `Halo-Setup-<version>.exe` from the [Releases page](https://github.com/finaea/halo/releases).
 2. Run it. **One UAC prompt**, no second one.
-3. Two components, both ticked by default:
+3. Up to two components, both ticked by default:
    - **PawnIO driver for CPU temps, fans, drive temps** — a signed third-party kernel driver
      ([namazso/PawnIO](https://github.com/namazso/PawnIO), GPL-2.0-or-later). LibreHardwareMonitor
      0.9.6 has no other way to read those sensors. If it says a restart is needed, those rows stay
      `N/A` until you reboot; nothing else is affected. Untick it if you'd rather not, you can turn
-     it on later from System check.
+     it on later from System check. If a PawnIO is already on the machine (FanControl, HWiNFO and
+     LibreHardwareMonitor install the same driver), this component isn't shown and the existing
+     driver is used as is, whatever its version.
    - **Start with Windows** — registers two scheduled tasks (`\Halo\Collector` at highest
      privileges, `\Halo\Widgets` at normal) so nothing prompts for UAC at logon.
 4. Widgets appear, and **Settings opens on the System check page**: what your hardware actually

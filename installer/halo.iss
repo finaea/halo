@@ -63,8 +63,11 @@ Name: "full"; Description: "Halo with the optional pieces"
 Name: "custom"; Description: "Custom"; Flags: iscustom
 
 [Components]
+; The PawnIO component only exists when no PawnIO is on the machine (any version). Its own
+; setup refuses to install over an existing copy — see PawnIoInstalled below.
 Name: "app"; Description: "Halo (widgets, collector, settings)"; Types: full custom; Flags: fixed
-Name: "pawnio"; Description: "PawnIO driver for CPU temps, fans, drive temps"; Types: full
+Name: "pawnio"; Description: "PawnIO driver for CPU temps, fans, drive temps"; Types: full; \
+    Check: not PawnIoInstalled
 Name: "autostart"; Description: "Start with Windows"; Types: full
 
 [Files]
@@ -177,12 +180,49 @@ begin
   Exec(ExpandConstant('{sys}\schtasks.exe'), '/End /TN "\Halo\Collector"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
-{ --------------------------------------------------------------------------- }
+{ ---------------------------------------------------------------------------
+  PawnIO is a shared kernel driver (FanControl, LibreHardwareMonitor and HWiNFO install the
+  same one) and its own setup refuses to run over an existing copy: "A previous installation
+  of PawnIO was found. Please uninstall it first before installing again.", exit 183 =
+  ERROR_ALREADY_EXISTS (measured 2026-09-13 on a PC where FanControl had installed 2.2.0).
+  So when any PawnIO is present, whatever its version, the component is not offered and the
+  bundled setup is not run. System check in Halo Settings can still (re)install later.
+  Detection mirrors what PawnIO_setup.exe itself checks: its ARP key, in both registry views,
+  with the install folder as a fallback.
+  --------------------------------------------------------------------------- }
+const
+  PawnIoUninstallKey = 'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO';
+  ERROR_ALREADY_EXISTS = 183;
+
+function PawnIoInstalled: Boolean;
+begin
+  Result := RegKeyExists(HKLM64, PawnIoUninstallKey)
+         or RegKeyExists(HKLM32, PawnIoUninstallKey)
+         or DirExists(ExpandConstant('{commonpf64}\PawnIO'))
+         or DirExists(ExpandConstant('{commonpf32}\PawnIO'));
+end;
+
+function PawnIoInstalledVersion: String;
+begin
+  if not RegQueryStringValue(HKLM64, PawnIoUninstallKey, 'DisplayVersion', Result) then
+    if not RegQueryStringValue(HKLM32, PawnIoUninstallKey, 'DisplayVersion', Result) then
+      Result := 'unknown version';
+end;
 
 procedure InstallPawnIo;
 var
   ResultCode: Integer;
 begin
+  { The component is hidden by its Check when PawnIO is present, but /COMPONENTS on the
+    command line or a PawnIO installed by something else between the wizard page and this
+    point can still land here. Skipping is right at every version: the setup cannot upgrade
+    in place anyway. A log line, never a dialog. }
+  if PawnIoInstalled then
+  begin
+    Log('Halo: PawnIO ' + PawnIoInstalledVersion + ' is already installed; not running the bundled installer');
+    exit;
+  end;
+
   if not WizardIsComponentSelected('pawnio') then
     exit;
 
@@ -195,11 +235,15 @@ begin
     exit;
   end;
 
+  { 183 = ERROR_ALREADY_EXISTS: the setup found a PawnIO the check above missed. Nothing was
+    changed and the existing driver keeps working, so it is a log line, not an error. }
+  if ResultCode = ERROR_ALREADY_EXISTS then
+    Log('Halo: PawnIO installer reported an existing installation (183); leaving it as is')
   { 3010 = ERROR_SUCCESS_REBOOT_REQUIRED: installed, but the driver does not load until a
     restart. Halo's NeedRestart event function cannot carry this — Inno queries it during
     ssInstall, before this code runs (Setup.Install.pas:2880) — so say it plainly instead
     of silently rebooting anyone. }
-  if ResultCode = 3010 then
+  else if ResultCode = 3010 then
     SayInstall('PawnIO was installed and needs a restart before the driver loads.' + #13#10#13#10
       + 'Until you restart, CPU temperatures, fan speeds and drive temperatures will read'
       + ' N/A. Everything else works.', mbInformation)

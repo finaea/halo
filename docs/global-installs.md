@@ -25,7 +25,7 @@ Last updated 2026-09-13 for the v2 layout.
 | Collector autostart | scheduled task `\Halo\Collector` — RunLevel **Highest**, at logon of the interactive user | `Halo.Settings.exe --register-autostart` | `--unregister-autostart`, run by `[UninstallRun]` |
 | Widgets autostart | scheduled task `\Halo\Widgets` — RunLevel **Limited** (medium integrity), at logon | same | same |
 | Config + logs | `%LOCALAPPDATA%\Halo\config\*.json`, `%LOCALAPPDATA%\Halo\logs\*.log` | the apps, at first run | uninstall **asks**; keep them and a re-install picks up where you left off |
-| PawnIO driver *(optional component, ticked by default)* | `C:\Program Files\PawnIO` + its own ARP entry and kernel service | `Halo.Settings.exe --install-pawnio` → `redist\PawnIO_setup.exe -install -silent` | **not removed** — see below |
+| PawnIO driver *(optional component, ticked by default, not offered when any PawnIO is already installed)* | `C:\Program Files\PawnIO` + its own ARP entry and kernel service | `Halo.Settings.exe --install-pawnio` → `redist\PawnIO_setup.exe -install -silent` | **not removed** — see below |
 
 Both tasks are created through the Task Scheduler API, not `schtasks`, with
 `DisallowStartIfOnBatteries=false`, `StopIfGoingOnBatteries=false`, `ExecutionTimeLimit=PT0S`,
