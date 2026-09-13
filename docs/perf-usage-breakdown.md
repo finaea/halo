@@ -323,6 +323,46 @@ completely independent methods, which is the best evidence available that both a
 
 ---
 
+## Widget refresh rate after R2/R4 (2026-09-13, ticket 03)
+
+Ticket 03 gave every widget its own `rateHz`, bounded by the fastest metric in the panel
+(0.5–10 Hz), and made graphs sample **once per widget tick** instead of on their own 1–5 Hz
+clock. So the slider's ceiling is now the widget process's cost ceiling, and this is what it
+costs. Rates plan R5 predicted "≤10 Hz × ~11 widgets ≈ 2× today's 1.9 % of a core".
+
+**Method**: the same `TotalProcessorTime` delta as above — 25 s settling, then a 120 s window,
+on the Halo.Widgets process. The two arms were run **interleaved** (5, 10, 5, 10) by editing
+`rateHz` in the config and letting the live-apply path pick it up, so no restart and no rebuild
+happened between arms. Jack's migrated 11-widget layout, an unelevated Debug collector, and his
+production v1 stack running throughout.
+
+| Arm | % of one core, per rep | mean | RAM |
+|---|---|---|---|
+| all 11 widgets @ 5 Hz (default) | 2.318 · 2.630 | **2.474** | 118–123 MB |
+| all 11 widgets @ 10 Hz (slider max) | 3.710 · 4.127 | **3.919** | 123–125 MB |
+| **paired delta** | +1.392 · +1.497 | **+1.445** | +2 MB |
+
+**3.92 % of one core is the worst case a user can ask for** — every widget at the maximum the
+slider offers. That is 1.58× the 5 Hz default, not 2×, and it lands almost exactly on R5's
+estimate (2 × 1.9 = 3.8). Doubling the tick does not double the cost because most of a tick is
+diffing: `TextEl` compares strings and `BarEl` quantises to 1/200 (`Elements.cs`), so a tick that
+changes nothing costs layout work and no D2D work at all.
+
+Two caveats on the number:
+
+- **The machine was not idle.** A game was running on the primary monitor for the whole run
+  (that is also why the two reps within an arm differ by ~0.3 points). The paired delta is the
+  trustworthy figure here; the absolute numbers carry the game's noise.
+- **Unelevated inflates the 10 Hz arm slightly.** With no SuperIO, the fans widget registers no
+  `fan.*` metrics, so `PanelRates.MaxHz` finds nothing and returns the 10 Hz ceiling. On an
+  elevated collector the fans widget's bound is its real 1 Hz and it cannot be raised at all —
+  so a real installation's 10 Hz worst case is a little cheaper than measured here.
+
+The FPS panel is excluded from both arms by design: it is event-driven off the frames-ready
+event with a fixed 5 Hz fallback tick (R2), so its cost does not move with the slider.
+
+---
+
 ## fps-displayed widget disabled (2026-07-20) — same game, uncapped ~231 fps
 
 User disabled the DISPLAYED fps panel in Settings (one fps widget remains: PRESENTED).
