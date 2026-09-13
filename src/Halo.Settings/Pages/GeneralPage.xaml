@@ -82,7 +82,7 @@
               <Slider Grid.Column="1" Minimum="1" Maximum="3.5" TickFrequency="0.05" IsSnapToTickEnabled="True"
                       Value="{Binding FixedScale, Mode=TwoWay}" IsEnabled="{Binding IsFixedScaleEnabled}" Margin="8,0" />
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                <ui:NumberBox Style="{StaticResource SettingsNumberBox}" Minimum="1" Maximum="3.5" SmallChange="0.05" MaxDecimalPlaces="2"
+                <ui:NumberBox Minimum="1" Maximum="3.5" SmallChange="0.05" MaxDecimalPlaces="2"
                               Value="{Binding FixedScale, Mode=TwoWay}" IsEnabled="{Binding IsFixedScaleEnabled}" />
                 <ui:ToggleSwitch Margin="10,0,0,0" IsChecked="{Binding AutoScale, Mode=TwoWay}" OnContent="Auto" OffContent="Fixed" />
               </StackPanel>
@@ -94,7 +94,7 @@
               <ComboBox Grid.Column="1" Width="260" HorizontalAlignment="Left" IsEditable="True"
                         ItemsSource="{Binding FontFamilies}" Text="{Binding FontFamily, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
               <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                <ui:NumberBox Style="{StaticResource SettingsNumberBox}" Minimum="5" Maximum="24" SmallChange="0.5" MaxDecimalPlaces="1"
+                <ui:NumberBox Minimum="5" Maximum="24" SmallChange="0.5" MaxDecimalPlaces="1"
                               Value="{Binding TextSizePt, Mode=TwoWay}" />
                 <TextBlock Text="pt" Margin="6,0,0,0" VerticalAlignment="Center" />
               </StackPanel>
@@ -104,7 +104,7 @@
               <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
               <TextBlock Text="Corner radius" VerticalAlignment="Center" />
               <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <ui:NumberBox Style="{StaticResource SettingsNumberBox}" Minimum="0" Maximum="20" SmallChange="1" MaxDecimalPlaces="1"
+                <ui:NumberBox Minimum="0" Maximum="20" SmallChange="1" MaxDecimalPlaces="1"
                               Value="{Binding CornerRadius, Mode=TwoWay}" />
                 <TextBlock Text="px" Margin="6,0,0,0" VerticalAlignment="Center" />
               </StackPanel>

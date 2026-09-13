@@ -7,19 +7,11 @@
   <UserControl.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
     <SolidColorBrush x:Key="HaloDropIndicator" Color="#0067C0" />
-    <!-- Why every NumberBox on this page used to render blank. WPF-UI's template lays the control
-         out as [icon][text *][buttons], and its chrome costs a fixed 78px: 2px border + 20px
-         TextControlThemePadding + two 24px inline spin buttons with 4px margins. The widths this
-         page asked for (72–100) are at or under that, so the star text column collapsed to ≤8px
-         and the value — which was always correctly bound — had nowhere to paint. Buy the space
-         back: drop the clear button, trim the horizontal padding, and floor the width.
-         BasedOn names WPF-UI's own style rather than {x:Type ui:NumberBox}, which would be a
-         self-reference to the implicit style being declared here. -->
-    <Style TargetType="{x:Type ui:NumberBox}" BasedOn="{StaticResource DefaultUiNumberBoxStyle}">
-      <Setter Property="MinWidth" Value="116" />
-      <Setter Property="Padding" Value="8,8,4,7" />
-      <Setter Property="ClearButtonEnabled" Value="False" />
-    </Style>
+    <!-- The NumberBox style that keeps this page's boxes from rendering blank now lives in
+         App.xaml, applied implicitly to every page. The nine hard Width="72..120" attributes below
+         survive only because MinWidth clamps up over them; see the comment there before changing
+         either. -->
+
     <!-- A disabled widget used to look exactly like an enabled one apart from the switch, which
          has no on/off caption. Dim the row and say "Off" in words. -->
     <Style x:Key="RowText" TargetType="StackPanel">

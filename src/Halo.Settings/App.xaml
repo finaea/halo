@@ -71,13 +71,20 @@
            makes the box jump 128 -> 155, visibly shoving the row as you click into it. It is also
            meaningless on a spinner that has a Minimum. Off keeps the width stable.
 
-           Keyed, not implicit: an implicit style keyed {x:Type ui:NumberBox} sitting next to
-           ui:ControlsDictionary in this same dictionary shadows WPF-UI's own entry, and its
-           BasedOn then resolves to itself, so the control loses the Fluent template and the spin
-           buttons with it. -->
-      <Style x:Key="SettingsNumberBox" TargetType="{x:Type ui:NumberBox}"
-             BasedOn="{StaticResource {x:Type ui:NumberBox}}">
+           Implicit on purpose, so a NumberBox added to any future page is covered without anyone
+           remembering to opt in — forgetting would put the blank box straight back.
+
+           BasedOn MUST name WPF-UI's key explicitly. Writing BasedOn="{StaticResource {x:Type
+           ui:NumberBox}}" here would resolve to the implicit style being declared — a self
+           reference that strips the Fluent template and the spin buttons with it. Naming
+           DefaultUiNumberBoxStyle looks outward to ui:ControlsDictionary instead.
+
+           The Widgets page carries nine NumberBoxes that still set a hard Width of 72-120. Those
+           are inert only because WPF clamps up: MinWidth beats Width when it is larger. Lower this
+           below 120 and all nine go blank again. -->
+      <Style TargetType="{x:Type ui:NumberBox}" BasedOn="{StaticResource DefaultUiNumberBoxStyle}">
         <Setter Property="MinWidth" Value="132" />
+        <Setter Property="Padding" Value="8,8,4,7" />
         <Setter Property="ClearButtonEnabled" Value="False" />
       </Style>
 

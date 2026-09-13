@@ -975,57 +975,11 @@ public sealed class WidgetsPageViewModel : ObservableObject, IDisposable
     public ObservableCollection<WidgetItemViewModel> Widgets { get; } = [];
     public IReadOnlyList<string> FontFamilies { get; } = Fonts.SystemFontFamilies.Select(font => font.Source).Order(StringComparer.CurrentCultureIgnoreCase).ToArray();
 
-    /// <summary>Adapter names for the Data source picker: "Best" first, then every non-loopback
-    /// adapter with the connected ones first. Enumerated once — the Data source tab is not a live
-    /// view of the NIC list.
-    /// <para>MERGE NOTE: ticket 01 landed this same enumeration as
-    /// <c>Halo.Settings.Services.NetworkAdapters.List()</c>, but that file is on their branch and
-    /// does not exist in this worktree, so calling it would not compile here. Delete this and point
-    /// the property at theirs once the branches meet — nothing else has to change.</para></summary>
-    public IReadOnlyList<string> NetworkAdapterChoices { get; } = BuildNetworkAdapterChoices();
+    /// <summary>Adapter names for the Data source picker, from the one enumeration Halo has.
+    /// Filtered to what <c>NetworkProvider.PickNic</c> will actually bind to, so the combo cannot
+    /// offer a name that silently leaves the widget with no network metrics.</summary>
+    public IReadOnlyList<string> NetworkAdapterChoices { get; } = NetworkAdapters.List();
 
-    private static IReadOnlyList<string> BuildNetworkAdapterChoices()
-    {
-        var names = new List<string> { "Best" };
-        try
-        {
-            // Offer exactly what the collector can honour. NetworkProvider.PickNic only ever accepts
-            // an interface that is Up and neither Loopback nor Tunnel, matched on Name — so listing
-            // anything else would let the user pick a name that silently matches nothing and leaves
-            // the widget with no network metrics at all.
-            var eligible = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
-                .Where(nic => nic.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up)
-                .Where(nic => nic.NetworkInterfaceType
-                    is not (System.Net.NetworkInformation.NetworkInterfaceType.Loopback
-                         or System.Net.NetworkInformation.NetworkInterfaceType.Tunnel))
-                .ToList();
-
-            // .NET 10 also returns one interface per NDIS lightweight filter bound to an adapter,
-            // named "<adapter>-<filter>-0000" — 35 entries on this machine against 3 real NICs.
-            // They pass the collector's test, so they are not wrong, just unusable as a menu. Drop
-            // any candidate whose name is another candidate's name plus a suffix; that identifies
-            // the filter instances by their own naming rule rather than by a vendor blocklist.
-            names.AddRange(eligible
-                .Where(nic => !eligible.Any(parent => !ReferenceEquals(parent, nic)
-                    && nic.Name.StartsWith(parent.Name + "-", StringComparison.OrdinalIgnoreCase)))
-                .OrderByDescending(GatewayCount)
-                .ThenBy(nic => nic.Name, StringComparer.CurrentCultureIgnoreCase)
-                .Select(nic => nic.Name)
-                .Distinct(StringComparer.OrdinalIgnoreCase));
-        }
-        catch
-        {
-            // Enumeration is best-effort: the box stays editable and "Best" alone is a valid list.
-        }
-        return names;
-    }
-
-    /// <summary>The collector prefers the interface that has a default gateway, so surface those first.</summary>
-    private static int GatewayCount(System.Net.NetworkInformation.NetworkInterface nic)
-    {
-        try { return nic.GetIPProperties().GatewayAddresses.Count; }
-        catch { return 0; }
-    }
     public WidgetItemViewModel? SelectedWidget { get => _selectedWidget; set => Set(ref _selectedWidget, value); }
     public bool CollectorOffline => !_hardware.Online;
     public string CollectorHint { get => _collectorHint; private set => Set(ref _collectorHint, value); }

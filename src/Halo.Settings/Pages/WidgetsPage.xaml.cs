@@ -1,8 +1,6 @@
-using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
-using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Threading;
 using Halo.Settings.Services;
@@ -11,7 +9,7 @@ using Halo.Shared.Panels;
 
 namespace Halo.Settings.Pages;
 
-public partial class WidgetsPage : UserControl, ISettingsPage, ISearchableSettingsPage, IDisposable
+public partial class WidgetsPage : UserControl, ISettingsPage, IDisposable
 {
     /// <summary>Where the user last put the splitter. Halo has no window/UI-state store, so this
     /// is remembered for the life of the process only and resets on restart.</summary>
@@ -20,7 +18,6 @@ public partial class WidgetsPage : UserControl, ISettingsPage, ISearchableSettin
     private readonly WidgetsPageViewModel _viewModel;
     private readonly DispatcherTimer _collectorTimer;
     private Point _dragStart;
-    private string _filter = "";
 
     public WidgetsPage(LiveConfigService config)
     {
@@ -41,21 +38,6 @@ public partial class WidgetsPage : UserControl, ISettingsPage, ISearchableSettin
     public void OnLeave() => _collectorTimer.Stop();
 
     public void ShowReadyBanner() => ReadyBanner.Visibility = Visibility.Visible;
-
-    public void ApplyFilter(string query)
-    {
-        _filter = query.Trim();
-        ICollectionView view = CollectionViewSource.GetDefaultView(_viewModel.Widgets);
-        view.Filter = item => item is WidgetItemViewModel widget &&
-            (_filter.Length == 0 || widget.DisplayName.Contains(_filter, StringComparison.CurrentCultureIgnoreCase) ||
-             widget.Panel.DisplayName.Contains(_filter, StringComparison.CurrentCultureIgnoreCase) ||
-             widget.Type.Contains(_filter, StringComparison.OrdinalIgnoreCase) ||
-             widget.Options.Any(option => option.Label.Contains(_filter, StringComparison.CurrentCultureIgnoreCase)) ||
-             widget.MetricRows.Any(metric => metric.Name.Contains(_filter, StringComparison.CurrentCultureIgnoreCase)));
-        view.Refresh();
-        if (_viewModel.SelectedWidget is not null && !view.Contains(_viewModel.SelectedWidget))
-            _viewModel.SelectedWidget = view.Cast<WidgetItemViewModel>().FirstOrDefault();
-    }
 
     private void AddWidget_Click(object sender, RoutedEventArgs e)
     {
