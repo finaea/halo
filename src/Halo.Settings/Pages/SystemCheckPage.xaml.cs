@@ -6,7 +6,7 @@ using Halo.Settings.ViewModels;
 
 namespace Halo.Settings.Pages;
 
-public partial class SystemCheckPage : UserControl, ISettingsPage, ISearchableSettingsPage, IDisposable
+public partial class SystemCheckPage : UserControl, ISettingsPage, IDisposable
 {
     private readonly SystemCheckViewModel _viewModel;
     private readonly DispatcherTimer _timer;
@@ -39,19 +39,6 @@ public partial class SystemCheckPage : UserControl, ISettingsPage, ISearchableSe
         CompleteFirstRun();
     }
 
-    public void ApplyFilter(string query)
-    {
-        string filter = query.Trim();
-        FrameworkElement[] sections = [SummarySection, ActionsSection, HardwareSection, ProvidersSection, ReadinessSection];
-        bool any = false;
-        foreach (FrameworkElement section in sections)
-        {
-            bool visible = filter.Length == 0 || section.Tag?.ToString()?.Contains(filter, StringComparison.CurrentCultureIgnoreCase) == true;
-            section.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-            any |= visible;
-        }
-        NoSearchResults.Visibility = any ? Visibility.Collapsed : Visibility.Visible;
-    }
 
     private async void Retry_Click(object sender, RoutedEventArgs e) => await _viewModel.RefreshAsync();
     private async void InstallPawnIo_Click(object sender, RoutedEventArgs e) => await _viewModel.InstallPawnIoAsync();

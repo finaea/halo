@@ -7,7 +7,7 @@ using Halo.Shared;
 
 namespace Halo.Settings.Pages;
 
-public partial class AboutPage : UserControl, ISettingsPage, ISearchableSettingsPage, IDisposable
+public partial class AboutPage : UserControl, ISettingsPage, IDisposable
 {
     private const string ProjectUrl = "https://github.com/finaea/halo";
     private const string RainformerUrl = "https://www.deviantart.com/pul53dr1v3r/art/Rainformer-3-1-HWiNFO-Edition-Rainmeter-789616481";
@@ -31,20 +31,6 @@ public partial class AboutPage : UserControl, ISettingsPage, ISearchableSettings
     }
 
     public void OnLeave() { }
-
-    public void ApplyFilter(string query)
-    {
-        string filter = query.Trim();
-        FrameworkElement[] sections = [VersionSection, ProjectSection, CreditSection];
-        bool any = false;
-        foreach (FrameworkElement section in sections)
-        {
-            bool visible = filter.Length == 0 || section.Tag?.ToString()?.Contains(filter, StringComparison.CurrentCultureIgnoreCase) == true;
-            section.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-            any |= visible;
-        }
-        NoSearchResults.Visibility = any ? Visibility.Collapsed : Visibility.Visible;
-    }
 
     private void CopyVersion_Click(object sender, RoutedEventArgs e)
     {

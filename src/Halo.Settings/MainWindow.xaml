@@ -2,7 +2,9 @@
                  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                 xmlns:services="clr-namespace:Halo.Settings.Services"
                  Title="Halo Settings"
+                 Icon="pack://application:,,,/assets/halo.ico"
                  Width="1040" Height="680" MinWidth="900" MinHeight="600"
                  WindowStartupLocation="CenterScreen"
                  Background="{StaticResource HaloPageBackground}">
@@ -12,47 +14,37 @@
       <ColumnDefinition Width="*" />
     </Grid.ColumnDefinitions>
     <Grid.RowDefinitions>
-      <RowDefinition Height="64" />
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
       <RowDefinition Height="30" />
     </Grid.RowDefinitions>
 
+    <!-- FluentWindow draws no native caption, so without a ui:TitleBar the window has no
+         minimise/maximise/close buttons at all and can only be closed with Alt+F4. -->
     <Border Grid.Row="0" Grid.ColumnSpan="2"
             Background="{StaticResource HaloPaneBackground}"
             BorderBrush="{StaticResource HaloBorder}" BorderThickness="0,0,0,1">
-      <Grid Margin="18,10">
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="Auto" />
-          <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="360" />
-        </Grid.ColumnDefinitions>
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-          <Border Width="34" Height="34" CornerRadius="9" Background="#1673D1" Margin="0,0,10,0">
-            <TextBlock Text="H" Foreground="White" FontSize="18" FontWeight="SemiBold"
-                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-          </Border>
-          <TextBlock Text="Halo Settings" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
-        </StackPanel>
-        <Grid Grid.Column="2">
-          <TextBox x:Name="SearchBox" Padding="34,8,12,8" VerticalContentAlignment="Center"
-                   TextChanged="SearchBox_TextChanged" AutomationProperties.Name="Find a setting" />
-          <TextBlock Text="Find a setting" Margin="34,0,0,0" VerticalAlignment="Center"
-                     Foreground="{StaticResource HaloSubtleText}" IsHitTestVisible="False">
-            <TextBlock.Style>
-              <Style TargetType="TextBlock">
-                <Setter Property="Visibility" Value="Collapsed" />
-                <Style.Triggers>
-                  <DataTrigger Binding="{Binding Text, ElementName=SearchBox}" Value="">
-                    <Setter Property="Visibility" Value="Visible" />
-                  </DataTrigger>
-                </Style.Triggers>
-              </Style>
-            </TextBlock.Style>
-          </TextBlock>
-          <TextBlock Text="⌕" Margin="12,0,0,0" VerticalAlignment="Center" FontSize="16"
-                     Foreground="{StaticResource HaloSubtleText}" IsHitTestVisible="False" />
-        </Grid>
-      </Grid>
+      <!-- Branding goes in Header, not in Icon/Title. TitleBar's own PART_Icon is an Image with a
+           hard Width="16", so anything larger assigned to Icon is clipped, and Title renders at the
+           system caption size with no way to ask for more. Header is a free content slot at the
+           left of the same bar, so this keeps the old 18pt SemiBold heading and a legible icon
+           while the caption buttons stay where the template puts them. Leaving Icon unset collapses
+           PART_Icon; leaving Title unset leaves the caption TextBlock empty. Height stays 44 to
+           match the TitleBarButton style, which pins the buttons to the top of the bar.
+           IsHitTestVisible="False" so click-drag and double-click-to-maximise still reach the bar. -->
+      <ui:TitleBar x:Name="WindowTitleBar" Height="44"
+                   ShowMinimize="True" ShowMaximize="True" ShowClose="True">
+        <ui:TitleBar.Header>
+          <StackPanel Orientation="Horizontal" Margin="14,0,0,0" VerticalAlignment="Center"
+                      IsHitTestVisible="False">
+            <!-- AppIcon.Large, not a plain Source: WPF picks halo.ico's 16-px frame otherwise. -->
+            <Image Source="{x:Static services:AppIcon.Large}" Width="28" Height="28"
+                   Margin="0,0,10,0" VerticalAlignment="Center"
+                   RenderOptions.BitmapScalingMode="HighQuality" />
+            <TextBlock Text="Halo Settings" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </StackPanel>
+        </ui:TitleBar.Header>
+      </ui:TitleBar>
     </Border>
 
     <Border Grid.Row="1" Grid.Column="0" Background="{StaticResource HaloPaneBackground}"

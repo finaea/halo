@@ -1,5 +1,4 @@
 using System.Collections.ObjectModel;
-using System.Net.NetworkInformation;
 using System.Windows;
 using System.Windows.Media;
 using Halo.Settings.Services;
@@ -34,6 +33,12 @@ public sealed class GeneralViewModel : ObservableObject, IDisposable
         ["devWarn3"] = "#FFFF00FF", ["devWarn4"] = "#FFA500FF", ["devWarn5"] = "#FF6060FF",
     };
 
+    /// <summary>Names <see cref="ApplyPreset"/> understands, plus the "nothing matches" state.</summary>
+    public const string RainformerPreset = "Rainformer";
+    public const string LightPreset = "Light";
+    public const string HighContrastPreset = "High contrast";
+    public const string CustomPalette = "Custom";
+
     private readonly LiveConfigService _config;
     private bool _applying;
     private bool _lockAll;
@@ -43,28 +48,10 @@ public sealed class GeneralViewModel : ObservableObject, IDisposable
     private string _fontFamily = "Trebuchet MS";
     private double _textSizePt = 8;
     private double _cornerRadius = 4;
-    private ChoiceItem? _transport;
-    private ChoiceItem? _presentedTap;
-    private double _etwFlushMs = 10;
-    private double _frameLowsWindowS = 60;
-    private string _networkInterface = "Best";
-    private bool _externalIpEnabled;
-    private string _externalIpUrl = "https://api.ipify.org";
-    private double _externalIpRefreshMinutes = 5;
+    private string _activePreset = CustomPalette;
 
     public ObservableCollection<GlobalColorViewModel> Colors { get; } = [];
     public IReadOnlyList<string> FontFamilies { get; }
-    public ObservableCollection<string> NetworkInterfaces { get; } = [];
-    public IReadOnlyList<ChoiceItem> Transports { get; } =
-    [
-        new("auto", "Auto — bundled PresentMon service"),
-        new("sdk", "Service + SDK only"),
-    ];
-    public IReadOnlyList<ChoiceItem> TapModes { get; } =
-    [
-        new("auto", "Auto — live tap when supported"),
-        new("off", "Off — capture transport only"),
-    ];
 
     public bool LockAll
     {
@@ -152,99 +139,30 @@ public sealed class GeneralViewModel : ObservableObject, IDisposable
         }
     }
 
-    public ChoiceItem? Transport
+    /// <summary>Which preset the colours currently in the editor spell out, or <see cref="CustomPalette"/>.</summary>
+    public string ActivePreset
     {
-        get => _transport;
-        set
+        get => _activePreset;
+        private set
         {
-            if (!Set(ref _transport, value) || value is null || _applying) return;
-            string selected = value.Value;
-            _config.QueueSettings("collector.presentMonTransport", s => s.Collector.PresentMonTransport = selected);
+            _activePreset = value;
+            Raise();
+            Raise(nameof(IsRainformerPreset));
+            Raise(nameof(IsLightPreset));
+            Raise(nameof(IsHighContrastPreset));
+            Raise(nameof(IsCustomPalette));
         }
     }
 
-    public ChoiceItem? PresentedTap
-    {
-        get => _presentedTap;
-        set
-        {
-            if (!Set(ref _presentedTap, value) || value is null || _applying) return;
-            string selected = value.Value;
-            _config.QueueSettings("collector.presentedTap", s => s.Collector.PresentedTap = selected);
-        }
-    }
-
-    public double EtwFlushMs
-    {
-        get => _etwFlushMs;
-        set
-        {
-            value = Math.Round(Math.Clamp(value, 0, 1000));
-            if (!Set(ref _etwFlushMs, value) || _applying) return;
-            int selected = (int)value;
-            _config.QueueSettings("collector.presentMonEtwFlushMs", s => s.Collector.PresentMonEtwFlushMs = selected);
-        }
-    }
-
-    public double FrameLowsWindowS
-    {
-        get => _frameLowsWindowS;
-        set
-        {
-            value = Math.Round(Math.Clamp(value, 10, 600));
-            if (!Set(ref _frameLowsWindowS, value) || _applying) return;
-            _config.QueueSettings("collector.frameLowsWindowS", s => s.Collector.FrameLowsWindowS = value);
-        }
-    }
-
-    public string NetworkInterface
-    {
-        get => _networkInterface;
-        set
-        {
-            value = string.IsNullOrWhiteSpace(value) ? "Best" : value.Trim();
-            if (!Set(ref _networkInterface, value) || _applying) return;
-            _config.QueueSettings("collector.networkInterface", s => s.Collector.NetworkInterface = value);
-        }
-    }
-
-    public bool ExternalIpEnabled
-    {
-        get => _externalIpEnabled;
-        set
-        {
-            if (!Set(ref _externalIpEnabled, value) || _applying) return;
-            _config.QueueSettings("collector.externalIp.enabled", s => s.Collector.ExternalIp.Enabled = value);
-        }
-    }
-
-    public string ExternalIpUrl
-    {
-        get => _externalIpUrl;
-        set
-        {
-            value = value?.Trim() ?? "";
-            if (!Set(ref _externalIpUrl, value) || _applying) return;
-            _config.QueueSettings("collector.externalIp.url", s => s.Collector.ExternalIp.Url = value);
-        }
-    }
-
-    public double ExternalIpRefreshMinutes
-    {
-        get => _externalIpRefreshMinutes;
-        set
-        {
-            value = Math.Round(Math.Clamp(value, 1, 1440), 1);
-            if (!Set(ref _externalIpRefreshMinutes, value) || _applying) return;
-            _config.QueueSettings("collector.externalIp.refreshMinutes", s => s.Collector.ExternalIp.RefreshMinutes = value);
-        }
-    }
+    public bool IsRainformerPreset => ActivePreset == RainformerPreset;
+    public bool IsLightPreset => ActivePreset == LightPreset;
+    public bool IsHighContrastPreset => ActivePreset == HighContrastPreset;
+    public bool IsCustomPalette => ActivePreset == CustomPalette;
 
     public GeneralViewModel(LiveConfigService config)
     {
         _config = config;
         FontFamilies = Fonts.SystemFontFamilies.Select(font => font.Source).Order(StringComparer.CurrentCultureIgnoreCase).ToArray();
-        LoadNetworkInterfaces();
         foreach ((string token, string hex, string description) in ThemeTokens.Defaults)
             Colors.Add(new GlobalColorViewModel(token, FriendlyToken(token), description, hex, ColorChanged));
         ApplyFromStore(NoDirtyPaths);
@@ -253,14 +171,12 @@ public sealed class GeneralViewModel : ObservableObject, IDisposable
 
     public void ApplyPreset(string name)
     {
-        IReadOnlyDictionary<string, string> palette = name switch
-        {
-            "Light" => CompletePalette(LightPalette),
-            "High contrast" => BuildHighContrastPalette(),
-            _ => ThemeTokens.Defaults.ToDictionary(x => x.Token, x => x.Color, StringComparer.Ordinal),
-        };
+        IReadOnlyDictionary<string, string> palette = PaletteFor(name);
         foreach (GlobalColorViewModel row in Colors)
             if (palette.TryGetValue(row.Token, out string? value)) row.Hex = value;
+        // Clicking the already-active chip changes no colour, so ColorChanged never fires and the
+        // chip would stay visually unchecked after its own click. Re-assert the state either way.
+        RecomputeActivePreset(force: true);
     }
 
     public void RefreshFromCurrent() => ApplyFromStore(NoDirtyPaths);
@@ -280,43 +196,8 @@ public sealed class GeneralViewModel : ObservableObject, IDisposable
                 row.ApplyExternal(ThemeTokens.Default(row.Token) ?? "#000000FF");
         }
         finally { _applying = false; }
+        RecomputeActivePreset(force: true);
         _config.QueueSettings("appearance", s => s.Appearance = new AppearanceSettings(), flushImmediately: true);
-    }
-
-    public void ResetFrameData()
-    {
-        var defaults = new CollectorSettings();
-        _applying = true;
-        try
-        {
-            Transport = Transports[0];
-            PresentedTap = TapModes[0];
-            EtwFlushMs = defaults.PresentMonEtwFlushMs;
-            FrameLowsWindowS = defaults.FrameLowsWindowS;
-        }
-        finally { _applying = false; }
-        _config.QueueSettings("collector.presentMonTransport", s => s.Collector.PresentMonTransport = defaults.PresentMonTransport);
-        _config.QueueSettings("collector.presentedTap", s => s.Collector.PresentedTap = defaults.PresentedTap);
-        _config.QueueSettings("collector.presentMonEtwFlushMs", s => s.Collector.PresentMonEtwFlushMs = defaults.PresentMonEtwFlushMs);
-        _config.QueueSettings("collector.frameLowsWindowS", s => s.Collector.FrameLowsWindowS = defaults.FrameLowsWindowS, flushImmediately: true);
-    }
-
-    public void ResetNetwork()
-    {
-        var defaults = new CollectorSettings();
-        _applying = true;
-        try
-        {
-            NetworkInterface = defaults.NetworkInterface;
-            ExternalIpEnabled = defaults.ExternalIp.Enabled;
-            ExternalIpUrl = defaults.ExternalIp.Url;
-            ExternalIpRefreshMinutes = defaults.ExternalIp.RefreshMinutes;
-        }
-        finally { _applying = false; }
-        _config.QueueSettings("collector.networkInterface", s => s.Collector.NetworkInterface = defaults.NetworkInterface);
-        _config.QueueSettings("collector.externalIp.enabled", s => s.Collector.ExternalIp.Enabled = defaults.ExternalIp.Enabled);
-        _config.QueueSettings("collector.externalIp.url", s => s.Collector.ExternalIp.Url = defaults.ExternalIp.Url);
-        _config.QueueSettings("collector.externalIp.refreshMinutes", s => s.Collector.ExternalIp.RefreshMinutes = defaults.ExternalIp.RefreshMinutes, flushImmediately: true);
     }
 
     public void ResetEverything()
@@ -365,45 +246,38 @@ public sealed class GeneralViewModel : ObservableObject, IDisposable
                 : ThemeTokens.Default(row.Token) ?? "#000000FF";
             row.ApplyExternal(value);
         }
-        ApplyCollector(settings.Collector, dirty);
-    }
-
-    private void ApplyCollector(CollectorSettings collector, IReadOnlySet<string> dirty)
-    {
-        if (!Conflicts("collector.presentMonTransport", dirty))
-            Transport = Transports.FirstOrDefault(x => x.Value.Equals(collector.PresentMonTransport, StringComparison.OrdinalIgnoreCase)) ?? Transports[0];
-        if (!Conflicts("collector.presentedTap", dirty))
-            PresentedTap = TapModes.FirstOrDefault(x => x.Value.Equals(collector.PresentedTap, StringComparison.OrdinalIgnoreCase)) ?? TapModes[0];
-        if (!Conflicts("collector.presentMonEtwFlushMs", dirty)) EtwFlushMs = collector.PresentMonEtwFlushMs;
-        if (!Conflicts("collector.frameLowsWindowS", dirty)) FrameLowsWindowS = collector.FrameLowsWindowS;
-        if (!Conflicts("collector.networkInterface", dirty)) NetworkInterface = collector.NetworkInterface;
-        if (!Conflicts("collector.externalIp.enabled", dirty)) ExternalIpEnabled = collector.ExternalIp.Enabled;
-        if (!Conflicts("collector.externalIp.url", dirty)) ExternalIpUrl = collector.ExternalIp.Url;
-        if (!Conflicts("collector.externalIp.refreshMinutes", dirty)) ExternalIpRefreshMinutes = collector.ExternalIp.RefreshMinutes;
+        RecomputeActivePreset();
     }
 
     private void ColorChanged(string token, string hex)
     {
+        // While _applying, ApplySettings/ResetAppearance recompute once at the end instead.
         if (_applying) return;
+        RecomputeActivePreset();
         _config.QueueSettings($"appearance.colors.{token}", settings => settings.Appearance.Colors[token] = hex);
     }
 
-    private void LoadNetworkInterfaces()
+    /// <summary>
+    /// Re-derives <see cref="ActivePreset"/> by comparing every token in the editor against each
+    /// preset's full palette, so editing a single swatch flips the chips to Custom.
+    /// </summary>
+    private void RecomputeActivePreset(bool force = false)
     {
-        NetworkInterfaces.Clear();
-        NetworkInterfaces.Add("Best");
-        try
-        {
-            foreach (string name in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
-                         .Where(item => item.NetworkInterfaceType != NetworkInterfaceType.Loopback)
-                         .OrderByDescending(item => item.OperationalStatus == OperationalStatus.Up)
-                         .ThenBy(item => item.Name)
-                         .Select(item => item.Name)
-                         .Distinct(StringComparer.CurrentCultureIgnoreCase))
-                NetworkInterfaces.Add(name);
-        }
-        catch { /* The editable combo still accepts a saved adapter while Windows is querying. */ }
+        string[] presets = [RainformerPreset, LightPreset, HighContrastPreset];
+        string match = presets.FirstOrDefault(name => Matches(PaletteFor(name))) ?? CustomPalette;
+        if (force || match != _activePreset) ActivePreset = match;
     }
+
+    private bool Matches(IReadOnlyDictionary<string, string> palette)
+        => Colors.All(row => palette.TryGetValue(row.Token, out string? value) &&
+            string.Equals(row.Hex, value, StringComparison.OrdinalIgnoreCase));
+
+    private static IReadOnlyDictionary<string, string> PaletteFor(string name) => name switch
+    {
+        LightPreset => CompletePalette(LightPalette),
+        HighContrastPreset => BuildHighContrastPalette(),
+        _ => ThemeTokens.Defaults.ToDictionary(x => x.Token, x => x.Color, StringComparer.Ordinal),
+    };
 
     private static bool Conflicts(string path, IReadOnlySet<string> dirty)
         => dirty.Any(candidate => candidate == "$" || candidate == path ||

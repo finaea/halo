@@ -1,11 +1,10 @@
 using System.Diagnostics;
-using System.ComponentModel;
 using System.IO;
 using System.IO.Compression;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
+using System.Windows.Controls.Primitives;
 using Halo.Settings.Services;
 using Halo.Settings.ViewModels;
 using Halo.Shared;
@@ -15,7 +14,7 @@ using InfoBarSeverity = Wpf.Ui.Controls.InfoBarSeverity;
 
 namespace Halo.Settings.Pages;
 
-public partial class GeneralPage : UserControl, ISettingsPage, ISearchableSettingsPage, IDisposable
+public partial class GeneralPage : UserControl, ISettingsPage, IDisposable
 {
     private readonly LiveConfigService _config;
     private readonly GeneralViewModel _viewModel;
@@ -38,55 +37,9 @@ public partial class GeneralPage : UserControl, ISettingsPage, ISearchableSettin
 
     public void OnLeave() { }
 
-    public void ApplyFilter(string query)
-    {
-        string filter = query.Trim();
-        bool empty = filter.Length == 0;
-        FrameworkElement[] desktopRows = [AutostartRow, LockRow, SnapRow, RepairAutostartButton];
-        FrameworkElement[] appearanceRows = [PresetRow, ScaleRow, FontRow, CornerRow, ColorsRow];
-        FrameworkElement[] frameRows = [TransportRow, TapRow, FlushRow, LowsRow];
-        FrameworkElement[] networkRows = [AdapterRow, ExternalIpRow, IpUrlRow, IpRefreshRow];
-
-        bool desktop = ApplyRows(desktopRows, filter, empty);
-        bool appearance = ApplyRows(appearanceRows, filter, empty);
-        bool frame = ApplyRows(frameRows, filter, empty);
-        bool network = ApplyRows(networkRows, filter, empty);
-        bool files = empty || Matches(FilesCard, filter);
-
-        ICollectionView colors = CollectionViewSource.GetDefaultView(_viewModel.Colors);
-        colors.Filter = empty ? null : item => item is GlobalColorViewModel row &&
-            ($"{row.Token} {row.Label} {row.Description} color colour palette".Contains(filter, StringComparison.CurrentCultureIgnoreCase));
-        ColorsRow.Visibility = empty || !colors.IsEmpty || Matches(ColorsRow, filter)
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        appearance = appearanceRows.Any(row => row.Visibility == Visibility.Visible);
-
-        DesktopCard.Visibility = desktop ? Visibility.Visible : Visibility.Collapsed;
-        AppearanceCard.Visibility = appearance ? Visibility.Visible : Visibility.Collapsed;
-        FrameCard.Visibility = frame ? Visibility.Visible : Visibility.Collapsed;
-        NetworkCard.Visibility = network ? Visibility.Visible : Visibility.Collapsed;
-        FilesCard.Visibility = files ? Visibility.Visible : Visibility.Collapsed;
-        NoSearchResults.Visibility = desktop || appearance || frame || network || files ? Visibility.Collapsed : Visibility.Visible;
-    }
-
-    private static bool ApplyRows(IEnumerable<FrameworkElement> rows, string filter, bool empty)
-    {
-        bool any = false;
-        foreach (FrameworkElement row in rows)
-        {
-            bool visible = empty || Matches(row, filter);
-            row.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-            any |= visible;
-        }
-        return any;
-    }
-
-    private static bool Matches(FrameworkElement element, string query)
-        => element.Tag?.ToString()?.Contains(query, StringComparison.CurrentCultureIgnoreCase) == true;
-
     private void Preset_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: string name }) _viewModel.ApplyPreset(name);
+        if (sender is ToggleButton { Tag: string name }) _viewModel.ApplyPreset(name);
     }
 
     private void ColorButton_Click(object sender, RoutedEventArgs e)
@@ -95,8 +48,6 @@ public partial class GeneralPage : UserControl, ISettingsPage, ISearchableSettin
     }
 
     private void ResetAppearance_Click(object sender, RoutedEventArgs e) => _viewModel.ResetAppearance();
-    private void ResetCollector_Click(object sender, RoutedEventArgs e) => _viewModel.ResetFrameData();
-    private void ResetNetwork_Click(object sender, RoutedEventArgs e) => _viewModel.ResetNetwork();
 
     private async void AutostartSwitch_Click(object sender, RoutedEventArgs e)
     {
