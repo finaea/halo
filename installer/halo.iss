@@ -102,6 +102,19 @@ Type: filesandordirs; Name: "{app}"
 const
   SQ = #39;   { a single quote, so the PowerShell one-liners below stay readable }
 
+{ A MsgBox still pops in /SILENT and /VERYSILENT and blocks forever with nobody to click
+  it, so every message below goes through these: a dialog when someone is watching, a line
+  in the /LOG file when nobody is. }
+procedure SayInstall(const Text: String; Kind: TMsgBoxType);
+begin
+  if WizardSilent then Log('Halo: ' + Text) else MsgBox(Text, Kind, MB_OK);
+end;
+
+procedure SayUninstall(const Text: String; Kind: TMsgBoxType);
+begin
+  if UninstallSilent then Log('Halo: ' + Text) else MsgBox(Text, Kind, MB_OK);
+end;
+
 { ---------------------------------------------------------------------------
   Stop everything of ours that is running out of the install folder.
 
@@ -166,9 +179,9 @@ begin
   if not Exec(ExpandConstant('{app}\Halo.Settings.exe'), '--install-pawnio', '',
               SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
-    MsgBox('Could not start the PawnIO installer. CPU temperatures, fan speeds and drive'
+    SayInstall('Could not start the PawnIO installer. CPU temperatures, fan speeds and drive'
       + ' temperatures will read N/A.' + #13#10#13#10
-      + 'You can install it later from Halo Settings > System check.', mbError, MB_OK);
+      + 'You can install it later from Halo Settings > System check.', mbError);
     exit;
   end;
 
@@ -177,13 +190,13 @@ begin
     ssInstall, before this code runs (Setup.Install.pas:2880) — so say it plainly instead
     of silently rebooting anyone. }
   if ResultCode = 3010 then
-    MsgBox('PawnIO was installed and needs a restart before the driver loads.' + #13#10#13#10
+    SayInstall('PawnIO was installed and needs a restart before the driver loads.' + #13#10#13#10
       + 'Until you restart, CPU temperatures, fan speeds and drive temperatures will read'
-      + ' N/A. Everything else works.', mbInformation, MB_OK)
+      + ' N/A. Everything else works.', mbInformation)
   else if ResultCode <> 0 then
-    MsgBox('The PawnIO installer returned ' + IntToStr(ResultCode) + '.' + #13#10#13#10
+    SayInstall('The PawnIO installer returned ' + IntToStr(ResultCode) + '.' + #13#10#13#10
       + 'CPU temperatures, fan speeds and drive temperatures will read N/A. You can retry'
-      + ' from Halo Settings > System check.', mbError, MB_OK);
+      + ' from Halo Settings > System check.', mbError);
 end;
 
 procedure RegisterAutostart;
@@ -200,9 +213,9 @@ begin
   if (not Exec(ExpandConstant('{app}\Halo.Settings.exe'), '--register-autostart', '',
                SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
   begin
-    MsgBox('Could not register Halo to start with Windows.' + #13#10#13#10
+    SayInstall('Could not register Halo to start with Windows.' + #13#10#13#10
       + 'Open Halo Settings > System check and use "Repair autostart" to try again.',
-      mbError, MB_OK);
+      mbError);
     exit;
   end;
 
@@ -252,17 +265,23 @@ begin
       visible instead of silent. }
     DataDir := ExpandConstant('{localappdata}\Halo');
     if DirExists(DataDir) then
-      if MsgBox('Delete Halo' + SQ + 's settings and widget layouts?' + #13#10#13#10 + DataDir
+    begin
+      { A silent uninstall keeps the data: deleting somebody's layouts because nobody was
+        there to answer a dialog is the wrong default. }
+      if UninstallSilent then
+        Log('Halo: keeping ' + DataDir + ' (silent uninstall)')
+      else if MsgBox('Delete Halo' + SQ + 's settings and widget layouts?' + #13#10#13#10 + DataDir
          + #13#10#13#10 + 'Choose No to keep them for a future install.',
          mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
         DelTree(DataDir, True, True, True);
+    end;
 
     { PawnIO is a shared kernel driver: FanControl, LibreHardwareMonitor and HWiNFO users
       depend on the same install. Removing it here would break them. }
     if DirExists(ExpandConstant('{commonpf64}\PawnIO')) or DirExists(ExpandConstant('{commonpf32}\PawnIO')) then
-      MsgBox('The PawnIO driver was left installed.' + #13#10#13#10
+      SayUninstall('The PawnIO driver was left installed.' + #13#10#13#10
         + 'It is a shared driver — FanControl, LibreHardwareMonitor and HWiNFO use the same'
         + ' one. Remove it from Settings > Apps if nothing else needs it.',
-        mbInformation, MB_OK);
+        mbInformation);
   end;
 end;
