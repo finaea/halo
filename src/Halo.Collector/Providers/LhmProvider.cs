@@ -20,6 +20,41 @@ public sealed class LhmProvider : ISensorProvider
     private Computer? _computer;
     private string? _unavailableReason;
 
+    /// <summary>
+    /// Serialises LibreHardwareMonitor's <b>process-global</b> plumbing across the four parts.
+    /// Every LHM call in this file goes through it; none may be made outside it.
+    ///
+    /// LHM 0.9.6's <c>Computer.Open()</c>/<c>Close()</c> call <c>OpCode.Open()</c>/<c>Close()</c>
+    /// and <c>Mutexes.Open()</c>/<c>Close()</c> unconditionally, and <c>OpCode</c> is an
+    /// <c>internal static</c> class with no reference counting: <c>Open()</c> VirtualAllocs one
+    /// PAGE_EXECUTE_READWRITE page holding the hand-written rdtsc/cpuid stubs and points the
+    /// static <c>Rdtsc</c>/<c>CpuId</c> delegates at it, <c>Close()</c> nulls both delegates and
+    /// MEM_RELEASEs the page. Only <c>Computer._open</c> is per-instance; the page is not.
+    ///
+    /// Halo runs four Computers on four provider threads (Program.cs), so without this gate one
+    /// part's Close breaks every other live part: a null delegate surfaces as a
+    /// NullReferenceException out of GenericCpu.Update or
+    /// GenericCpu.EstimateTimeStampCounterFrequency, and freeing the page while another thread is
+    /// executing inside it is an 0xC0000005 — uncatchable, process gone (diagnosed 2026-09-14).
+    ///
+    /// Write = the lifecycle calls that touch that global state. Read = <c>hw.Update()</c>, which
+    /// is what dereferences the delegates. Sensor values are floats cached by Update, so reading
+    /// them stays outside the gate: steady-state polling is exactly as concurrent as it was, which
+    /// is what keeps a multi-drive storage poll from stalling the 5 Hz CPU one (rates plan R1).
+    ///
+    /// <b>Excluding threads is only half of it.</b> The gate stops two parts touching that state
+    /// at once; it does nothing about a part that releases the lock having left it torn down. So
+    /// the second rule is that no <c>Close()</c> may be unpaired — every one is followed by an
+    /// <c>Open()</c> before the write lock is released, and an unavailable part keeps its empty
+    /// Computer rather than closing it. Measured 2026-09-14: with this gate but without that rule,
+    /// an unelevated lhm-storage retry still broke lhm-cpu's poll 129 ms later.
+    /// </summary>
+    private static readonly ReaderWriterLockSlim Lhm = new(LockRecursionPolicy.NoRecursion);
+
+    /// <summary>How long <see cref="Dispose"/> waits for the gate before giving up on a clean
+    /// Close. Matches ProviderHost.Dispose's per-runner join budget.</summary>
+    private static readonly TimeSpan ShutdownGateTimeout = TimeSpan.FromSeconds(2);
+
     public LhmProvider(Part part) => _part = part;
 
     public string Name => $"lhm-{_part.ToString().ToLowerInvariant()}";
@@ -33,14 +68,17 @@ public sealed class LhmProvider : ISensorProvider
     /// Initialize opens the LHM Computer, which is where the hardware tree — fans, GPUs, disks —
     /// is enumerated, so a `rescan` re-runs it.
     ///
-    /// <b>The CPU part is excluded, deliberately.</b> It has nothing to re-discover: a fixed four
-    /// metrics, no indexed family, and a CPU that cannot be hot-plugged. It is also the one part
-    /// that is *dangerous* to re-open — measured 2026-09-13: LibreHardwareMonitor 0.9.6 throws an
-    /// NRE out of `CpuId.Get` on a re-`Open()` and, when two re-opens land a few seconds apart,
-    /// access-violates (0xC0000005) inside `CpuId..ctor` and takes the whole process down. An AV
-    /// is not catchable, so the only fix is not to ask. Spaced tens of seconds apart it survives,
-    /// which is why the host's own poll-failure retry path is unaffected (88 such re-inits in one
-    /// session, no crash).
+    /// <b>The CPU part is excluded</b> because it has nothing to re-discover: a fixed four
+    /// metrics, no indexed family, and a CPU that cannot be hot-plugged. Re-opening it is pure
+    /// cost, so a rescan does not ask for one.
+    ///
+    /// It used to be excluded for a second reason as well — that re-opening a Computer with
+    /// IsCpuEnabled is inherently unsafe (an NRE out of `CpuId.Get`, an 0xC0000005 when two
+    /// re-opens land seconds apart, measured 2026-09-13). That reasoning was wrong, and the
+    /// conclusion it drew — that the host's poll-failure retry path was therefore fine — was
+    /// wrong with it: the danger was never re-opening as such but LHM's process-global OpCode
+    /// plumbing being torn down under a *sibling* part (see <see cref="Lhm"/>, diagnosed
+    /// 2026-09-14). With the gate in place a re-open is as safe as any other LHM call.
     /// </summary>
     public bool RescanReinitialises => _part != Part.Cpu;
 
@@ -64,22 +102,40 @@ public sealed class LhmProvider : ISensorProvider
 
     public bool Initialize(MetricSink sink)
     {
-        _computer?.Close();
-        _computer = new Computer
-        {
-            IsCpuEnabled = _part == Part.Cpu,
-            IsMotherboardEnabled = _part == Part.SuperIo,
-            IsStorageEnabled = _part == Part.Storage,
-            IsGpuEnabled = _part == Part.Gpu,
-        };
-        _computer.Open();
-
+        // Close-then-Open is the whole reason the gate exists: between the two, LHM's global
+        // rdtsc/cpuid delegates are null and their page is freed, so no other part may be inside
+        // hw.Update() for the duration.
+        //
+        // Note what is NOT here: the old "no hardware found" path used to Close and null the
+        // Computer, which left LHM's globals torn down *after* the write lock was released — so
+        // the next part to poll dereferenced a null delegate even though the gate had done its
+        // job. Excluding threads is only half of it; every Close must be paired with an Open in
+        // the same hold, so the process never leaves this block with LHM's globals shut. An
+        // unavailable part therefore keeps its (empty) Computer open until its next retry
+        // Close+Opens it, or until Dispose. Measured 2026-09-14: without this, an unelevated
+        // lhm-storage retry still broke lhm-cpu 129 ms later, gate or no gate.
         bool any = false;
-        foreach (var hw in AllHardware())
+        Lhm.EnterWriteLock();
+        try
         {
-            hw.Update();
-            any = true;
+            _computer?.Close();
+            _computer = new Computer
+            {
+                IsCpuEnabled = _part == Part.Cpu,
+                IsMotherboardEnabled = _part == Part.SuperIo,
+                IsStorageEnabled = _part == Part.Storage,
+                IsGpuEnabled = _part == Part.Gpu,
+            };
+            _computer.Open();
+
+            foreach (var hw in AllHardware())
+            {
+                hw.Update();
+                any = true;
+            }
         }
+        finally { Lhm.ExitWriteLock(); }
+
         if (!any)
         {
             // Distinguish "this PC has no such hardware" from "we cannot reach it": the System
@@ -88,8 +144,6 @@ public sealed class LhmProvider : ISensorProvider
                 : NeedsElevation && !PawnIoInstalled() ? ProviderError.NoDriver
                 : ProviderError.NoHardware;
             Log.Warn($"{Name}: no hardware found ({_unavailableReason})");
-            _computer.Close();
-            _computer = null;
             return false;
         }
         _unavailableReason = null;
@@ -133,13 +187,20 @@ public sealed class LhmProvider : ISensorProvider
     }
 
     /// <summary>Close and re-open the LHM Computer so its hardware tree is enumerated again.
-    /// Runs on this provider's own poll thread, so nothing else is touching _computer.</summary>
+    /// Runs on this provider's own poll thread, so nothing else is touching _computer — but it
+    /// does touch LHM's global state, hence the write side of the gate. Callers must not hold the
+    /// read lock (the gate is non-recursive): PollStorage releases it before calling this.</summary>
     private void ReopenComputer()
     {
         if (_computer == null) return;
-        try { _computer.Close(); } catch (Exception ex) { Log.Warn($"{Name}: close before re-open: {ex.Message}"); }
-        _computer.Open();
-        foreach (var hw in AllHardware()) hw.Update();
+        Lhm.EnterWriteLock();
+        try
+        {
+            try { _computer.Close(); } catch (Exception ex) { Log.Warn($"{Name}: close before re-open: {ex.Message}"); }
+            _computer.Open();
+            foreach (var hw in AllHardware()) hw.Update();
+        }
+        finally { Lhm.ExitWriteLock(); }
     }
 
     private IEnumerable<IHardware> AllHardware()
@@ -161,7 +222,12 @@ public sealed class LhmProvider : ISensorProvider
     public void Poll(MetricSink sink)
     {
         if (_computer == null) return;
-        foreach (var hw in AllHardware()) hw.Update();
+        // Update is what dereferences LHM's global rdtsc/cpuid delegates, so it takes the read
+        // side. The Poll* methods below only read floats Update already cached, and PollStorage
+        // may call ReopenComputer, which needs the write side — so the lock is released first.
+        Lhm.EnterReadLock();
+        try { foreach (var hw in AllHardware()) hw.Update(); }
+        finally { Lhm.ExitReadLock(); }
 
         switch (_part)
         {
@@ -551,7 +617,20 @@ public sealed class LhmProvider : ISensorProvider
 
     public void Dispose()
     {
-        try { _computer?.Close(); } catch { }
+        // The gate must not turn shutdown into a hang. A poll thread wedged inside an LHM driver
+        // call holds the read lock, and ProviderHost.Dispose has already given each runner 2 s to
+        // join before it gets here — so a gate we still cannot take means someone is stuck, not
+        // merely busy, and blocking forever would be a worse bug than the one the gate fixes.
+        // Skipping Close leaks an LHM Computer into a process that is exiting anyway.
+        if (!Lhm.TryEnterWriteLock(ShutdownGateTimeout))
+        {
+            if (_computer != null) Log.Warn($"{Name}: LHM gate still busy after {ShutdownGateTimeout.TotalSeconds:0}s, leaving the Computer open");
+            _computer = null;
+            return;
+        }
+        try { _computer?.Close(); }
+        catch { }
+        finally { Lhm.ExitWriteLock(); }
         _computer = null;
     }
 }

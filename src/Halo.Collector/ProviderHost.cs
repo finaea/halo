@@ -6,8 +6,16 @@ namespace Halo.Collector;
 
 /// <summary>
 /// Runs each provider on its own thread at its fixed cadence (capped by MaxRateHz).
-/// Failed providers are retried with backoff (1/5/30/60 s). A provider crash never
-/// touches other providers (plan D2, §11).
+/// Failed providers are retried with backoff (1/5/30/60 s).
+///
+/// A provider <b>exception</b> never touches other providers (plan D2, §11): Initialize and Poll
+/// are each wrapped, and a throwing provider costs only its own thread's tick. A native crash is
+/// not the same thing — an access violation on a provider thread is uncatchable and takes the
+/// whole collector with it, and nothing in this host can isolate that; only running providers in
+/// separate processes would, and Halo does not. So a provider that can corrupt process state has
+/// to avoid doing so by construction rather than rely on this host to contain it. See
+/// LhmProvider's gate over LibreHardwareMonitor's process-global OpCode plumbing, which is the
+/// one case known to have made that gap reachable (diagnosed 2026-09-14).
 ///
 /// Each runner also owns one row of the section's provider table: state, needs-elevation,
 /// rate, last poll timestamp and duration, and a short failure code. That table is what the
@@ -93,7 +101,7 @@ public sealed class ProviderHost : IDisposable
     /// command was ignored as a repeat.
     ///
     /// Repeats inside <see cref="RescanDebounce"/> are dropped. Re-opening a
-    /// LibreHardwareMonitor <c>Computer</c> is not free and not entirely robust (see
+    /// LibreHardwareMonitor <c>Computer</c> is not free (see
     /// <see cref="Providers.LhmProvider.RescanReinitialises"/>), and nothing a user can plug in
     /// appears twice in a few seconds — so a held-down button must not become a re-open storm.
     /// </summary>
