@@ -53,9 +53,22 @@ integrity, so nothing you interact with is elevated.
      driver is used as is, whatever its version.
    - **Start with Windows** — registers two scheduled tasks (`\Halo\Collector` at highest
      privileges, `\Halo\Widgets` at normal) so nothing prompts for UAC at logon.
+   There's also a **Create a desktop shortcut** checkbox.
 4. Widgets appear, and **Settings opens on the System check page**: what your hardware actually
    exposes, which providers are OK / degraded / unavailable and why, and buttons to fix the
    fixable. First run also offers to generate a starting layout for your monitors.
+
+### Starting Halo yourself
+
+Halo doesn't start itself unless you ticked **Start with Windows**. The **Halo** shortcut (Start
+menu, and your desktop if you asked for it) is the one to click: the overlay comes up, then Windows
+asks to let the collector run as administrator. Say yes — that's what reads CPU temps, fans, drive
+temps and the FPS pipeline. Say no and everything else still works, those rows just read `N/A`.
+
+Clicking it again while Halo is already running is safe: the widgets are single-instance, and the
+collector is only started if there isn't one. `Halo Widgets` and `Halo Settings` still start one
+process each, with no prompt, and `Halo.Collector.exe` on its own is still unelevated — `--dump`,
+`--migrate-config` and the smoketests never ask for anything.
 
 Prefer portable? `Halo-<version>-win-x64.zip` from the same release unzips to a folder that keeps
 its config and logs in `.\data` next to the exes (that's what the `portable.marker` file inside
@@ -172,6 +185,20 @@ actually elevated (System check says).
 
 **Widgets in the wrong place / wrong monitor.** Positions are stored per monitor device id. Drag one
 once and the drop saves instantly, including which monitor it landed on.
+
+**Everything reads N/A and there was no UAC prompt.** You probably started `Halo Widgets` rather
+than **Halo** — the plain entry is the overlay on its own. Start `Halo` instead, or start
+`Halo.Collector.exe` as administrator by hand.
+
+**I hand-edited `widgets.json` and my widgets vanished.** They shouldn't any more: a config file
+that's present but doesn't parse is ignored and the last good copy is kept, with a line in
+`%LOCALAPPDATA%\Halo\logs\widgets-*.log` saying which file and why. Halo also won't overwrite it
+while it's broken, so a widget you drag in the meantime won't stick until the JSON is valid again.
+
+**On a standard-user account, Settings changes don't reach the collector.** UAC asked for an
+admin's password, so the collector is running as *that* user and resolves a different
+`%LOCALAPPDATA%\Halo`. Use portable mode, or tick "Start with Windows" — the scheduled task always
+runs as you. Details in [docs/global-installs.md](docs/global-installs.md#6-known-limitation-the-halo-shortcut-on-a-standard-user-account).
 
 ## Privacy
 

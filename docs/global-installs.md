@@ -20,7 +20,8 @@ Last updated 2026-09-13 for the v2 layout.
 | Item | Where | Created by | Removed by |
 | --- | --- | --- | --- |
 | Program files | `C:\Program Files\Halo` (three exes over one shared .NET runtime, `assets\`, `presentmon\`, `redist\`, licences) | Inno Setup `[Files]` | uninstall |
-| Start menu shortcuts | `Halo Settings`, `Halo Widgets` | `[Icons]` | uninstall |
+| Start menu shortcuts | `Halo` (runs `Halo.Widgets.exe --start-collector` — the overlay plus a UAC prompt for the collector), `Halo Settings`, `Halo Widgets` | `[Icons]` | uninstall |
+| Desktop shortcut *(optional, "Create a desktop shortcut" checkbox)* | `Halo` on the all-users desktop, same target as the Start-menu `Halo` | `[Icons]` + `[Tasks] desktopicon` | uninstall |
 | ARP / uninstall entry | `HKLM\...\Uninstall\{D05EF3BB-...}_is1` | Inno Setup | uninstall |
 | Collector autostart | scheduled task `\Halo\Collector` — RunLevel **Highest**, at logon of the interactive user | `Halo.Settings.exe --register-autostart` | `--unregister-autostart`, run by `[UninstallRun]` |
 | Widgets autostart | scheduled task `\Halo\Widgets` — RunLevel **Limited** (medium integrity), at logon | same | same |
@@ -90,3 +91,30 @@ registered for the **interactive console user** instead, resolved at install tim
 installing with an admin's credentials. If it still lands on the wrong account — multiple
 simultaneous sessions, say — Settings → System check → **Repair autostart** re-registers them for
 whoever is running it.
+
+## 6. Known limitation: the Halo shortcut on a standard-user account
+
+The `Halo` shortcut runs `Halo.Widgets.exe --start-collector`, which starts the collector with the
+`runas` verb — a normal UAC prompt. If the logged-in user **is** an administrator (the common case)
+Windows just asks for consent and the collector runs as that same user, so both processes resolve
+the same `%LOCALAPPDATA%\Halo` and everything matches.
+
+If the logged-in user is **not** an administrator, UAC asks for a *different* account's
+credentials. The collector then runs as that admin, and `Paths` resolves `%LOCALAPPDATA%` per user —
+so the collector reads and writes `C:\Users\<admin>\AppData\Local\Halo` while the widgets use
+`C:\Users\<you>\AppData\Local\Halo`. Config and logs quietly split in two. The metrics themselves
+still arrive — `Local\Halo.Metrics.v2` is scoped to the logon *session*, not the user, and the
+collector creates it granting `GENERIC_READ` to Everyone
+(`src/Halo.Metrics/NativeSection.cs:29`) — so the panels show live numbers. It is settings and log
+files that diverge: the collector reads a `settings.json` the Settings app never writes.
+
+Two ways around it, both already supported:
+
+- **Portable mode** — a `portable.marker` next to the exes puts data in `<app folder>\data`, which
+  is the same folder whoever runs it.
+- **Autostart** — the scheduled tasks do not have this problem. They are registered with
+  `TaskLogonInteractiveToken` for the interactive console user, so the elevated collector is always
+  the *same* user as the widgets (`AutostartManager.cs`, `RegisterTask`).
+
+Documented rather than engineered around: the direct-UAC launch is what makes "click the shortcut,
+approve the prompt" work without a scheduled task, and an admin-user machine is unaffected.

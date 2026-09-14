@@ -150,6 +150,7 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
     private bool _canRescan;
     private string _pawnIoButtonText = "Install PawnIO…  ⛨";
     private string _pawnIoButtonToolTip = "Installs the optional PawnIO driver with administrator permission.";
+    private string _autostartButtonText = "Repair autostart…  ⛨";
     private string _autostartButtonToolTip = "Recreates both scheduled tasks with administrator permission.";
     private string _actionStatus = "";
     private string _collectorVersion = "Not connected";
@@ -171,6 +172,7 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
     public bool CanRescan { get => _canRescan; private set => Set(ref _canRescan, value); }
     public string PawnIoButtonText { get => _pawnIoButtonText; private set => Set(ref _pawnIoButtonText, value); }
     public string PawnIoButtonToolTip { get => _pawnIoButtonToolTip; private set => Set(ref _pawnIoButtonToolTip, value); }
+    public string AutostartButtonText { get => _autostartButtonText; private set => Set(ref _autostartButtonText, value); }
     public string AutostartButtonToolTip { get => _autostartButtonToolTip; private set => Set(ref _autostartButtonToolTip, value); }
     public string ActionStatus { get => _actionStatus; set => Set(ref _actionStatus, value); }
     public string CollectorVersion { get => _collectorVersion; private set => Set(ref _collectorVersion, value); }
@@ -237,10 +239,16 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
             PawnIoButtonToolTip = _pawnInstalled
                 ? (pawnVersion.Length > 0 ? $"PawnIO {pawnVersion} is installed." : "PawnIO is installed.")
                 : PawnIoManager.PayloadPresent ? "Installs the optional PawnIO driver with administrator permission." : PawnIoManager.MissingPayloadMessage;
+            // Deliberately still !Healthy and not !NeedsAttention: an install whose
+            // --register-autostart failed leaves no tasks at all, which is indistinguishable from a
+            // decline, and halo.iss tells that user to come here and press this. Gating the button
+            // on NeedsAttention would remove it in exactly the state the installer points at.
             CanRepairAutostart = AutostartManager.HasTaskPayloads && !autostart.Healthy;
-            AutostartButtonToolTip = AutostartManager.HasTaskPayloads
-                ? autostart.Healthy ? "Both scheduled tasks already point at this Halo installation." : "Recreates both scheduled tasks with administrator permission."
-                : AutostartManager.MissingPayloadMessage;
+            AutostartButtonText = autostart.ActionLabel;
+            AutostartButtonToolTip = !AutostartManager.HasTaskPayloads ? AutostartManager.MissingPayloadMessage
+                : autostart.Healthy ? "Both scheduled tasks already point at this Halo installation."
+                : autostart.Off ? "Registers both scheduled tasks so Halo starts at logon, with administrator permission."
+                : "Recreates both scheduled tasks with administrator permission.";
         }
         catch (Exception ex)
         {
@@ -413,8 +421,18 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
                 : _pawnInstalled ? (pawnVersion.Length > 0 ? $"Version {pawnVersion} · no provider reported a driver error" : "Installed · no provider reported a driver error")
                 : "Optional: enables CPU temperature, power, drive temperature and fan sensors.",
             pawnDriverError ? CheckLevel.Error : _pawnInstalled && connected ? CheckLevel.Good : CheckLevel.Warning);
-        _cards["autostart"].Apply(autostart.Healthy ? "Autostart healthy" : "Autostart needs attention", autostart.Summary,
-            autostart.Healthy ? CheckLevel.Good : CheckLevel.Warning);
+        // Three states, not two. "No tasks" is now how every user who declined "Start with Windows"
+        // runs Halo — they start it from the shortcut and the collector elevates through UAC — so
+        // rendering that as a Warning tells them their own choice is a fault, and makes the repair
+        // button look like the remedy for a non-problem. Only a genuinely broken registration
+        // (half-registered, pointing at another install, or a legacy Run value left behind) warns.
+        (string title, CheckLevel level) = autostart switch
+        {
+            { Healthy: true } => ("Autostart on", CheckLevel.Good),
+            { Off: true } => ("Autostart off", CheckLevel.Neutral),
+            _ => ("Autostart needs attention", CheckLevel.Warning),
+        };
+        _cards["autostart"].Apply(title, autostart.Summary, level);
     }
 
     private void ApplyReadinessCard(bool connected)

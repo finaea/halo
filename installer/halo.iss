@@ -98,9 +98,24 @@ Source: "{#HaloAppDir}\*"; DestDir: "{app}"; Components: app; \
     Excludes: "portable.marker,data\*"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
+[Tasks]
+; The standard "Create a desktop shortcut" checkbox. Halo is started by the user from a
+; shortcut, so this is the one most people will actually click.
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+
 [Icons]
+; "Halo" is the entry that starts the pair: Halo.Widgets.exe brings the overlay up and its
+; --start-collector flag then asks for the elevation the collector needs (UAC prompt by
+; design — src\Halo.Widgets\CollectorLauncher.cs). Halo.Collector.exe itself stays
+; asInvoker so --dump, --migrate-config and the smoketests never prompt.
+;
+; The two single-process entries are deliberately kept as they were, for anyone who wants
+; one half on its own.
+Name: "{group}\Halo"; Filename: "{app}\Halo.Widgets.exe"; Parameters: "--start-collector"
 Name: "{group}\Halo Settings"; Filename: "{app}\Halo.Settings.exe"
 Name: "{group}\Halo Widgets"; Filename: "{app}\Halo.Widgets.exe"
+Name: "{autodesktop}\Halo"; Filename: "{app}\Halo.Widgets.exe"; Parameters: "--start-collector"; \
+    Tasks: desktopicon
 
 [Run]
 ; Both at the original (medium-integrity) user, which is what runasoriginaluser buys us —
@@ -114,7 +129,13 @@ Name: "{group}\Halo Widgets"; Filename: "{app}\Halo.Widgets.exe"
 ; (Halo.Widgets App.GenerateFirstRunLayout) and then write the minimal offline layout.
 ; With postinstall the two entries run when the user clicks Finish, after the collector
 ; has been registered and started.
-Filename: "{app}\Halo.Widgets.exe"; Description: "{cm:LaunchProgram,Halo Widgets}"; \
+;
+; --start-collector for the same reason the shortcut has it: with "Start with Windows"
+; unticked nothing has registered a collector task, so this is the only thing that gives
+; the first session real sensor data. With it ticked, RegisterAutostart has already run
+; schtasks /Run and the flag finds a live collector and stays quiet.
+Filename: "{app}\Halo.Widgets.exe"; Parameters: "--start-collector"; \
+    Description: "{cm:LaunchProgram,Halo}"; \
     Flags: nowait postinstall runasoriginaluser skipifsilent
 Filename: "{app}\Halo.Settings.exe"; Description: "Open Halo Settings (System check)"; \
     Flags: nowait postinstall runasoriginaluser skipifsilent
@@ -277,7 +298,22 @@ var
   ResultCode: Integer;
 begin
   if not WizardIsComponentSelected('autostart') then
+  begin
+    { Upgrading with "Start with Windows" unticked. The previous release registered
+      Halo Collector and Halo Widgets tasks; they survive the file copy, still point into the
+      install folder, and would start Halo at the next logon anyway - an explicit opt-out that
+      does nothing. The verb only stops and deletes tasks whose action points inside the
+      install folder, so a source build registered by install-dev.ps1, or a second install
+      somewhere else, is left alone. On a fresh install there is nothing to remove and this
+      is a no-op. Never a dialog: "nothing to unregister" and "unregistered" look the same
+      from here, and the user did not ask for autostart either way. }
+    if not Exec(ExpandConstant('{app}\Halo.Settings.exe'), '--unregister-autostart', '',
+                SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      Log('Halo: could not run --unregister-autostart')
+    else if ResultCode <> 0 then
+      Log('Halo: --unregister-autostart returned ' + IntToStr(ResultCode));
     exit;
+  end;
 
   { --user is deliberately omitted. Inno's "username" constant under UAC is whoever's
     credentials approved the elevation, which is not necessarily the person at the
@@ -286,8 +322,11 @@ begin
   if (not Exec(ExpandConstant('{app}\Halo.Settings.exe'), '--register-autostart', '',
                SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
   begin
+    { Do not quote the button's caption here: it is conditional now. With no tasks registered -
+      which is exactly where a failure lands - it reads "Turn on autostart", and a dialog naming
+      a caption the user cannot find is worse than one that just says where to go. }
     SayInstall('Could not register Halo to start with Windows.' + #13#10#13#10
-      + 'Open Halo Settings > System check and use "Repair autostart" to try again.',
+      + 'Open Halo Settings > System check and use the autostart button there to try again.',
       mbError);
     exit;
   end;
