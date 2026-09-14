@@ -12,7 +12,7 @@ namespace Halo.Metrics;
 /// </summary>
 public sealed class CollectorSession : IDisposable
 {
-    private readonly MetricsReader _reader = new();
+    private readonly MetricsReader _reader;
     private readonly Dictionary<string, int> _indexByName = new(StringComparer.Ordinal);
     private readonly Action<string>? _log;
     private readonly FrameEntry[] _frameBuf;
@@ -23,9 +23,15 @@ public sealed class CollectorSession : IDisposable
     /// <param name="log">Optional diagnostics sink (the package has no logger of its own).</param>
     /// <param name="frameBufferSize">Frames drained per <see cref="Poll"/>.</param>
     public CollectorSession(Action<string>? log = null, int frameBufferSize = 4096)
+        : this(log, frameBufferSize, null) { }
+
+    /// <summary>Test seam: read a named section other than the real one. Internal on purpose —
+    /// the public surface is a published contract, so this stays inside the assembly.</summary>
+    internal CollectorSession(Action<string>? log, int frameBufferSize, string? sectionName)
     {
         _log = log;
         _frameBuf = new FrameEntry[Math.Max(1, frameBufferSize)];
+        _reader = new MetricsReader(sectionName);
     }
 
     /// <summary>Seconds without a heartbeat before <see cref="Stale"/> goes true.</summary>
@@ -63,7 +69,7 @@ public sealed class CollectorSession : IDisposable
             _indexByName.Clear();
             _attachedStartQpc = _reader.CollectorStartQpc;
             _frameCursor = 0;
-            _log?.Invoke($"attached to {SharedMemoryLayout.SectionName} (pid {_reader.CollectorPid}, {_reader.MetricCount} metrics)");
+            _log?.Invoke($"attached to {_reader.SectionName} (pid {_reader.CollectorPid}, {_reader.MetricCount} metrics)");
         }
 
         // A restarted collector reuses the same named section (our handle keeps it alive) but

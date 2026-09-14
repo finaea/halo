@@ -12,24 +12,78 @@ namespace Halo.Collector;
 /// Each runner also owns one row of the section's provider table: state, needs-elevation,
 /// rate, last poll timestamp and duration, and a short failure code. That table is what the
 /// Settings System-check page reads — no log parsing (interface plan I5).
+///
+/// The host also owns the <b>freshness contract</b>: a value in shared memory is either fresh or
+/// absent. A provider that fails, or that stops polling at all, has its readings marked N/A here
+/// (<see cref="MetricSink.MarkProviderStale"/>) — otherwise every number it last wrote keeps a
+/// valid timestamp and the widgets go on rendering a dead sensor as a live one, indefinitely.
 /// </summary>
 public sealed class ProviderHost : IDisposable
 {
+    /// <summary>
+    /// How long a provider may go without completing a poll before its readings are marked N/A:
+    /// <c>max(10 s, 10 x its own period)</c>, so a 0.5 Hz provider gets 20 s and a 40 Hz one gets
+    /// the 10 s floor. Deliberately generous — far enough out that a hiccup, an init retry or a
+    /// <c>rescan</c> never trips it, and the only thing it catches is a provider that really has
+    /// stopped.
+    /// </summary>
+    private const double StaleFloorSeconds = 10;
+    private const double StalePeriodMultiple = 10;
+
+    /// <summary>How often the watchdog re-checks. Coarse on purpose: the bound it enforces is
+    /// tens of seconds, so a second of resolution is free.</summary>
+    private static readonly TimeSpan WatchdogInterval = TimeSpan.FromSeconds(1);
+
     private readonly MetricSink _sink;
     private readonly List<Runner> _runners = new();
     private readonly CancellationTokenSource _cts = new();
+    private readonly Thread _watchdog;
 
-    public ProviderHost(MetricSink sink) => _sink = sink;
+    public ProviderHost(MetricSink sink)
+    {
+        _sink = sink;
+        _watchdog = new Thread(WatchdogLoop) { IsBackground = true, Name = "halo-freshness" };
+        _watchdog.Start();
+    }
 
     public void Add(ISensorProvider provider)
     {
         var r = new Runner(provider, _sink, _cts.Token);
-        _runners.Add(r);
+        lock (_runners) _runners.Add(r);
         r.Start();
     }
 
+    private Runner[] Snapshot()
+    {
+        lock (_runners) return _runners.ToArray();
+    }
+
+    /// <summary>
+    /// Rule 2 of the freshness contract: stale the readings of any provider that has not completed
+    /// a poll inside its bound. Rule 1 (below, in the runner) covers a provider that throws — this
+    /// covers the one case no failure path can: a provider wedged inside a native call that never
+    /// returns, whose thread is still alive and whose last published values look perfectly fresh.
+    /// </summary>
+    private void WatchdogLoop()
+    {
+        while (!_cts.Token.WaitHandle.WaitOne(WatchdogInterval))
+        {
+            // This thread only ever marks values N/A. An exception escaping it would be unhandled
+            // on a background thread, which ends the collector — a bookkeeping fault must never
+            // cost the user every metric they have.
+            try
+            {
+                foreach (var r in Snapshot()) r.CheckFreshness();
+            }
+            catch (Exception ex)
+            {
+                Log.Error("freshness watchdog", ex);
+            }
+        }
+    }
+
     public IReadOnlyList<(string Name, bool Available, double RateHz, double LastPollMs)> Status()
-        => _runners.Select(r => (r.Provider.Name, r.Available, r.RateHz, r.LastPollMs)).ToList();
+        => Snapshot().Select(r => (r.Provider.Name, r.Available, r.RateHz, r.LastPollMs)).ToList();
 
     /// <summary>
     /// Handle a <c>rescan</c> command: every provider whose Initialize enumerates hardware is
@@ -51,7 +105,7 @@ public sealed class ProviderHost : IDisposable
             if (now - _lastRescan < RescanDebounce) return -1;
             _lastRescan = now;
         }
-        return _runners.Count(r => r.RequestRescan());
+        return Snapshot().Count(r => r.RequestRescan());
     }
 
     private static readonly TimeSpan RescanDebounce = TimeSpan.FromSeconds(10);
@@ -61,9 +115,11 @@ public sealed class ProviderHost : IDisposable
     public void Dispose()
     {
         _cts.Cancel();
-        foreach (var r in _runners) r.Wake();   // cut short a long sleep (lhm-storage waits 10 s)
-        foreach (var r in _runners) r.Join(2000);
-        foreach (var r in _runners) { try { r.Provider.Dispose(); } catch { } }
+        _watchdog.Join(2000);
+        var runners = Snapshot();
+        foreach (var r in runners) r.Wake();   // cut short a long sleep (lhm-storage waits 10 s)
+        foreach (var r in runners) r.Join(2000);
+        foreach (var r in runners) { try { r.Provider.Dispose(); } catch { } }
         // The wake handles are deliberately not disposed: a runner that missed its 2 s join would
         // then throw ObjectDisposedException out of its wait, on a thread with no handler.
     }
@@ -79,6 +135,14 @@ public sealed class ProviderHost : IDisposable
         private Thread? _thread;
         private string? _lastErrorSig;
         private DateTime _nextErrorLog;
+
+        /// <summary>QPC of the last poll that returned without throwing, or 0 while this provider
+        /// has never got that far. Written by the poll thread, read by the host's watchdog.</summary>
+        private long _lastGoodPollQpc;
+        /// <summary>Latch so a failed provider is staled once rather than on every watchdog tick.
+        /// Races between the two threads are benign: the worst case is one redundant pass, or one
+        /// skipped pass that the next tick repeats.</summary>
+        private volatile bool _metricsStale = true;
 
         /// <summary>Lets the host interrupt the inter-poll sleep — a rescan or a shutdown should
         /// not have to wait out lhm-storage's 10 s period.</summary>
@@ -120,6 +184,47 @@ public sealed class ProviderHost : IDisposable
                 unelevated ? ProviderError.Unelevated : ProviderError.None);
         }
 
+        /// <summary>
+        /// Rule 1 of the freshness contract: this provider just failed, so everything it publishes
+        /// is now a number nobody re-read. Mark it N/A rather than leaving the last sample looking
+        /// live. Static metrics and .max companions are exempt — see
+        /// <see cref="MetricSink.MarkProviderStale"/>.
+        ///
+        /// Note this is keyed to the failure itself, not to the published <c>Degraded</c> state: an
+        /// unelevated provider that is polling perfectly well also reports Degraded, and staling
+        /// that one would be exactly backwards.
+        /// </summary>
+        private void StaleMetrics()
+        {
+            if (_metricsStale) return;
+            _metricsStale = true;
+            sink.MarkProviderStale(Provider.Name);
+        }
+
+        /// <summary>A poll came back: the values it wrote are fresh again.</summary>
+        private void MarkFresh()
+        {
+            Volatile.Write(ref _lastGoodPollQpc, Stopwatch.GetTimestamp());
+            _metricsStale = false;
+        }
+
+        /// <summary>
+        /// Rule 2, called from the host's watchdog thread. A provider wedged inside a native call
+        /// never reaches its own catch block, so nothing on this thread can report it — the bound
+        /// on how old a completed poll may be is the only thing that catches it.
+        /// </summary>
+        public void CheckFreshness()
+        {
+            if (_metricsStale) return;
+            long last = Volatile.Read(ref _lastGoodPollQpc);
+            if (last == 0) return;                      // never polled: nothing published to stale
+            double age = (double)(Stopwatch.GetTimestamp() - last) / Stopwatch.Frequency;
+            double bound = Math.Max(StaleFloorSeconds, StalePeriodMultiple / RateHz);
+            if (age < bound) return;
+            Log.Warn($"{Provider.Name}: no completed poll for {age:0.#} s (bound {bound:0.#} s) — its metrics now read N/A");
+            StaleMetrics();
+        }
+
         private void Run()
         {
             int initFailures = 0;
@@ -141,6 +246,7 @@ public sealed class ProviderHost : IDisposable
                 {
                     sink.SetProviderState(_providerIndex, ProviderState.Unavailable, RateHz,
                         Provider.UnavailableReason ?? ProviderError.Failed);
+                    StaleMetrics();
                     int delay = initFailures switch { 0 => 1000, 1 => 5000, 2 => 30000, _ => 60000 };
                     initFailures++;
                     if (initFailures <= 3) Log.Warn($"{Provider.Name}: unavailable, retry in {delay} ms");
@@ -180,6 +286,7 @@ public sealed class ProviderHost : IDisposable
                     try
                     {
                         Provider.Poll(sink);
+                        MarkFresh();
                         if (consecutiveErrors > 0) PublishHealthy();
                         consecutiveErrors = 0;
                     }
@@ -187,6 +294,7 @@ public sealed class ProviderHost : IDisposable
                     {
                         consecutiveErrors++;
                         sink.SetProviderState(_providerIndex, ProviderState.Degraded, RateHz, ProviderError.Failed);
+                        StaleMetrics();
                         // identical failures repeat across re-init cycles (e.g. LHM NRE
                         // streaks) — full detail on first sight, then one line per 5 min
                         // so a flaky sensor can't flood the log

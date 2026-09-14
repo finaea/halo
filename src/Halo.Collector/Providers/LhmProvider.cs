@@ -172,22 +172,34 @@ public sealed class LhmProvider : ISensorProvider
         }
     }
 
+    /// <summary>
+    /// Package temperature, package power and the top core clock. All three are readings, so a
+    /// poll that does not find one marks it N/A instead of leaving the previous sample looking
+    /// live — losing the PawnIO driver mid-session is exactly how that happens. The tallies are
+    /// kept across the whole hardware loop so a second CPU package cannot blank the first one's
+    /// values.
+    /// </summary>
     private void PollCpu(MetricSink sink)
     {
+        bool tempSeen = false, powerSeen = false;
+        double maxCoreClock = 0;
         foreach (var hw in AllHardware().Where(h => h.HardwareType == HardwareType.Cpu))
         {
             sink.SetString(MetricNames.CpuName, hw.Name);
-            double maxCoreClock = 0;
             foreach (var s in hw.Sensors)
             {
                 if (s.Value is not { } v || float.IsNaN((float)v)) continue;
                 switch (s.SensorType)
                 {
+                    // A CPU at 0 °C drawing 0 W is not a reading, it is an unread sensor: the
+                    // v > 0 guards keep those out, and they then fall through to N/A below.
                     case SensorType.Temperature when v > 0 && s.Name is "CPU Package" or "Core (Tctl/Tdie)":
                         sink.Set(MetricNames.CpuPackageTempC, v);
+                        tempSeen = true;
                         break;
                     case SensorType.Power when v > 0 && s.Name is "CPU Package" or "Package":
                         sink.Set(MetricNames.CpuPackagePowerW, v);
+                        powerSeen = true;
                         break;
                     case SensorType.Clock when !s.Name.Contains("Bus", StringComparison.OrdinalIgnoreCase):
                         // core clocks are named "CPU Core #N" (or "Core #N" depending on LHM
@@ -196,8 +208,11 @@ public sealed class LhmProvider : ISensorProvider
                         break;
                 }
             }
-            if (maxCoreClock > 0) sink.Set(MetricNames.CpuClockMhz, maxCoreClock);
         }
+        if (maxCoreClock > 0) sink.Set(MetricNames.CpuClockMhz, maxCoreClock);
+        else sink.MarkStale(MetricNames.CpuClockMhz);
+        if (!tempSeen) sink.MarkStale(MetricNames.CpuPackageTempC);
+        if (!powerSeen) sink.MarkStale(MetricNames.CpuPackagePowerW);
     }
 
     /// <summary>
@@ -215,6 +230,8 @@ public sealed class LhmProvider : ISensorProvider
         // Channel numbering runs across every SuperIO chip on the board, so a second controller
         // continues the range instead of overwriting channel 0.
         int fanIdx = 0;
+        bool vcoreSeen = false;
+        _fansSeen.Clear();
         foreach (var hw in AllHardware().Where(h => h.HardwareType == HardwareType.SuperIO))
         {
             // LHM names them "Fan #N" / "Fan Control #N"; pair on the trailing number, else by order.
@@ -234,8 +251,13 @@ public sealed class LhmProvider : ISensorProvider
                     sink.Set(MetricNames.FanCount, _registeredFans.Count);
                 }
 
-                double rpm = s.Value is { } v && !float.IsNaN((float)v) ? v : 0;
-                sink.Set(MetricNames.FanRpm(fanIdx), rpm);
+                // 0 RPM is a reading, not a failure: a case fan the board has stopped, or a GPU in
+                // zero-RPM mode, really does report 0 and must show 0 — not N/A. What is N/A is a
+                // channel whose sensor gave us nothing at all (no value, or NaN), which is what an
+                // unelevated collector or a missing PawnIO driver looks like from here.
+                _fansSeen.Add(fanIdx);
+                if (s.Value is { } v && !float.IsNaN((float)v)) sink.Set(MetricNames.FanRpm(fanIdx), v);
+                else sink.MarkStale(MetricNames.FanRpm(fanIdx));
 
                 var control = MatchControl(controls, s, chipOrdinal);
                 if (control?.Value is { } duty && !float.IsNaN((float)duty))
@@ -243,7 +265,14 @@ public sealed class LhmProvider : ISensorProvider
                     if (_registeredControls.Add(fanIdx))
                         sink.Register(MetricNames.FanControlPct(fanIdx), MetricType.Double, MetricUnit.Percent, Name,
                             DefaultRateHz, flags: MetricFlags.NeedsElevation);
+                    // Likewise 0% duty is a real duty cycle.
                     sink.Set(MetricNames.FanControlPct(fanIdx), Math.Clamp(duty, 0, 100));
+                }
+                else if (_registeredControls.Contains(fanIdx))
+                {
+                    // The channel had a duty cycle once and has stopped reporting one. A metric
+                    // that never registers at all is already absent; this is the other case.
+                    sink.MarkStale(MetricNames.FanControlPct(fanIdx));
                 }
                 fanIdx++;
                 chipOrdinal++;
@@ -252,12 +281,34 @@ public sealed class LhmProvider : ISensorProvider
             var vcore = hw.Sensors.FirstOrDefault(s => s.SensorType == SensorType.Voltage &&
                             (s.Name.Contains("core", StringComparison.OrdinalIgnoreCase) || s.Name == "VIN0"));
             if (vcore?.Value is { } vc && !float.IsNaN((float)vc))
+            {
                 sink.Set(MetricNames.CpuVcoreV, vc);
+                vcoreSeen = true;
+            }
+        }
+
+        // Decided across the whole loop, not per chip: on a board with two SuperIO controllers
+        // only one of them carries Vcore, and staling it from the other would blank a reading we
+        // just took.
+        if (!vcoreSeen) sink.MarkStale(MetricNames.CpuVcoreV);
+
+        // The third fan branch, and the one with no sensor to ask: a channel this poll did not
+        // enumerate at all. A dropped chip (or a sensor list that came back short) leaves no
+        // value and no NaN — just silence — so neither branch above fires and the channel would
+        // hold its last RPM for the rest of the session, reading as live.
+        foreach (int idx in _registeredFans)
+        {
+            if (_fansSeen.Contains(idx)) continue;
+            sink.MarkStale(MetricNames.FanRpm(idx));
+            sink.MarkStale(MetricNames.FanControlPct(idx));   // no-op when none was registered
         }
     }
 
     private readonly HashSet<int> _registeredFans = new();
     private readonly HashSet<int> _registeredControls = new();
+    /// <summary>Channels enumerated by the poll in progress; reused so the 1 Hz sweep does not
+    /// allocate.</summary>
+    private readonly HashSet<int> _fansSeen = new();
 
     private static ISensor? MatchControl(List<ISensor> controls, ISensor fan, int chipOrdinal)
     {
@@ -421,10 +472,17 @@ public sealed class LhmProvider : ISensorProvider
         else sink.Register(metric, MetricType.Double, unit, Name, DefaultRateHz);
     }
 
-    /// <summary>Publish a sensor value, registering the metric the first time the sensor is seen.</summary>
+    /// <summary>
+    /// Publish a sensor value, registering the metric the first time the sensor is seen. A sensor
+    /// with no readable value marks the metric N/A — which is a no-op while it has never been seen
+    /// (nothing is registered yet, so the row simply does not exist), and the point when it has:
+    /// a card whose fan sensor stops answering shows N/A rather than its last RPM forever.
+    ///
+    /// A readable 0 is published as 0. That is the whole zero-RPM-mode case.
+    /// </summary>
     private void Publish(MetricSink sink, string metric, MetricUnit unit, ISensor? s, bool withMax = false)
     {
-        if (s?.Value is not { } v || float.IsNaN((float)v)) return;
+        if (s?.Value is not { } v || float.IsNaN((float)v)) { sink.MarkStale(metric); return; }
         RegisterLazy(sink, metric, unit, withMax);
         sink.Set(metric, v);
     }

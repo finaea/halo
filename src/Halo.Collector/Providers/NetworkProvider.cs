@@ -79,14 +79,23 @@ public sealed class NetworkProvider(ConfigStore config) : ISensorProvider
         }
     }
 
+    /// <summary>Throughput is a reading off an interface: with no interface, or one whose counters
+    /// we cannot read, there is no rate — not a rate of zero. The session totals are left alone;
+    /// they are a running count and their last value stays true.</summary>
+    private static void NoRates(MetricSink sink)
+    {
+        sink.MarkStale(MetricNames.NetDownBps);
+        sink.MarkStale(MetricNames.NetUpBps);
+    }
+
     public void Poll(MetricSink sink)
     {
         if (DateTime.UtcNow >= _nextNicRefresh || _nic == null) PickNic();
-        if (_nic == null) return;
+        if (_nic == null) { NoRates(sink); return; }
 
         IPInterfaceStatistics stats;
         try { stats = _nic.GetIPStatistics(); }
-        catch { _nic = null; return; }
+        catch { _nic = null; NoRates(sink); return; }
 
         long rx = stats.BytesReceived, tx = stats.BytesSent;
         double dt = _sw.IsRunning ? _sw.Elapsed.TotalSeconds : 0;
@@ -112,6 +121,7 @@ public sealed class NetworkProvider(ConfigStore config) : ISensorProvider
         else
         {
             _startRx = rx; _startTx = tx; // first sample of this nic = session base
+            NoRates(sink);                // a rate needs two samples; there is none yet
         }
         _prevRx = rx; _prevTx = tx;
 

@@ -128,6 +128,37 @@ public sealed class PanelContext
     /// <summary>"48°C" / "118°F" for a Celsius reading.</summary>
     public string TempText(double celsius) => ValueFormat.Int0(Temp(celsius)) + TempUnit;
 
+    // ---- N/A ----
+
+    /// <summary>
+    /// The collector-side freshness contract, rendered: a metric with no fresh value reads
+    /// <c>N/A</c>, not a plausible <c>0</c>. The collector already decided (a provider that failed
+    /// or stopped polling has its readings marked absent), so there is no age policy here — the
+    /// row just asks whether there is a value and says so.
+    ///
+    /// <b>The unit has to vanish with the number</b>, or a dead sensor reads "N/A °C". Units are
+    /// concatenated outside the number formatter in every panel — <c>Int0(v) + TempUnit</c>,
+    /// <c>$"{Int0(v)}%"</c>, <c>AutoScale(v) + "B/s"</c> — so the decision cannot live inside
+    /// <see cref="ValueFormat"/>. It lives here, one level up, where <paramref name="format"/>
+    /// produces the whole string including the unit and the whole string is what gets replaced.
+    /// </summary>
+    public string Na(string metric, Func<double, string> format)
+        => Metrics.TryValue(metric, out double v) ? format(v) : "N/A";
+
+    /// <summary>Two metrics in one row ("12.4 / 32.0 GB"): N/A unless both are readable, since
+    /// half a ratio is not a number anyone can use.</summary>
+    public string Na(string a, string b, Func<double, double, string> format)
+        => Metrics.TryValue(a, out double va) && Metrics.TryValue(b, out double vb) ? format(va, vb) : "N/A";
+
+    /// <summary>
+    /// A graph sample, or NaN when the reading is unavailable. NaN is how a series says "no sample
+    /// here": <see cref="GraphEl"/>'s bucket drawing already treats an empty column as "hold the
+    /// previous value", so a provider blip leaves a flat line rather than a cliff to the floor —
+    /// which is what appending a 0 would draw.
+    /// </summary>
+    public double NaSample(string metric)
+        => Metrics.TryValue(metric, out double v) ? v : double.NaN;
+
     /// <summary>"rpm.2" → "rpm": repeated rows share one catalog spec.</summary>
     private static string BaseKey(string key)
     {

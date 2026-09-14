@@ -57,7 +57,7 @@ public static class ClockPanel
         // uptime pill
         p.Elements.Add(new TextEl
         {
-            Text = c => ValueFormat.Uptime(c.Metrics.Value(Halo.Metrics.MetricNames.SysUptimeS)),
+            Text = c => c.Na(Halo.Metrics.MetricNames.SysUptimeS, ValueFormat.Uptime),
             VisibleWhen = c => c.Shows("uptime"),
             Style = TextStyle.Text8,
             Align = TextAlign.Center,

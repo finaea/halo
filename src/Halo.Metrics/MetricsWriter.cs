@@ -12,8 +12,7 @@ public sealed unsafe class MetricsWriter : IDisposable
     private readonly object _registryLock = new();
     private readonly object _providerLock = new();
     private readonly object _frameLock = new();     // ring has multiple writer threads (poll + tap)
-    private readonly EventWaitHandle _framesReady =
-        new(false, EventResetMode.AutoReset, SharedMemoryLayout.FramesReadyEventName);
+    private readonly EventWaitHandle _framesReady;
     private readonly Action<string>? _warn;
     private int _stringSlotsUsed;
 
@@ -22,9 +21,28 @@ public sealed unsafe class MetricsWriter : IDisposable
     /// <param name="collectorVersion">Semver stamped into the header (≤ 16 UTF-8 bytes).</param>
     /// <param name="warn">Optional diagnostics sink; the package itself has no logger.</param>
     public MetricsWriter(string collectorVersion = "", Action<string>? warn = null)
+        : this(collectorVersion, warn, null) { }
+
+    /// <summary>
+    /// Test seam: own a named section other than the real one. <b>Internal on purpose</b> — the
+    /// package's public surface is a published third-party contract (see the project file), so the
+    /// escape hatch stays inside the assembly until there is a reason of its own to expose it.
+    /// <para>
+    /// It exists because constructing a writer is <b>destructive</b>: the next line clears the whole
+    /// section. Without a way to point that somewhere else, any test that news up a
+    /// <c>MetricsWriter</c> silently wipes a running collector's metrics, with no window, no process
+    /// name and nothing to notice. Shadowing <see cref="SharedMemoryLayout"/> does not save you:
+    /// the name is a <c>const</c>, baked into this assembly at compile time, so a consumer
+    /// referencing Halo.Metrics.dll cannot redirect it (measured 2026-09-14).
+    /// </para>
+    /// The frames-ready event follows the section name, so two sections never share a wake handle.
+    /// </summary>
+    internal MetricsWriter(string collectorVersion, Action<string>? warn, string? sectionName)
     {
         _warn = warn;
-        _section = NativeSection.Create(SharedMemoryLayout.SectionName, SharedMemoryLayout.TotalSize);
+        _framesReady = new EventWaitHandle(false, EventResetMode.AutoReset,
+            sectionName == null ? SharedMemoryLayout.FramesReadyEventName : sectionName + ".FramesReady");
+        _section = NativeSection.Create(sectionName ?? SharedMemoryLayout.SectionName, SharedMemoryLayout.TotalSize);
         new Span<byte>(B, SharedMemoryLayout.TotalSize).Clear();
 
         *(uint*)(B + SharedMemoryLayout.OffMagic) = SharedMemoryLayout.Magic;

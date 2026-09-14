@@ -39,9 +39,15 @@ public static class CpuRamPanelImpl
         // temp, centered at abs Y=30, staged warn colors (thresholds from the metric settings)
         p.Elements.Add(new TextEl
         {
-            Text = c => c.TempText(c.Metrics.Value(MetricNames.CpuPackageTempC)),
-            ColorFn = c => WarnColor(c.Metrics.Value(MetricNames.CpuPackageTempC), c.Warn("temp")),
-            VisibleWhen = c => c.Shows("temp") && c.Metrics.TryValue(MetricNames.CpuPackageTempC, out _),
+            Text = c => c.Na(MetricNames.CpuPackageTempC, c.TempText),
+            // An absent reading is muted, not painted with a temperature colour: WarnColor(0) is
+            // devWarn1, the coolest step on the scale, so "N/A" would render tinted as though the
+            // CPU were cold. Matches how the Power panel colours its N/A rows.
+            ColorFn = c => c.Metrics.TryValue(MetricNames.CpuPackageTempC, out double t)
+                ? WarnColor(t, c.Warn("temp")) : "text2",
+            // Gated on registration, not on a readable value: a machine with no package-temp
+            // sensor has no row at all, one whose sensor stopped answering reads N/A in place.
+            VisibleWhen = c => c.Shows("temp") && c.Metrics.Has(MetricNames.CpuPackageTempC),
             Style = TextStyle.Bold8,
             Align = TextAlign.Center,
             AbsY = 30,
@@ -52,7 +58,7 @@ public static class CpuRamPanelImpl
         p.Elements.Add(new TextEl { Text = c => c.Label("usage", "CPU:"), VisibleWhen = c => c.Shows("usage"), Style = TextStyle.Bold8, Align = TextAlign.Left, AbsY = 32, FixedH = 11 });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{ValueFormat.Fixed(c.Metrics.Value(MetricNames.CpuTotalPct), 1)}%",
+            Text = c => c.Na(MetricNames.CpuTotalPct, v => $"{ValueFormat.Fixed(v, 1)}%"),
             VisibleWhen = c => c.Shows("usage"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
@@ -102,12 +108,9 @@ public static class CpuRamPanelImpl
         p.Elements.Add(new TextEl { Text = c => c.Label("ram", "RAM:"), VisibleWhen = c => c.Shows("ram"), Style = TextStyle.Bold8, Align = TextAlign.Left, FixedH = 11, Advance = 2 });
         p.Elements.Add(new TextEl
         {
-            Text = c =>
-            {
-                double used = c.Metrics.Value(MetricNames.RamUsedGb) * 1073741824;
-                double total = c.Metrics.Value(MetricNames.RamTotalGb) * 1073741824;
-                return $"{ValueFormat.AutoScale(used)}B/{ValueFormat.AutoScale(total)}B";
-            },
+            // Both halves or nothing: "12.4 GB/N/A" is not a ratio anyone can read.
+            Text = c => c.Na(MetricNames.RamUsedGb, MetricNames.RamTotalGb,
+                (used, total) => $"{ValueFormat.AutoScale(used * 1073741824)}B/{ValueFormat.AutoScale(total * 1073741824)}B"),
             VisibleWhen = c => c.Shows("ram"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Center,
@@ -116,7 +119,7 @@ public static class CpuRamPanelImpl
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(MetricNames.RamPct))}%",
+            Text = c => c.Na(MetricNames.RamPct, v => $"{ValueFormat.Int0(v)}%"),
             VisibleWhen = c => c.Shows("ram"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
@@ -143,12 +146,14 @@ public static class CpuRamPanelImpl
             HistoryS = ctx.GraphHistoryS,
             Style = ctx.GraphStyle,
         };
+        // NaSample, not Value: an absent reading skips the sample instead of appending a 0, so a
+        // provider blip leaves the line flat rather than drawing a cliff to the floor.
         if (ctx.Graphs("temp"))
-            graph.Series.Add(new GraphSeries { Color = ctx.Color("temp", "cpuTemp"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.CpuPackageTempC) });
+            graph.Series.Add(new GraphSeries { Color = ctx.Color("temp", "cpuTemp"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.NaSample(MetricNames.CpuPackageTempC) });
         if (ctx.Graphs("usage"))
-            graph.Series.Add(new GraphSeries { Color = ctx.Color("usage", "cpuUsage"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.CpuTotalPct) });
+            graph.Series.Add(new GraphSeries { Color = ctx.Color("usage", "cpuUsage"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.NaSample(MetricNames.CpuTotalPct) });
         if (ctx.Graphs("ram"))
-            graph.Series.Add(new GraphSeries { Color = ctx.Color("ram", "ramUsage"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.Metrics.Value(MetricNames.RamPct) });
+            graph.Series.Add(new GraphSeries { Color = ctx.Color("ram", "ramUsage"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.NaSample(MetricNames.RamPct) });
         p.Elements.Add(graph);
 
         return p;
@@ -277,8 +282,8 @@ public static class CpuRamPanelImpl
                 p.Elements.Add(new TextEl
                 {
                     Text = columns == 1
-                        ? c => $"{ValueFormat.Fixed(c.Metrics.Value(MetricNames.CpuCorePct(core)), 1)}%"
-                        : c => $"{ValueFormat.Int0(c.Metrics.Value(MetricNames.CpuCorePct(core)))}%",
+                        ? c => c.Na(MetricNames.CpuCorePct(core), v => $"{ValueFormat.Fixed(v, 1)}%")
+                        : c => c.Na(MetricNames.CpuCorePct(core), v => $"{ValueFormat.Int0(v)}%"),
                     VisibleWhen = c => c.Shows("cores"),
                     Style = TextStyle.Text8,
                     Color = "text2",
