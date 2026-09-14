@@ -117,9 +117,29 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
         }
     }
 
-    /// <summary>Foreground 3D app PID, set by the PresentMon provider's tracking via the sink.
-    /// Until wired, 0 = accept all (single-GPU, one game at a time is the norm).</summary>
-    public void SetTargetPid(int pid) => _targetPid = pid;
+    /// <summary>Foreground 3D app PID, read back each Poll from fps.app.pid (published by
+    /// PresentMonProvider). 0 = accept all — what an unelevated or failed PresentMon provider
+    /// degrades to, and the behaviour this provider had before the filter existed.
+    ///
+    /// Everything keyed on FrameID is dropped on a change: FrameID is monotonic PER PROCESS, so
+    /// the previous game's half-finished frames would collide with the new one's and produce
+    /// latency numbers belonging to neither.</summary>
+    public void SetTargetPid(int pid)
+    {
+        if (pid == _targetPid) return;   // volatile read: the unchanged case never takes the lock
+        lock (_lock)
+        {
+            if (pid == _targetPid) return;
+            _targetPid = pid;
+            _pingConsumeMs.Clear();
+            _queueForFrame.Clear();
+            _renderWin.Clear();
+            _queueWin.Clear();
+            _lastInputPostMs = -1;
+            _simCountWindow = 0;
+            _windowStartMs = -1;   // restart the rendered-rate window with the new game
+        }
+    }
 
     private void OnAnyEvent(TraceEvent data)
     {
@@ -139,6 +159,13 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
 
     private void OnEvent(TraceEvent data)
     {
+        // Scope to the tracked game. Reflex is instrumented per process and FrameID only counts
+        // up within one, so a second Reflex-enabled process (a launcher, a benchmark, a second
+        // game) writes into the same FrameID-keyed maps and the published latency belongs to
+        // neither. 0 keeps the documented accept-all fallback.
+        int target = _targetPid;
+        if (target != 0 && data.ProcessID != target) return;
+
         double ms = data.TimeStampRelativeMSec;
 
         // "PCLStatsInput" fires when the game's ping thread POSTS the synthetic input (the top
@@ -205,6 +232,11 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
     {
         if (_session == null) return;
         if (_etwThread is { IsAlive: false }) throw new InvalidOperationException("pclstats ETW thread died");
+
+        // The two providers run on their own host threads with no reference to each other, so the
+        // target travels through the section the same way latency.pc.ms reads the display segment
+        // back (below). A missing or stale pid widens to accept-all rather than going silent.
+        SetTargetPid(sink.TryGet(MetricNames.FpsAppPid, out double pid, maxAgeS: 3) ? (int)pid : 0);
 
         double render = 0, queue = 0, renderHz = 0;
         bool haveRender, haveQueue, eventsFresh;

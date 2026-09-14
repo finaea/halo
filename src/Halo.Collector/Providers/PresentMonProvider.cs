@@ -36,6 +36,16 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
     /// full window dominates), so that — not the poll rate — is their nominal cadence.</summary>
     private const double LowsRateHz = 2;
 
+    /// <summary>Rolling window behind latency.click.ms / latency.allinput.ms (settled 2026-09-14).
+    /// These two only advance when the user actually clicks, so the old running sum was a session
+    /// average that <c>if (click &gt; 0)</c> restamped fresh every poll — a click from twenty
+    /// minutes ago read as live. 20 s is long enough that sparse clicking still shows a number and
+    /// short enough that the number belongs to what is on screen; menus, cutscenes and long
+    /// stretches of pure movement empty the window and the metric goes N/A, which is honest.
+    /// The per-frame accumulators (sim pacing, P2D) are NOT windowed: they fill their 200-sample
+    /// budget every ~3 s at 60 fps, so they are already a live window in practice.</summary>
+    private const double InputLatencyWindowS = 20;
+
     /// <summary>Owning an ETW session needs admin. Attaching to an already-installed running
     /// PresentMon service works unelevated, which is why this is a flag and not a hard gate.</summary>
     public bool NeedsElevation => true;
@@ -55,8 +65,10 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
     private volatile int _targetPid;
     private string _targetName = "";
     private long _lastTargetFrameQpc;
-    private double _clickSum, _allInputSum;
-    private int _clickCount, _allInputCount;
+    // input-driven latencies: timestamped samples over InputLatencyWindowS, not running sums —
+    // a click is an event, and its latency stops describing the game the moment it ages out
+    private readonly Queue<(long Qpc, double V)> _clickWin = new();
+    private readonly Queue<(long Qpc, double V)> _allInputWin = new();
     private double _simMsSum;                    // app simulation pacing (FG-ratio fallback)
     private int _simCount;
     private double _dispLatSum;                 // present->displayed (P2D)
@@ -102,8 +114,14 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
         sink.Register(MetricNames.FpsFgRatio, MetricType.Double, MetricUnit.None, Name, DefaultRateHz);
         sink.Register(MetricNames.FpsRefreshHz, MetricType.Double, MetricUnit.Hertz, Name, 1);
         sink.Register(MetricNames.FpsAppName, MetricType.String, MetricUnit.Text, Name, 1);
-        sink.Register(MetricNames.LatencyClickMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz);
-        sink.Register(MetricNames.LatencyAllInputMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz);
+        // published every poll (not on the 1 Hz slow timer with the app name): PclStatsProvider
+        // reads it back to scope its Reflex markers, and a stale pid there means accept-all
+        sink.Register(MetricNames.FpsAppPid, MetricType.Double, MetricUnit.None, Name, DefaultRateHz);
+        // the input latencies declare their real window so a reader sees honest semantics
+        sink.Register(MetricNames.LatencyClickMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz,
+            MetricSemantics.RollingWindow, windowMs: (int)(InputLatencyWindowS * 1000));
+        sink.Register(MetricNames.LatencyAllInputMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz,
+            MetricSemantics.RollingWindow, windowMs: (int)(InputLatencyWindowS * 1000));
         // latency.pcl.ms is owned by PclStatsProvider (true marker-based). PresentMon only
         // contributes the present->displayed (P2D) span it uniquely measures.
         sink.Register(MetricNames.FpsDisplayLatencyMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz);
@@ -181,17 +199,17 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
         long now = Stopwatch.GetTimestamp();
 
         FrameStats.Result r;
-        double click = 0, allInput = 0, simMs = 0, dispLat = 0;
+        double click, allInput, simMs = 0, dispLat = 0;
+        bool haveClick, haveAllInput;
+        long inputCutoff = now - (long)(InputLatencyWindowS * Stopwatch.Frequency);
         lock (_statsLock)
         {
             r = Stats.Consume(now);
-            if (_clickCount > 0) { click = _clickSum / _clickCount; }
-            if (_allInputCount > 0) { allInput = _allInputSum / _allInputCount; }
+            click = WinAvg(_clickWin, inputCutoff, out haveClick);
+            allInput = WinAvg(_allInputWin, inputCutoff, out haveAllInput);
             if (_simCount > 0) { simMs = _simMsSum / _simCount; }
             if (_dispLatCount > 0) { dispLat = _dispLatSum / _dispLatCount; }
             // decay accumulators slowly (rolling-ish, non-zero average)
-            if (_clickCount > 200) { _clickSum /= 2; _clickCount /= 2; }
-            if (_allInputCount > 200) { _allInputSum /= 2; _allInputCount /= 2; }
             if (_simCount > 200) { _simMsSum /= 2; _simCount /= 2; }
             if (_dispLatCount > 200) { _dispLatSum /= 2; _dispLatCount /= 2; }
         }
@@ -222,8 +240,12 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
                 ? Math.Clamp(r.FpsDisplayed * simMs / 1000.0, 0.25, 8)
                 : r.FgRatio;
             sink.Set(MetricNames.FpsFgRatio, fgMult);
-            if (click > 0) sink.Set(MetricNames.LatencyClickMs, click);
-            if (allInput > 0) sink.Set(MetricNames.LatencyAllInputMs, allInput);
+            // an empty window means nobody has clicked in InputLatencyWindowS — N/A, not the
+            // last number restamped fresh. Expect these to drop out during menus and cutscenes.
+            if (haveClick) sink.Set(MetricNames.LatencyClickMs, click);
+            else sink.MarkStale(MetricNames.LatencyClickMs);
+            if (haveAllInput) sink.Set(MetricNames.LatencyAllInputMs, allInput);
+            else sink.MarkStale(MetricNames.LatencyAllInputMs);
             if (dispLat > 0) sink.Set(MetricNames.FpsDisplayLatencyMs, dispLat);
         }
         else
@@ -235,6 +257,22 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
             sink.MarkStale(MetricNames.LatencyAllInputMs);
         }
         sink.Set(MetricNames.FpsTapActive, tapActive ? 1 : 0);
+        // deliberately outside the branch, so it survives MarkAllStale("fps.") above: this is the
+        // identity of what is being captured, not a reading off it. 0 = no 3D app, which is what
+        // both consumers want — PCL widens back to accept-all, the frame graphs clear.
+        sink.Set(MetricNames.FpsAppPid, _targetPid);
+    }
+
+    /// <summary>Mean of the samples at or after <paramref name="cutoffQpc"/>; drops the older ones
+    /// off the front. Caller holds _statsLock.</summary>
+    private static double WinAvg(Queue<(long Qpc, double V)> q, long cutoffQpc, out bool any)
+    {
+        while (q.Count > 0 && q.Peek().Qpc < cutoffQpc) q.Dequeue();
+        any = q.Count > 0;
+        if (!any) return 0;
+        double s = 0;
+        foreach (var e in q) s += e.V;
+        return s / q.Count;
     }
 
     /// <summary>Idle-aware fps pipeline: ETW flush cadence and the tap's providers only buy
@@ -286,8 +324,10 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
                 Stats.Add(s.Entry);
                 _pendingRing.Add(s.Entry);
                 if (s.Entry.Qpc > _lastTargetFrameQpc) _lastTargetFrameQpc = s.Entry.Qpc;
-                if (!double.IsNaN(s.ClickMs) && s.ClickMs > 0) { _clickSum += s.ClickMs; _clickCount++; }
-                if (!double.IsNaN(s.AllInputMs) && s.AllInputMs > 0) { _allInputSum += s.AllInputMs; _allInputCount++; }
+                // stamped with the frame's own QPC (the same clock Stopwatch reads), so the
+                // 20 s window ages by when the input actually happened
+                if (!double.IsNaN(s.ClickMs) && s.ClickMs > 0) _clickWin.Enqueue((s.Entry.Qpc, s.ClickMs));
+                if (!double.IsNaN(s.AllInputMs) && s.AllInputMs > 0) _allInputWin.Enqueue((s.Entry.Qpc, s.AllInputMs));
                 if (!double.IsNaN(s.SimMs) && s.SimMs > 0) { _simMsSum += s.SimMs; _simCount++; }
                 if (!double.IsNaN(s.DispLatMs) && s.DispLatMs is > 0 and < 200) { _dispLatSum += s.DispLatMs; _dispLatCount++; }
             }
@@ -313,8 +353,10 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
             {
                 Stats.Clear();
                 _pendingRing.Clear();
-                _clickSum = _allInputSum = _simMsSum = _dispLatSum = 0;
-                _clickCount = _allInputCount = _simCount = _dispLatCount = 0;
+                _clickWin.Clear();
+                _allInputWin.Clear();
+                _simMsSum = _dispLatSum = 0;
+                _simCount = _dispLatCount = 0;
                 _lastTargetFrameQpc = 0;
             }
             _sdk?.OnTargetChanged(_targetPid, pid);

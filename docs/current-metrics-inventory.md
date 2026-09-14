@@ -369,6 +369,24 @@ component (no marker-tagged frame, no PC latency); the other two add on when the
 them, each read back with a 3 s freshness bound so a frozen component cannot keep inflating the sum
 ([PclStatsProvider.cs](../src/Halo.Collector/Providers/PclStatsProvider.cs)).
 
+### Changed since the 2026-09-13 dump
+
+The table above is a transcript of one real run, so it is left as it was measured. Three things in
+the `presentmon` block have moved since (audit-feedback ticket 02, 2026-09-14) and will show
+differently on the next regeneration:
+
+| Metric | Then | Now | Why |
+|---|---|---|---|
+| `fps.app.pid` | did not exist | 1 · — · latest · 40 | PID of the tracked foreground app, 0 when there is none. `pclstats` reads it back to scope its Reflex markers to one process, and the widget's frame graphs use it as their reset key so one game's bars never bleed into the next. |
+| `latency.click.ms` | latest | rolling window (20 s) | Was a session average that got restamped fresh every poll, so a click from twenty minutes ago read as live. Now a real 20 s window, and N/A when it empties. |
+| `latency.allinput.ms` | latest | rolling window (20 s) | Same. |
+
+`fps.presented` and `fps.displayed` did not change semantics, but their **values** did: the rate
+used to be frame count ÷ the span from the oldest to the newest frame in the window, and k frames
+bound only k−1 gaps, so every reading was a flat **+1** (a locked 60 fps published 61 beside a
+FRAMETIME row that said 16.7 ms). The rate now comes from the frametime intervals themselves. The
+1 % / 0.1 % lows are unaffected — they already worked off frametimes.
+
 ---
 
 <a id="source-providers"></a>

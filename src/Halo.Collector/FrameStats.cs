@@ -94,9 +94,8 @@ public sealed class FrameStats(double windowSeconds)
         if (lowsDue) _nextLowsQpc = dataNow + _qpcFreq / 2;
 
         int displayedCount = 0, appCount = 0;
-        int n1 = 0, displayed1 = 0, nShort = 0, dispNShort = 0;
-        double worst1 = 0, ftSum1 = 0, ftSumShort = 0, dispSumShort = 0, dispWorst1 = 0;
-        long oldest1 = dataNow;
+        int n1 = 0, dispN1 = 0, nShort = 0, dispNShort = 0;
+        double worst1 = 0, ftSum1 = 0, ftSumShort = 0, dispSum1 = 0, dispSumShort = 0, dispWorst1 = 0;
         List<float>? presentedFts = lowsDue ? new List<float>(n) : null;
         List<float>? displayedFts = lowsDue ? new List<float>(n) : null;
         foreach (var s in _window)
@@ -111,13 +110,12 @@ public sealed class FrameStats(double windowSeconds)
 
             if (s.Qpc >= headlineCutoff)
             {
-                if (n1 == 0 || s.Qpc < oldest1) oldest1 = s.Qpc;
                 n1++;
                 ftSum1 += s.PresentedFtMs;
                 if (s.PresentedFtMs > worst1) worst1 = s.PresentedFtMs;
                 if (s.Displayed)
                 {
-                    displayed1++;
+                    if (s.DisplayedFtMs > 0) { dispN1++; dispSum1 += s.DisplayedFtMs; }
                     if (s.DisplayedFtMs > dispWorst1) dispWorst1 = s.DisplayedFtMs;
                 }
                 if (s.Qpc >= shortCutoff)
@@ -129,9 +127,14 @@ public sealed class FrameStats(double windowSeconds)
             }
         }
 
-        double span1 = Math.Max(0.1, (double)(dataNow - oldest1) / _qpcFreq);
-        double fpsPresented = n1 > 0 ? n1 / span1 : 0;
-        double fpsDisplayed = n1 > 0 ? displayed1 / span1 : 0;
+        // Rate comes from the intervals already summed, NOT from the span of the window's
+        // frames: k frames bound only k-1 gaps, so count ÷ (newest-oldest) read a flat +1 fps
+        // (60 showed 61) and disagreed with the FRAMETIME row right beside it. Each sample
+        // carries its own present-to-present interval, so k frames really do carry k intervals
+        // and mean-frametime → rate is exact. Under two samples there is no interval at all:
+        // report 0 (N/A) rather than the old Math.Max(0.1, span) floor's hard 10 fps.
+        double fpsPresented = Rate(n1, ftSum1);
+        double fpsDisplayed = Rate(dispN1, dispSum1);
 
         if (lowsDue)
         {
@@ -156,6 +159,11 @@ public sealed class FrameStats(double windowSeconds)
             FgRatio: appCount > 0 ? (double)displayedCount / appCount : 0,
             SampleCount: n);
     }
+
+    /// <summary>Frames per second from <paramref name="count"/> frametime intervals totalling
+    /// <paramref name="sumMs"/>. 0 = not enough data to name a rate (needs two samples).</summary>
+    private static double Rate(int count, double sumMs)
+        => count >= 2 && sumMs > 0 ? count * 1000.0 / sumMs : 0;
 
     /// <summary>x% low FPS = 1000 / mean of the worst x% frametimes (CapFrameX-style).</summary>
     private static double LowFps(List<float> ftMs, double fraction)

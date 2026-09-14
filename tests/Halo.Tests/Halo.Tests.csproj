@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Halo's unit tests. Deliberately NOT in tools\build.ps1's publish list, so nothing here can
+     reach dist\app: that script names the three shipping exes one by one. `dotnet build Halo.sln`
+     and `dotnet test Halo.sln` both pick it up because it is in the solution.
+
+     Scope: the pure, I/O-free parts of Halo that can be exercised without a collector, a section
+     or a GPU. Anything that needs live hardware or the PresentMon ETW session stays a hand check
+     (the collector's pm-smoketest / tap-smoketest switches). -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- Directory.Build.props pins RuntimeIdentifier=win-x64 for the shipping exes; the test
+         host is happy with it and it keeps this project on the same restore graph. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Halo.Collector\Halo.Collector.csproj" />
+    <ProjectReference Include="..\..\src\Halo.Metrics\Halo.Metrics.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

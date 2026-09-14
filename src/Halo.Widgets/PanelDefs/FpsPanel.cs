@@ -170,6 +170,14 @@ public static class FpsPanel
                     ? (f.Flags & (uint)FrameFlags.Provisional) != 0
                     : (f.Flags & (uint)FrameFlags.Provisional) == 0
                 : (c, f) => (f.Flags & (uint)FrameFlags.Provisional) == 0,
+            // What the bars describe: this game, on this lane. A game switch invalidates both
+            // streams (fps.app.pid goes to the new pid, or to 0 for a non-presenting app — which
+            // is why alt-tabbing to a browser clears the graph instead of freezing it). A lane
+            // flip invalidates only the presented one, whose FrameFilter above chooses tap or
+            // resolved frames per frame and would otherwise mix the two in a single ring.
+            ResetKey = presented
+                ? c => AppPid(c) * 2 + (c.Metrics.Value(MetricNames.FpsTapActive) >= 1 ? 1 : 0)
+                : AppPid,
             Series =
             {
                 new GraphSeries
@@ -184,6 +192,15 @@ public static class FpsPanel
 
         return p;
     }
+
+    /// <summary>PID of the app the frame pipeline is tracking; 0 when there is no 3D app. The
+    /// graphs' reset key — it is the one signal that changes on a game switch and is a number,
+    /// not a string read (fps.app.name's staleness is a separate matter).
+    ///
+    /// The rings are the whole of this panel's cross-switch state: every other element (the FPS
+    /// number, the lows, the frametime rows, the usage bar) recomputes from live metrics each
+    /// tick and caches only what it last drew, so there is nothing else here to clear.</summary>
+    private static long AppPid(PanelContext c) => (long)c.Metrics.Value(MetricNames.FpsAppPid);
 
     /// <summary>Idle = no fresh presented-FPS sample (no 3D app rendering). Plan §7.</summary>
     private static bool IsIdle(PanelContext c) => !c.Metrics.TryValue(MetricNames.FpsPresented, out _, maxAgeS: 3);
