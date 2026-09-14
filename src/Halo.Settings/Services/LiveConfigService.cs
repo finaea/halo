@@ -23,6 +23,11 @@ public sealed record ConfigWriteStatus(string Message, bool IsError = false, boo
 /// coalesced for 200 ms, and applied to a fresh disk snapshot before ConfigStore performs its
 /// same-directory temp + move write. A content hash distinguishes our watcher echo from a real
 /// edit made during ConfigStore's time-based suppression window.
+///
+/// Both the snapshot and the write happen inside <see cref="ConfigStore.Transaction"/>, which is
+/// what keeps this honest against the <i>other</i> writer: the widget process saves widgets.json on
+/// drag-end, and a reload taken before its File.Move plus a save taken after it would quietly undo
+/// the move. <see cref="_ioGate"/> only orders this process's own flushes and watcher reads.
 /// </summary>
 public sealed class LiveConfigService : IDisposable
 {
@@ -148,23 +153,37 @@ public sealed class LiveConfigService : IDisposable
         await _ioGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await ValidateCurrentFileAsync(kind).ConfigureAwait(false);
-            _store.Reload();
-
-            if (settingsBatch is not null)
+            string hash = "";
+            // The reload has to be inside the lock, not just the write. Our document comes from
+            // that reload and goes back out through SaveWidgets a few milliseconds later; the
+            // widget process does its own read → mutate → File.Move on drag-end, and whichever of
+            // the two read first silently loses its change. ConfigStore.Transaction takes a named
+            // mutex both processes share, so the two sequences can no longer interleave.
+            //
+            // Re-hashing belongs inside too: a peer write landing between our File.Move and the
+            // hash read would be recorded as our own echo, and the watcher would then ignore the
+            // one change it exists to notice.
+            _store.Transaction(FileName(kind), () =>
             {
-                foreach (Mutation<AppSettings> mutation in settingsBatch.Values.OrderBy(x => x.Generation))
-                    mutation.Apply(_store.Settings);
-                _store.SaveSettings();
-            }
-            else if (widgetsBatch is not null)
-            {
-                foreach (Mutation<WidgetsConfig> mutation in widgetsBatch.Values.OrderBy(x => x.Generation))
-                    mutation.Apply(_store.Widgets);
-                _store.SaveWidgets();
-            }
+                ValidateCurrentFile(kind);
+                _store.Reload();
 
-            string hash = await ReadHashWithRetryAsync(PathFor(kind)).ConfigureAwait(false);
+                if (settingsBatch is not null)
+                {
+                    foreach (Mutation<AppSettings> mutation in settingsBatch.Values.OrderBy(x => x.Generation))
+                        mutation.Apply(_store.Settings);
+                    _store.SaveSettings();
+                }
+                else if (widgetsBatch is not null)
+                {
+                    foreach (Mutation<WidgetsConfig> mutation in widgetsBatch.Values.OrderBy(x => x.Generation))
+                        mutation.Apply(_store.Widgets);
+                    _store.SaveWidgets();
+                }
+
+                hash = ReadHashWithRetry(PathFor(kind));
+            });
+
             lock (_gate)
             {
                 _ownHashes[kind] = hash;
@@ -216,13 +235,26 @@ public sealed class LiveConfigService : IDisposable
         try
         {
             string path = PathFor(kind);
-            string hash = File.Exists(path) ? await ReadHashWithRetryAsync(path).ConfigureAwait(false) : "<missing>";
-            lock (_gate)
+            // Same lock as the write path, for the same reason: the hash, the validation and the
+            // reload are three separate reads of one file, and a widget-process save landing
+            // between them would file someone else's document under this hash.
+            string hash = "";
+            bool echo = false;
+            _store.Transaction(FileName(kind), () =>
             {
-                if ((_ownHashes.TryGetValue(kind, out string? own) && own == hash) ||
-                    (_seenHashes.TryGetValue(kind, out string? seen) && seen == hash))
-                    return;
-            }
+                hash = File.Exists(path) ? ReadHashWithRetry(path) : "<missing>";
+                lock (_gate)
+                {
+                    echo = (_ownHashes.TryGetValue(kind, out string? own) && own == hash) ||
+                           (_seenHashes.TryGetValue(kind, out string? seen) && seen == hash);
+                }
+                if (echo || hash == "<missing>") return;
+
+                ValidateCurrentFile(kind);
+                _store.Reload();
+                lock (_gate) _seenHashes[kind] = hash;
+            });
+            if (echo) return;
 
             if (hash == "<missing>")
             {
@@ -230,10 +262,7 @@ public sealed class LiveConfigService : IDisposable
                 return;
             }
 
-            await ValidateCurrentFileAsync(kind).ConfigureAwait(false);
-            _store.Reload();
             IReadOnlySet<string> dirty = DirtyPaths(kind);
-            lock (_gate) _seenHashes[kind] = hash;
             PublishExternalChange(new(kind, dirty));
             PublishStatus(dirty.Count == 0
                 ? new($"Loaded external changes from {FileName(kind)}")
@@ -249,11 +278,13 @@ public sealed class LiveConfigService : IDisposable
         }
     }
 
-    private async Task ValidateCurrentFileAsync(ConfigFileKind kind)
+    /// <summary>Synchronous on purpose: it runs inside <see cref="ConfigStore.Transaction"/>, and a
+    /// cross-process mutex cannot be handed to whatever thread an await happens to resume on.</summary>
+    private void ValidateCurrentFile(ConfigFileKind kind)
     {
         string path = PathFor(kind);
         if (!File.Exists(path)) return;
-        byte[] bytes = await ReadBytesWithRetryAsync(path).ConfigureAwait(false);
+        byte[] bytes = ReadBytesWithRetry(path);
         try
         {
             object? value = kind == ConfigFileKind.Settings
@@ -279,33 +310,34 @@ public sealed class LiveConfigService : IDisposable
         catch { /* A later watcher event will retry and report a readable error. */ }
     }
 
-    private static async Task<byte[]> ReadBytesWithRetryAsync(string path)
+    private static byte[] ReadBytesWithRetry(string path)
     {
         Exception? last = null;
         for (int attempt = 0; attempt < 4; attempt++)
         {
             try
             {
-                await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
-                    4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
+                    4096, FileOptions.SequentialScan);
                 using var memory = new MemoryStream();
-                await stream.CopyToAsync(memory).ConfigureAwait(false);
+                stream.CopyTo(memory);
                 return memory.ToArray();
             }
             catch (IOException ex)
             {
                 last = ex;
-                await Task.Delay(50).ConfigureAwait(false);
+                Thread.Sleep(50);
             }
         }
         throw last ?? new IOException($"Could not read {path}.");
     }
 
-    private static async Task<string> ReadHashWithRetryAsync(string path)
-        => Convert.ToHexString(SHA256.HashData(await ReadBytesWithRetryAsync(path).ConfigureAwait(false)));
+    private static string ReadHashWithRetry(string path)
+        => Convert.ToHexString(SHA256.HashData(ReadBytesWithRetry(path)));
 
     private string PathFor(ConfigFileKind kind) => Path.Combine(ConfigDir, FileName(kind));
-    private static string FileName(ConfigFileKind kind) => kind == ConfigFileKind.Settings ? "settings.json" : "widgets.json";
+    private static string FileName(ConfigFileKind kind)
+        => kind == ConfigFileKind.Settings ? ConfigStore.SettingsFile : ConfigStore.WidgetsFile;
 
     private static void OnUi(Action action)
     {

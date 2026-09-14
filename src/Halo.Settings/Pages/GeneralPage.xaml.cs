@@ -93,9 +93,15 @@ public partial class GeneralPage : UserControl, ISettingsPage, IDisposable
         AutostartSwitch.IsEnabled = payloadsPresent;
         RepairAutostartButton.IsEnabled = payloadsPresent && !status.Healthy;
         AutostartSwitch.ToolTip = payloadsPresent ? null : AutostartManager.MissingPayloadMessage;
-        RepairAutostartButton.ToolTip = payloadsPresent
-            ? "Recreates both scheduled tasks and asks Windows for administrator permission."
-            : AutostartManager.MissingPayloadMessage;
+        // Same label as the System check page, from the same property: this button sits directly
+        // under the autostart toggle, so leaving it reading "Repair" while the switch reads "off"
+        // is the worst version of the mismatch — the switch says nothing is wrong, the button says
+        // something is.
+        RepairAutostartButton.Content = status.ActionLabel;
+        RepairAutostartButton.ToolTip = !payloadsPresent ? AutostartManager.MissingPayloadMessage
+            : status.Off
+                ? "Registers both scheduled tasks so Halo starts at logon, and asks Windows for administrator permission."
+                : "Recreates both scheduled tasks and asks Windows for administrator permission.";
         if (!payloadsPresent) AutostartStatusText.Text = "Autostart can be changed from an installed or published Halo folder.";
         _autostartBusy = false;
     }

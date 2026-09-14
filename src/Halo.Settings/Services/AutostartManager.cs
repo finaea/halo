@@ -18,9 +18,46 @@ public sealed record AutostartStatus(ScheduledTaskState Collector, ScheduledTask
 {
     public bool Healthy => Collector == ScheduledTaskState.Present && Widgets == ScheduledTaskState.Present && !HkcuRun;
     public bool Enabled => Collector == ScheduledTaskState.Present && Widgets == ScheduledTaskState.Present;
+
+    /// <summary>
+    /// Autostart is off and nothing is left behind: no tasks, no legacy Run value.
+    /// <para>
+    /// A supported configuration, not a fault. Halo is started by the user from its shortcut,
+    /// which elevates the collector through UAC (audit finding 10). "No tasks" used to mean a Halo
+    /// that could not start itself, and warning about it was fair; it is now the state every user
+    /// who declined "Start with Windows" is in, and telling them their own choice needs attention
+    /// is simply wrong.
+    /// </para>
+    /// </summary>
+    public bool Off => Collector == ScheduledTaskState.Missing
+                    && Widgets == ScheduledTaskState.Missing
+                    && !HkcuRun;
+
+    /// <summary>
+    /// Genuinely wrong, as opposed to on (<see cref="Healthy"/>) or deliberately off
+    /// (<see cref="Off"/>): half-registered, pointing at a different Halo, or a legacy HKCU Run
+    /// value left behind. That last one includes the case worth naming — nothing registered and
+    /// yet something still starts Halo at logon, which reads as "off" to the user and is not.
+    /// </summary>
+    public bool NeedsAttention => !Healthy && !Off;
+
     public string Summary => Healthy
         ? "Collector and Widgets tasks are healthy"
-        : $"Collector: {Label(Collector)} · Widgets: {Label(Widgets)}{(HkcuRun ? " · legacy startup entry found" : "")}";
+        : Off
+            ? "Autostart is off — Halo starts when you run it from its shortcut"
+            : $"Collector: {Label(Collector)} · Widgets: {Label(Widgets)}{(HkcuRun ? " · legacy startup entry found" : "")}";
+
+    /// <summary>
+    /// Label for the button that puts autostart right — shared by the System check page and the
+    /// General page so a toggle reading "off" can never sit next to a button reading "repair".
+    /// <para>
+    /// The button is still offered from <see cref="Off"/> on purpose: an install whose
+    /// <c>--register-autostart</c> failed lands in exactly that state, the installer tells the user
+    /// to come here and fix it, and nothing distinguishes that from a deliberate decline without
+    /// recording installer intent. So the affordance stays and only the verb changes.
+    /// </para>
+    /// </summary>
+    public string ActionLabel => Off ? "Turn on autostart…  ⛨" : "Repair autostart…  ⛨";
 
     private static string Label(ScheduledTaskState state) => state switch
     {
@@ -187,6 +224,12 @@ public static class AutostartManager
         definition.Settings.RestartCount = 3;
         definition.Settings.RestartInterval = "PT1M";
         definition.Settings.Priority = 5;
+        // MultipleInstances is deliberately left at Task Scheduler's default, IGNORE_NEW: two
+        // collectors fight over the same Local\Halo.Metrics.v2 section and the PresentMon ETW
+        // session, so a second instance must never start. RestartCount covers a task that EXITS;
+        // a collector wedged in native sensor or ETW code still counts as running, so
+        // "schtasks /Run" against it is silently a no-op — the widgets' watchdog ends the task
+        // first when the collector's pid is still alive (Halo.Widgets App.Watchdog).
 
         dynamic trigger = definition.Triggers.Create(TaskTriggerLogon);
         trigger.UserId = user;

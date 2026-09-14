@@ -326,11 +326,34 @@ public static class ConfigMigrator
         return map;
     }
 
+    private static int _tempSequence;
+
+    /// <summary>
+    /// Same atomic write as <see cref="ConfigStore"/>, and the temp name has to be unique for the
+    /// same reason (audit finding 6b — this was the second place with the defect). Migration runs
+    /// from the <see cref="ConfigStore"/> constructor, which <b>all three processes</b> call, and
+    /// at logon the collector and widgets tasks start together: a shared <c>&lt;file&gt;.tmp</c>
+    /// opened <see cref="FileShare.None"/> handed one of them an IOException, and the constructor
+    /// logs that as "config migration failed — loading defaults".
+    /// <para>
+    /// The <c>mig</c> marker keeps these distinct from ConfigStore's own temps whatever the call
+    /// order, rather than relying on migration never overlapping a save. The <c>.tmp</c> suffix
+    /// stays because both config watchers glob <c>*.json</c>.
+    /// </para>
+    /// </summary>
     private static void WriteJson<T>(string path, T value, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> ti)
     {
-        string tmp = path + ".tmp";
-        using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
-            JsonSerializer.Serialize(fs, value, ti);
-        File.Move(tmp, path, overwrite: true);
+        string tmp = $"{path}.mig{Environment.ProcessId:x}-{Interlocked.Increment(ref _tempSequence):x}.tmp";
+        try
+        {
+            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+                JsonSerializer.Serialize(fs, value, ti);
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(tmp); } catch { /* best effort */ }
+            throw;
+        }
     }
 }

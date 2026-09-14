@@ -42,9 +42,15 @@ public sealed unsafe class App : IDisposable
     private nint _framesReadyEvent;          // collector's frames-ready signal (0 until opened)
     private long _nextFrameEventOpenQpc;
     private long _nextFrameWakeQpc;          // coalesce event-driven repaints to ~refresh rate
+    private readonly bool _startCollector;   // --start-collector (the shortcut)
+    private long _collectorLaunchDueQpc;     // 0 = nothing pending
+    private bool _collectorLaunchHandled;    // first run already did it, before the layout
 
-    public App()
+    /// <param name="startCollector">The "Halo" shortcut's <c>--start-collector</c>: once the
+    /// overlay is up, make sure there is an elevated collector behind it.</param>
+    public App(bool startCollector = false)
     {
+        _startCollector = startCollector;
         bool freshInstall = !File.Exists(Path.Combine(Paths.ConfigDir, "widgets.json"));
         ConfigStore = new ConfigStore(Paths.ConfigDir);
         _dx = new Dx(Paths.FontsDir);
@@ -52,7 +58,16 @@ public sealed unsafe class App : IDisposable
         DesktopHost = FindDesktopHost();
         Log.Info($"desktop host: 0x{DesktopHost:X}");
 
-        if (freshInstall && ConfigStore.Widgets.Widgets.Count == 0) GenerateFirstRunLayout();
+        if (freshInstall && ConfigStore.Widgets.Widgets.Count == 0)
+        {
+            // First run is the one case where the prompt has to come BEFORE the overlay: the layout
+            // about to be generated is built from the hardware the collector has discovered, and
+            // there is no overlay to paint yet. Prompting after would bake in the minimal offline
+            // layout — every user who installs without "Start with Windows" would get it — and
+            // nothing regenerates a layout once widgets.json exists.
+            if (_startCollector) { CollectorLauncher.EnsureRunning(); _collectorLaunchHandled = true; }
+            GenerateFirstRunLayout();
+        }
         if (ArrangeRequested) Log.Info("config asks for an arrange pass — widgets will be packed onto the primary monitor");
 
         ConfigStore.Changed += () => _configDirty = true;
@@ -67,6 +82,11 @@ public sealed unsafe class App : IDisposable
         Metrics.Tick();
         _wasAttached = Metrics.Attached;
         BuildWindows();
+        // Give the overlay a beat to paint before a UAC dialog dims the desktop — and give a
+        // collector that the autostart task or the installer started moments ago the same beat to
+        // publish its section, so the shortcut does not prompt over one that is already coming up.
+        if (_startCollector && !_collectorLaunchHandled)
+            _collectorLaunchDueQpc = Stopwatch.GetTimestamp() + 2 * Stopwatch.Frequency;
         _ = timeBeginPeriod(1);
         try { Loop(); }
         finally { _ = timeEndPeriod(1); }
@@ -209,6 +229,10 @@ public sealed unsafe class App : IDisposable
                 if (_placementDirty) RefreshPlacement(); else RunPacker();
                 RateBoundGuard();
             }
+
+            // outside the anyDue gate: a layout with no windows never has a due tick, and the
+            // shortcut still has to produce a collector
+            if (_collectorLaunchDueQpc != 0) StartCollectorWhenDue();
 
             // sleep until next due tick, next message, or the collector's frames-ready event
             long soonest = long.MaxValue;
@@ -496,11 +520,33 @@ public sealed unsafe class App : IDisposable
         foreach (var w in _windows) w.ApplyRateBound(MaxRateFor(w.Config));
     }
 
-    private bool? _collectorTaskExists;
+    /// <summary>
+    /// <c>--start-collector</c>: the shortcut launches the pair, and the collector is the half that
+    /// needs administrator rights. Fires once — either the moment a live collector is seen (nothing
+    /// to do) or when the grace window set in <see cref="Run"/> runs out.
+    /// </summary>
+    private void StartCollectorWhenDue()
+    {
+        bool live = CollectorLauncher.IsRunning(Metrics.Attached, Metrics.CollectorPid);
+        if (!live && Stopwatch.GetTimestamp() < _collectorLaunchDueQpc) return;
+        _collectorLaunchDueQpc = 0;
+        CollectorLauncher.EnsureRunning(Metrics.Attached, Metrics.CollectorPid);
+    }
 
-    /// <summary>Collector watchdog: stale > 5 s → try to (re)start via the scheduled task
-    /// (backoff 1/5/30 s per plan §11). If the task isn't installed, widgets just show
-    /// their stale badges — no point spawning schtasks forever.</summary>
+    private bool? _collectorTaskExists;
+    private DateTime _nextTaskProbe = DateTime.MinValue;
+    private bool _noTaskLogged;
+
+    /// <summary>
+    /// Collector watchdog: stale > 5 s → try to (re)start via the scheduled task (backoff 1/5/30 s
+    /// per plan §11).
+    /// <para>
+    /// No task is a perfectly normal state now that Halo is started from a shortcut — every user
+    /// who declined "Start with Windows" is in it — so it stays exactly what it was: stale badges
+    /// and one log line. Putting a UAC dialog on an idle desktop because a background heartbeat
+    /// lapsed would be worse than the badge (settled with Jack, 2026-09-14).
+    /// </para>
+    /// </summary>
     private void Watchdog()
     {
         if (!Metrics.Stale)
@@ -514,19 +560,42 @@ public sealed unsafe class App : IDisposable
         _watchdogFailures++;
         try
         {
-            if (_collectorTaskExists == null)
+            // "No task" is not a permanent answer: autostart can be turned on at any time from
+            // Settings > System check, and a widget process that started first used to cache the
+            // miss for its whole life and never notice.
+            if (_collectorTaskExists != true && DateTime.UtcNow >= _nextTaskProbe)
             {
+                _nextTaskProbe = DateTime.UtcNow.AddSeconds(60);
                 using var q = Process.Start(new ProcessStartInfo("schtasks", "/Query /TN \"\\Halo\\Collector\"")
                 { CreateNoWindow = true, UseShellExecute = false });
                 q!.WaitForExit(3000);
                 _collectorTaskExists = q.ExitCode == 0;
-                if (_collectorTaskExists == false)
-                    Log.Warn("watchdog: \\Halo\\Collector task not installed — run tools\\install-halo.ps1; widgets will show stale badges");
+                if (_collectorTaskExists == false && !_noTaskLogged)
+                {
+                    _noTaskLogged = true;
+                    Log.Warn("watchdog: no \\Halo\\Collector task — start Halo from its shortcut, or turn on "
+                        + "\"Start with Windows\" in Halo Settings > System check; until then the panels show stale badges");
+                }
             }
             if (_collectorTaskExists == true)
             {
-                Process.Start(new ProcessStartInfo("schtasks", "/Run /TN \"\\Halo\\Collector\"")
-                { CreateNoWindow = true, UseShellExecute = false });
+                // The task is registered with Task Scheduler's default MultipleInstances
+                // (IGNORE_NEW), which is right — two collectors fight over the same shared-memory
+                // section and the PresentMon ETW session. The cost is that /Run against a collector
+                // WEDGED in native sensor or ETW code is silently a no-op: the hung instance still
+                // counts as running. So end it first, but only when its process is actually there;
+                // a collector that simply exited leaves nothing to end. No wait afterwards — if
+                // /Run still lands on a dying instance, the next pass sees the pid gone and the
+                // plain /Run works.
+                if (CollectorLauncher.IsRunning(Metrics.Attached, Metrics.CollectorPid))
+                {
+                    Log.Warn($"watchdog: collector pid {Metrics.CollectorPid} is alive but silent for "
+                        + $"{Metrics.HeartbeatAge:0.0}s — ending the task before restarting it");
+                    int end = Schtasks("/End /TN \"\\Halo\\Collector\"", waitMs: 5000);
+                    if (end != 0)
+                        Log.Warn($"watchdog: schtasks /End returned {end} — the hung collector may outlive the restart request");
+                }
+                Schtasks("/Run /TN \"\\Halo\\Collector\"");
                 Log.Info("watchdog: requested collector start via scheduled task");
             }
         }
@@ -534,6 +603,15 @@ public sealed unsafe class App : IDisposable
         {
             Log.Warn($"watchdog: {ex.Message}");
         }
+    }
+
+    /// <summary>Exit code, or -1 when we did not wait for one / could not start schtasks.</summary>
+    private static int Schtasks(string arguments, int waitMs = 0)
+    {
+        using var p = Process.Start(new ProcessStartInfo("schtasks", arguments)
+        { CreateNoWindow = true, UseShellExecute = false });
+        if (p == null || waitMs <= 0) return -1;
+        return p.WaitForExit(waitMs) ? p.ExitCode : -1;
     }
 
     // ---- monitors & snapping ----
@@ -694,6 +772,13 @@ public sealed unsafe class App : IDisposable
         {
             if (!ConfigStore.UpdateWidget(id, mutate))
                 Log.Warn($"widget {id} is no longer in widgets.json — change not saved");
+        }
+        catch (InvalidDataException ex)
+        {
+            // Someone is hand-editing widgets.json and it does not parse yet. Writing our own copy
+            // over it would throw that edit away, so the move is dropped instead: the widget stays
+            // where it was dragged, and the next save after the file parses again will stick.
+            Log.Warn($"widget {id}: {ex.Message} — change not saved");
         }
         catch (Exception ex) { Log.Error($"saving widget {id}", ex); }
     }

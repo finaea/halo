@@ -65,7 +65,7 @@
             <WrapPanel>
               <Button Content="{Binding PawnIoButtonText}" IsEnabled="{Binding CanInstallPawnIo}"
                       ToolTip="{Binding PawnIoButtonToolTip}" Padding="12,6" Margin="0,0,8,8" Click="InstallPawnIo_Click" />
-              <Button Content="Repair autostart…  ⛨" IsEnabled="{Binding CanRepairAutostart}"
+              <Button Content="{Binding AutostartButtonText}" IsEnabled="{Binding CanRepairAutostart}"
                       ToolTip="{Binding AutostartButtonToolTip}" Padding="12,6" Margin="0,0,8,8" Click="RepairAutostart_Click" />
               <Button Content="Rescan hardware" IsEnabled="{Binding CanRescan}"
                       ToolTip="Re-enumerates GPUs, fans and volumes. Available once every 10 seconds."

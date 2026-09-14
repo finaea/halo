@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace Halo.Shared.Config;
@@ -13,6 +15,9 @@ namespace Halo.Shared.Config;
 /// </summary>
 public sealed class ConfigStore : IDisposable
 {
+    public const string SettingsFile = "settings.json";
+    public const string WidgetsFile = "widgets.json";
+
     public string ConfigDir { get; }
     public AppSettings Settings { get; private set; } = new();
     public WidgetsConfig Widgets { get; private set; } = new();
@@ -27,6 +32,7 @@ public sealed class ConfigStore : IDisposable
     public ConfigStore(string configDir, bool watch = true)
     {
         ConfigDir = configDir;
+        _lockKey = LockKey(configDir);
         try
         {
             Directory.CreateDirectory(configDir);
@@ -80,31 +86,174 @@ public sealed class ConfigStore : IDisposable
 
     public void Reload()
     {
-        Settings = Load("settings.json", ConfigJsonContext.Default.AppSettings) ?? new AppSettings();
-        Widgets = Load("widgets.json", ConfigJsonContext.Default.WidgetsConfig) ?? new WidgetsConfig();
+        Settings = ReloadOne(SettingsFile, ConfigJsonContext.Default.AppSettings, Settings);
+        Widgets = ReloadOne(WidgetsFile, ConfigJsonContext.Default.WidgetsConfig, Widgets);
     }
 
-    private T? Load<T>(string file, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> ti) where T : class
+    /// <summary>
+    /// The document to publish for <paramref name="file"/>. A <b>missing</b> file is first run —
+    /// defaults are the right answer. A file that is <b>present but unreadable</b> is not: a
+    /// widgets.json a user left half-edited — an unclosed brace, a string where a number goes —
+    /// used to load as an empty document, and <c>ApplyConfigChange</c> then closed every widget
+    /// window because none of them were in the (now empty) wanted list. Keep the last-known-good
+    /// document instead, and let the log say why. (Trailing commas and // comments are fine: the
+    /// serializer is configured to tolerate both so the files stay hand-editable — see
+    /// ConfigJsonContext in Models.cs.)
+    /// </summary>
+    private T ReloadOne<T>(string file, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> ti, T current)
+        where T : class, new()
+        => Load(file, ti, out T? loaded) switch
+        {
+            LoadOutcome.Loaded => loaded!,
+            LoadOutcome.Missing => new T(),
+            _ => current,
+        };
+
+    private enum LoadOutcome
     {
+        Loaded,
+        /// <summary>No such file — first run, or the user deleted it.</summary>
+        Missing,
+        /// <summary>The file is there and we could not turn it into a document.</summary>
+        Unreadable,
+    }
+
+    private LoadOutcome Load<T>(string file, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> ti, out T? value)
+        where T : class
+    {
+        value = null;
         string path = Path.Combine(ConfigDir, file);
+        Exception? last = null;
         for (int attempt = 0; attempt < 3; attempt++)
         {
             try
             {
-                if (!File.Exists(path)) return null;
+                if (!File.Exists(path)) { NoteReadable(file); return LoadOutcome.Missing; }
                 using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                return JsonSerializer.Deserialize(fs, ti);
+                value = JsonSerializer.Deserialize(fs, ti);
+                if (value == null) return NoteUnreadable(file, "the file holds a bare JSON null");
+                NoteReadable(file);
+                return LoadOutcome.Loaded;
             }
-            catch (IOException) { Thread.Sleep(50); }
-            catch (JsonException) { return null; } // mid-write torn read; keep old config
+            catch (IOException ex) { last = ex; Thread.Sleep(50); }
+            catch (JsonException ex) { return NoteUnreadable(file, ex.Message); }
         }
-        return null;
+        // Held open by something else for 150 ms: present, just not readable right now. Treating
+        // that as "missing" is what turned a locked file into a fresh default document.
+        return NoteUnreadable(file, last?.Message ?? "could not be opened");
     }
 
-    public void SaveSettings() => Save("settings.json", Settings, ConfigJsonContext.Default.AppSettings);
-    public void SaveWidgets() => Save("widgets.json", Widgets, ConfigJsonContext.Default.WidgetsConfig);
+    // Logged on the way into the bad state and on the way out, not on every poll: the debounce
+    // timer re-reads on every watcher event and an unreadable file usually stays unreadable.
+    private readonly HashSet<string> _unreadable = new(StringComparer.OrdinalIgnoreCase);
+
+    private LoadOutcome NoteUnreadable(string file, string reason)
+    {
+        bool first;
+        lock (_unreadable) first = _unreadable.Add(file);
+        if (first)
+            Log.Warn($"config: {file} is present but unreadable ({reason}) — keeping the last "
+                + "known-good copy; Halo will not overwrite it until it parses again");
+        return LoadOutcome.Unreadable;
+    }
+
+    private void NoteReadable(string file)
+    {
+        bool wasBad;
+        lock (_unreadable) wasBad = _unreadable.Remove(file);
+        if (wasBad) Log.Info($"config: {file} parses again — reloaded");
+    }
+
+    private string UnreadableMessage(string file)
+        => $"{Path.Combine(ConfigDir, file)} is not valid JSON — fix or delete it and Halo will pick it up";
+
+    public void SaveSettings()
+        => Transaction(SettingsFile, () => Save(SettingsFile, Settings, ConfigJsonContext.Default.AppSettings));
+
+    public void SaveWidgets()
+        => Transaction(WidgetsFile, () => Save(WidgetsFile, Widgets, ConfigJsonContext.Default.WidgetsConfig));
 
     private readonly Lock _writeLock = new();
+    private readonly string _lockKey;
+    private readonly Dictionary<string, Mutex?> _fileMutexes = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>How long to wait for the other process before writing anyway. Every holder does a
+    /// re-read plus one <c>File.Move</c>, so anything near this means the peer is wedged — and a
+    /// frozen widget loop is worse than the lost update the lock exists to prevent.</summary>
+    private const int CrossProcessWaitMs = 5000;
+
+    /// <summary>
+    /// Runs <paramref name="body"/> holding this instance's write lock <b>and</b> a machine-wide
+    /// mutex for <paramref name="file"/>.
+    /// <para>
+    /// <see cref="_writeLock"/> alone only serialises writers inside one process, and there are
+    /// two: the widget process patches widgets.json on drag-end, the Settings app rewrites it on a
+    /// 200 ms debounce while the user drags a slider. Both do read → mutate → <c>File.Move</c>, and
+    /// interleaving those two sequences loses whichever change was read first — the merge API
+    /// stopped the whole-document clobber, not the race. So the lock has to span the whole
+    /// transaction, including the caller's re-read, in <b>both</b> processes.
+    /// </para>
+    /// Callers that own their own read (the Settings app reloads into the objects its UI is bound
+    /// to) call this directly; <see cref="UpdateWidget"/> and friends use it internally.
+    /// </summary>
+    public void Transaction(string file, Action body)
+    {
+        lock (_writeLock)
+        {
+            Mutex? mutex = FileMutex(file);
+            bool held = false;
+            try
+            {
+                try { held = mutex != null && mutex.WaitOne(CrossProcessWaitMs); }
+                // The peer died holding it. WaitOne still hands us ownership, so carry on — the
+                // file itself is fine either way, File.Move is atomic.
+                catch (AbandonedMutexException) { held = true; }
+                if (!held && mutex != null)
+                    Log.Warn($"config: waited {CrossProcessWaitMs} ms for the {file} write lock and gave up — "
+                        + "writing anyway; another Halo process looks wedged mid-save");
+                body();
+            }
+            finally
+            {
+                if (held) try { mutex!.ReleaseMutex(); } catch (ApplicationException) { /* not ours any more */ }
+            }
+        }
+    }
+
+    /// <summary>The named mutex for one config file, or null when this machine will not give us
+    /// one — in which case the in-process lock is all there is, which is exactly where we were
+    /// before. A config write must never fail because a kernel object could not be opened.</summary>
+    private Mutex? FileMutex(string file)
+    {
+        lock (_fileMutexes)
+        {
+            if (_fileMutexes.TryGetValue(file, out Mutex? existing)) return existing;
+            try
+            {
+                // Session-local, like every other Halo name: the elevated collector, the widgets
+                // and Settings all run as the interactive user in one session. Keyed by config
+                // folder so a portable copy and an installed one never block each other.
+                var created = new Mutex(false, $"Local\\Halo.Config.{_lockKey}.{file}");
+                _fileMutexes[file] = created;
+                return created;
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"config: no cross-process write lock for {file} ({ex.Message}) — "
+                    + "concurrent edits from two Halo processes can lose each other");
+                _fileMutexes[file] = null;
+                return null;
+            }
+        }
+    }
+
+    private static string LockKey(string configDir)
+    {
+        string canonical;
+        try { canonical = Path.TrimEndingDirectorySeparator(Path.GetFullPath(configDir)).ToLowerInvariant(); }
+        catch { canonical = configDir.ToLowerInvariant(); }
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))[..16];
+    }
 
     /// <summary>
     /// Change one widget's fields on disk without clobbering anyone else's.
@@ -113,32 +262,41 @@ public sealed class ConfigStore : IDisposable
     /// while a user edits, the widget process on drag-end and on a context-menu toggle. A
     /// whole-file <see cref="SaveWidgets"/> from a stale in-memory copy would silently revert
     /// whatever the other process wrote since the last reload. This re-reads the file, applies
-    /// <paramref name="mutate"/> to that fresh copy, and writes it back atomically — so only the
-    /// fields the caller touches move.
+    /// <paramref name="mutate"/> to that fresh copy, and writes it back atomically — all inside
+    /// <see cref="Transaction"/>, so the other process cannot slip a write between the two halves.
     /// </para>
     /// The caller's own in-memory <see cref="WidgetInstance"/> is NOT replaced: live widget
     /// windows hold references to it, and swapping the object under them is exactly the orphaned
     /// -config bug the hot-reload path is careful to avoid. Apply the same change there first.
     /// </summary>
     /// <returns>False when the id is not in the file (removed by the other writer).</returns>
+    /// <exception cref="InvalidDataException">The file exists but is not valid JSON. Overwriting
+    /// it would throw away whatever the user was hand-editing, so the change is refused instead.</exception>
     public bool UpdateWidget(string id, Action<WidgetInstance> mutate)
     {
-        lock (_writeLock)
+        bool written = false;
+        Transaction(WidgetsFile, () =>
         {
-            var fresh = Load("widgets.json", ConfigJsonContext.Default.WidgetsConfig);
-            if (fresh == null)
+            switch (Load(WidgetsFile, ConfigJsonContext.Default.WidgetsConfig, out WidgetsConfig? fresh))
             {
-                // No file yet (first run, or it was deleted): our in-memory copy is all there is.
-                mutate(Widgets.Widgets.FirstOrDefault(w => w.Id == id) ?? new WidgetInstance());
-                SaveWidgets();
-                return true;
+                case LoadOutcome.Missing:
+                    // No file yet (first run, or it was deleted): our in-memory copy is all there is.
+                    mutate(Widgets.Widgets.FirstOrDefault(w => w.Id == id) ?? new WidgetInstance());
+                    Save(WidgetsFile, Widgets, ConfigJsonContext.Default.WidgetsConfig);
+                    written = true;
+                    return;
+                case LoadOutcome.Unreadable:
+                    throw new InvalidDataException(UnreadableMessage(WidgetsFile));
+                default:
+                    var target = fresh!.Widgets.FirstOrDefault(w => w.Id == id);
+                    if (target == null) return;
+                    mutate(target);
+                    Save(WidgetsFile, fresh, ConfigJsonContext.Default.WidgetsConfig);
+                    written = true;
+                    return;
             }
-            var target = fresh.Widgets.FirstOrDefault(w => w.Id == id);
-            if (target == null) return false;
-            mutate(target);
-            Save("widgets.json", fresh, ConfigJsonContext.Default.WidgetsConfig);
-            return true;
-        }
+        });
+        return written;
     }
 
     /// <summary>
@@ -148,42 +306,65 @@ public sealed class ConfigStore : IDisposable
     /// not touch survives.
     /// </summary>
     public void UpdateWidgets(Action<WidgetsConfig> mutate)
-    {
-        lock (_writeLock)
-        {
-            var fresh = Load("widgets.json", ConfigJsonContext.Default.WidgetsConfig);
-            if (fresh == null) { mutate(Widgets); SaveWidgets(); return; }
-            mutate(fresh);
-            Save("widgets.json", fresh, ConfigJsonContext.Default.WidgetsConfig);
-        }
-    }
+        => Update(WidgetsFile, ConfigJsonContext.Default.WidgetsConfig, () => Widgets, mutate);
 
     /// <summary>Same merge rule as <see cref="UpdateWidget"/> for settings.json — the widget
     /// process owns only <c>lockAll</c> there, Settings owns everything else.</summary>
     public void UpdateSettings(Action<AppSettings> mutate)
-    {
-        lock (_writeLock)
+        => Update(SettingsFile, ConfigJsonContext.Default.AppSettings, () => Settings, mutate);
+
+    private void Update<T>(string file, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> ti,
+        Func<T> inMemory, Action<T> mutate) where T : class
+        => Transaction(file, () =>
         {
-            var fresh = Load("settings.json", ConfigJsonContext.Default.AppSettings);
-            if (fresh == null) { mutate(Settings); SaveSettings(); return; }
-            mutate(fresh);
-            Save("settings.json", fresh, ConfigJsonContext.Default.AppSettings);
-        }
-    }
+            switch (Load(file, ti, out T? fresh))
+            {
+                case LoadOutcome.Missing:
+                    T mine = inMemory();
+                    mutate(mine);
+                    Save(file, mine, ti);
+                    return;
+                case LoadOutcome.Unreadable:
+                    throw new InvalidDataException(UnreadableMessage(file));
+                default:
+                    mutate(fresh!);
+                    Save(file, fresh!, ti);
+                    return;
+            }
+        });
+
+    private static int _tempSequence;
 
     private void Save<T>(string file, T value, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> ti)
     {
         Interlocked.Exchange(ref _suppressUntilTicks, DateTime.UtcNow.AddMilliseconds(800).Ticks);
         string path = Path.Combine(ConfigDir, file);
-        string tmp = path + ".tmp";
-        using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
-            JsonSerializer.Serialize(fs, value, ti);
-        File.Move(tmp, path, overwrite: true);
+        // Unique per process and per write. Both processes used to write "<file>.tmp" with
+        // FileShare.None, so two overlapping saves handed one of them an IOException — and the
+        // only thing either caller can do with that is drop the change, which the user reads as
+        // "Halo forgot where I put that widget". The .tmp suffix stays: the watchers glob *.json.
+        string tmp = $"{path}.{Environment.ProcessId:x}-{Interlocked.Increment(ref _tempSequence):x}.tmp";
+        try
+        {
+            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+                JsonSerializer.Serialize(fs, value, ti);
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(tmp); } catch { /* best effort */ }
+            throw;
+        }
     }
 
     public void Dispose()
     {
         _watcher?.Dispose();
         _debounce.Dispose();
+        lock (_fileMutexes)
+        {
+            foreach (Mutex? m in _fileMutexes.Values) m?.Dispose();
+            _fileMutexes.Clear();
+        }
     }
 }
