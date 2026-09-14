@@ -153,6 +153,10 @@ host.Add(new PclStatsProvider(
 
 writer.MarkReady();
 
+// Declared before the command server so "quit" can set it. Disposal runs in reverse, so the
+// server stops listening before the event it signals goes away.
+using var stop = new ManualResetEventSlim(false);
+
 using var commands = new CommandServer(cmd =>
 {
     var parts = cmd.Split(' ', 2, StringSplitOptions.TrimEntries);
@@ -171,6 +175,7 @@ using var commands = new CommandServer(cmd =>
                 : $"rescan requested: re-enumerating {rescanned} provider(s)");
             break;
         case ControlPipe.Ping: break;
+        case ControlPipe.Quit: Log.Info("quit requested via control pipe"); stop.Set(); break;
         default: Log.Warn($"unknown command: {cmd}"); break;
     }
 });
@@ -184,7 +189,6 @@ configStore.Changed += () =>
 };
 
 Log.Info("collector running");
-using var stop = new ManualResetEventSlim(false);
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; stop.Set(); };
 AppDomain.CurrentDomain.ProcessExit += (_, _) => stop.Set();
 

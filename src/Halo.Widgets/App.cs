@@ -997,8 +997,21 @@ public sealed unsafe class App : IDisposable
         foreach (var w in _windows) w.ForceRedraw();
     }
 
+    /// <summary>
+    /// "Exit Halo" means Halo, not just the overlay. The collector is a separate elevated process
+    /// with no window and no tray of its own, so leaving it behind gives the user no way to stop it
+    /// short of Task Manager — and killing it there skips <c>ProviderHost.Dispose</c>, which can
+    /// strand the PresentMon ETW session and cost the next collector its frame data.
+    /// <para>
+    /// Fire and forget: the control pipe is one-way, so there is no ack to wait for, and a collector
+    /// that is already gone just returns false. On an autostart machine the scheduled task brings it
+    /// back at the next logon, which is what "start with Windows" means.
+    /// </para>
+    /// </summary>
     public void Quit()
     {
+        if (Halo.Metrics.ControlPipe.Send(Halo.Metrics.ControlPipe.Quit))
+            Log.Info("quit: asked the collector to shut down");
         _quit = true;
         PostQuitMessage(0);
     }

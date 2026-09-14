@@ -23,6 +23,14 @@ public static class ControlPipe
     public const string ReloadConfig = "reload-config";
     /// <summary>"ping" — no-op liveness check.</summary>
     public const string Ping = "ping";
+    /// <summary>
+    /// "quit" — shut the collector down cleanly. The only way to stop it that runs
+    /// <c>ProviderHost.Dispose</c>: killing the process instead leaves providers undisposed, and a
+    /// dangling PresentMon ETW session then denies the next collector its frame data. Started from
+    /// the Halo shortcut there is no scheduled task to stop and no window to close, so without this
+    /// the only route is Task Manager.
+    /// </summary>
+    public const string Quit = "quit";
 
     public static bool Send(string command, int timeoutMs = 500)
     {

@@ -232,8 +232,14 @@ Plus one for liveness: the collector is gone if `heartbeatQpc` has not moved for
 | `rescan` | re-enumerate hardware (GPUs, fans, volumes); repeats inside 10 s are ignored |
 | `reload-config` | re-read the config files now instead of waiting for the file watcher |
 | `ping` | no-op liveness check |
+| `quit` | shut the collector down cleanly |
 
 Unknown lines are logged and ignored, so adding commands is backwards-compatible.
+
+`quit` is the only way to stop the collector that runs its shutdown path. Terminating the process
+instead leaves providers undisposed, and a stranded PresentMon ETW session denies the next collector
+its frame data. The Halo tray sends it on exit; a third-party tool that starts a collector should do
+the same.
 
 ## Diagnostics
 
