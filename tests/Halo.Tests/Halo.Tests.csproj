@@ -13,6 +13,17 @@
     <IsTestProject>true</IsTestProject>
     <!-- Directory.Build.props pins RuntimeIdentifier=win-x64 for the shipping exes; the test
          host is happy with it and it keeps this project on the same restore graph. -->
+
+    <!-- These two and Program.cs are ONE unit — remove any of the three and the build breaks.
+         The cross-process config test spawns a second copy of itself, which needs a real
+         apphost; a test project is OutputType=Library by default and produces none, so
+         Environment.ProcessPath is testhost.exe and there is nothing to re-launch. OutputType
+         then demands an entry point that GenerateProgramFile would otherwise synthesise, so
+         Program.cs supplies it (and hands VSTest the normal path when no peer argument is
+         present). Dropping the properties alone gives CS5001; dropping Program.cs alone does
+         the same. Measured both ways, 2026-09-14. -->
+    <OutputType>Exe</OutputType>
+    <GenerateProgramFile>false</GenerateProgramFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -24,6 +35,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Halo.Collector\Halo.Collector.csproj" />
     <ProjectReference Include="..\..\src\Halo.Metrics\Halo.Metrics.csproj" />
+    <ProjectReference Include="..\..\src\Halo.Shared\Halo.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>
