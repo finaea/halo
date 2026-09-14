@@ -190,14 +190,28 @@ public sealed class NvmlProvider : ISensorProvider
         foreach (var d in _devices) PollDevice(sink, d);
     }
 
+    /// <summary>
+    /// Every read here is a sensor read, so a non-zero NVML return code means "this number could
+    /// not be taken" — the metric goes N/A for this poll rather than keeping the previous sample
+    /// with a fresh-looking timestamp. Per-sensor only: a single failure never reinitialises the
+    /// device, and a provider-wide outage is the host's job (<see cref="ProviderHost"/>).
+    ///
+    /// <b>Fan speed is the one to read carefully.</b> A successful call returning 0 is a real
+    /// reading — zero-RPM / fan-stop mode on a modern card genuinely reports 0 — so it is
+    /// published as 0. Only the failed call is N/A.
+    /// </summary>
     private static void PollDevice(MetricSink sink, Device d)
     {
         int i = d.Index;
         if (nvmlDeviceGetTemperature(d.Handle, 0 /*GPU*/, out uint temp) == 0)
             sink.Set(MetricNames.GpuTempC(i), temp);
+        else
+            sink.MarkStale(MetricNames.GpuTempC(i));
 
         if (nvmlDeviceGetUtilizationRates(d.Handle, out var util) == 0)
             sink.Set(MetricNames.GpuUsagePct(i), util.gpu);
+        else
+            sink.MarkStale(MetricNames.GpuUsagePct(i));
 
         if (nvmlDeviceGetMemoryInfo(d.Handle, out var mem) == 0 && mem.total > 0)
         {
@@ -205,21 +219,36 @@ public sealed class NvmlProvider : ISensorProvider
             sink.Set(MetricNames.GpuVramUsedMb(i), usedMb);
             sink.Set(MetricNames.GpuVramPct(i), usedMb / totalMb * 100);
         }
+        else
+        {
+            sink.MarkStale(MetricNames.GpuVramUsedMb(i));
+            sink.MarkStale(MetricNames.GpuVramPct(i));
+        }
 
+        // 0% is a stopped fan, which is a reading; a failed call is not.
         if (nvmlDeviceGetFanSpeed_v2(d.Handle, 0, out uint fanPct) == 0)
             sink.Set(MetricNames.GpuFanPct(i), fanPct);
+        else
+            sink.MarkStale(MetricNames.GpuFanPct(i));
 
         if (d.HasFanRpm)
         {
             var info = new nvmlFanSpeedInfo { version = 0x1000000 | (uint)Marshal.SizeOf<nvmlFanSpeedInfo>(), fan = 0 };
+            // Same rule: info.speed == 0 means the fan is stopped, not that we failed to read it.
             if (nvmlDeviceGetFanSpeedRPM(d.Handle, ref info) == 0)
                 sink.Set(MetricNames.GpuFanRpm(i), info.speed);
+            else
+                sink.MarkStale(MetricNames.GpuFanRpm(i));
         }
 
         if (nvmlDeviceGetClockInfo(d.Handle, 0 /*GRAPHICS*/, out uint core) == 0)
             sink.Set(MetricNames.GpuClockCoreMhz(i), core);
+        else
+            sink.MarkStale(MetricNames.GpuClockCoreMhz(i));
         if (nvmlDeviceGetClockInfo(d.Handle, 2 /*MEM*/, out uint memclk) == 0)
             sink.Set(MetricNames.GpuClockMemMhz(i), memclk);
+        else
+            sink.MarkStale(MetricNames.GpuClockMemMhz(i));
 
         if (nvmlDeviceGetPowerUsage(d.Handle, out uint mw) == 0)
         {
@@ -237,6 +266,10 @@ public sealed class NvmlProvider : ISensorProvider
             {
                 sink.Set(MetricNames.GpuPowerW(i), mw / 1000.0);
             }
+        }
+        else
+        {
+            sink.MarkStale(MetricNames.GpuPowerW(i));
         }
     }
 

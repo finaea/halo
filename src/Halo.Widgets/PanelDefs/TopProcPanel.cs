@@ -81,7 +81,7 @@ public static class TopProcPanel
                 // center: CPU% (static text2, never threshold-colored)
                 p.Elements.Add(new TextEl
                 {
-                    Text = c => $"{ValueFormat.Fixed(c.Metrics.Value(MetricNames.TopRamCpuPct(rank, Agg(c))), 1)}%",
+                    Text = c => c.Na(MetricNames.TopRamCpuPct(rank, Agg(c)), v => $"{ValueFormat.Fixed(v, 1)}%"),
                     VisibleWhen = c => c.Shows("cpu"),
                     Style = TextStyle.Bold8,
                     Align = TextAlign.Center,
@@ -92,7 +92,7 @@ public static class TopProcPanel
                 // right: RAM autoscaled bytes (threshold-colored)
                 p.Elements.Add(new TextEl
                 {
-                    Text = c => $"{ValueFormat.AutoScale(c.Metrics.Value(MetricNames.TopRamB(rank, Agg(c))), 1)}B",
+                    Text = c => c.Na(MetricNames.TopRamB(rank, Agg(c)), v => $"{ValueFormat.AutoScale(v, 1)}B"),
                     ColorFn = warnColor,
                     VisibleWhen = c => c.Shows("ram"),
                     Style = TextStyle.Bold8,
@@ -106,7 +106,7 @@ public static class TopProcPanel
                 // center: RAM autoscaled bytes (static text2, never threshold-colored)
                 p.Elements.Add(new TextEl
                 {
-                    Text = c => $"{ValueFormat.AutoScale(c.Metrics.Value(MetricNames.TopCpuRamB(rank, Agg(c))), 1)}B",
+                    Text = c => c.Na(MetricNames.TopCpuRamB(rank, Agg(c)), v => $"{ValueFormat.AutoScale(v, 1)}B"),
                     VisibleWhen = c => c.Shows("ram"),
                     Style = TextStyle.Bold8,
                     Align = TextAlign.Center,
@@ -117,7 +117,7 @@ public static class TopProcPanel
                 // right: CPU% (threshold-colored)
                 p.Elements.Add(new TextEl
                 {
-                    Text = c => $"{ValueFormat.Fixed(c.Metrics.Value(MetricNames.TopCpuPct(rank, Agg(c))), 1)}%",
+                    Text = c => c.Na(MetricNames.TopCpuPct(rank, Agg(c)), v => $"{ValueFormat.Fixed(v, 1)}%"),
                     ColorFn = warnColor,
                     VisibleWhen = c => c.Shows("cpu"),
                     Style = TextStyle.Bold8,

@@ -46,7 +46,7 @@ public static class LatencyPanel
         // ROW 2 — the three components that sum to ROW 1 (queue + render + display), on a pill.
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? $"{c.Label("queue", "QUEUE")} —" : $"{c.Label("queue", "QUEUE")} {ValueFormat.Int0(Comp(c, MetricNames.LatencyQueueMs))}",
+            Text = c => $"{c.Label("queue", "QUEUE")} {Comp(c, MetricNames.LatencyQueueMs)}",
             VisibleWhen = c => c.Shows("queue"),
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
@@ -59,7 +59,7 @@ public static class LatencyPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? $"{c.Label("render", "REND")} —" : $"{c.Label("render", "REND")} {ValueFormat.Int0(Comp(c, MetricNames.LatencyRenderMs))}",
+            Text = c => $"{c.Label("render", "REND")} {Comp(c, MetricNames.LatencyRenderMs)}",
             VisibleWhen = c => c.Shows("render"),
             Style = TextStyle.Text8,
             Align = TextAlign.Center,
@@ -69,7 +69,7 @@ public static class LatencyPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? $"{c.Label("display", "DISP")} —" : $"{c.Label("display", "DISP")} {ValueFormat.Int0(Comp(c, MetricNames.FpsDisplayLatencyMs))}",
+            Text = c => $"{c.Label("display", "DISP")} {Comp(c, MetricNames.FpsDisplayLatencyMs)}",
             VisibleWhen = c => c.Shows("display"),
             Style = TextStyle.Text8,
             Align = TextAlign.Right,
@@ -81,7 +81,13 @@ public static class LatencyPanel
         // ROW 3 — PresentMon click-to-photon + input-to-photon references, on a pill.
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) || !c.Metrics.TryValue(MetricNames.LatencyClickMs, out double v, 10) ? $"{c.Label("click", "CLICK")} —" : $"{c.Label("click", "CLICK")} {ValueFormat.Int0(v)}ms",
+            // No widget-side age policy any more: the collector decides how long an input-photon
+            // sample stays valid (ticket 02's 20 s window), and a long input-free stretch —
+            // cutscene, menu, pure movement — legitimately reads N/A here. Idle still reads "—",
+            // which is the panel-level "no 3D app" state and a different statement.
+            Text = c => IsIdle(c)
+                ? $"{c.Label("click", "CLICK")} —"
+                : $"{c.Label("click", "CLICK")} {c.Na(MetricNames.LatencyClickMs, v => $"{ValueFormat.Int0(v)}ms")}",
             VisibleWhen = c => c.Shows("click"),
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
@@ -94,7 +100,9 @@ public static class LatencyPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => IsIdle(c) ? $"{c.Label("input", "INPUT")} —" : $"{c.Label("input", "INPUT")} {ValueFormat.Int0(c.Metrics.Value(MetricNames.LatencyAllInputMs))}ms",
+            Text = c => IsIdle(c)
+                ? $"{c.Label("input", "INPUT")} —"
+                : $"{c.Label("input", "INPUT")} {c.Na(MetricNames.LatencyAllInputMs, v => $"{ValueFormat.Int0(v)}ms")}",
             VisibleWhen = c => c.Shows("input"),
             Style = TextStyle.Text8,
             Align = TextAlign.Right,
@@ -183,7 +191,8 @@ public static class LatencyPanel
                     Color = ctx.Color("pclat", "histogram"),
                     Ring = ctx.NewRing(),
                     FixedMax = null,
-                    Sample = c => PcLatency(c),
+                    // NaN skips the sample: no PCL reading holds the line rather than dropping it.
+                    Sample = c => c.Metrics.TryValue(MetricNames.LatencyPcMs, out double v, maxAgeS: 3) ? v : double.NaN,
                 },
             },
         });
@@ -193,8 +202,17 @@ public static class LatencyPanel
 
     private static bool IsIdle(PanelContext c) => !c.Metrics.TryValue(MetricNames.FpsPresented, out _, maxAgeS: 3);
 
-    private static double Comp(PanelContext c, string metric)
-        => c.Metrics.TryValue(metric, out double v, maxAgeS: 3) ? v : 0;
+    /// <summary>
+    /// One latency component, rendered. A component the collector is not publishing reads "—"
+    /// (this panel's idle vocabulary) rather than a plausible <c>0</c> — the whole point of the
+    /// freshness contract.
+    ///
+    /// The 3 s window is the panel's own idle rule, the same one <see cref="IsIdle"/> uses, not a
+    /// per-metric age policy: these come from the frame pipeline, which republishes every poll
+    /// while a 3D app is alive and simply stops when one is not.
+    /// </summary>
+    private static string Comp(PanelContext c, string metric)
+        => !IsIdle(c) && c.Metrics.TryValue(metric, out double v, maxAgeS: 3) ? ValueFormat.Int0(v) : "—";
 
     /// <summary>Overlay-equivalent PC latency = queue wait + render + display, summed by the
     /// collector and published as <c>latency.pc.ms</c> (ticket 02). The panel used to add the

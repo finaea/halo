@@ -9,8 +9,13 @@ namespace Halo.Widgets.PanelDefs;
 /// see JSON notes), each row = label (left) + current value (warn-colored, right) + session max
 /// ("Max: …", gray, center). VCORE and CPU POWER come from elevated-only sensors (SuperIO
 /// voltage / MSR package power via LibreHardwareMonitor); when that reading isn't available the
-/// current value shows "N/A" (text2) and the max shows "Max: —" — the row itself is never
+/// current value shows "N/A" (text2) and the max shows "Max: N/A" — the row itself is never
 /// hidden. The GPU rows follow the widget's "gpuIndex" option.
+///
+/// Every value here is read off hardware, so every one of them is N/A when it is not readable —
+/// including the maxima, which are read on their own merit rather than gated on the live value: a
+/// session peak that really was observed stays on screen when the sensor behind it drops out, and
+/// one that never was reads "Max: N/A" rather than "Max: 0.000 V".
 /// </summary>
 public static class PowerPanel
 {
@@ -46,9 +51,7 @@ public static class PowerPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => c.Metrics.TryValue(MetricNames.CpuVcoreV, out _)
-                ? $"Max: {ValueFormat.Fixed(c.Metrics.Value(MetricNames.CpuVcoreV + MetricNames.MaxSuffix), 3)} V"
-                : "Max: —",
+            Text = c => $"Max: {c.Na(MetricNames.CpuVcoreV + MetricNames.MaxSuffix, v => ValueFormat.Fixed(v, 3) + " V")}",
             VisibleWhen = c => showMax && c.Shows("vcore"),
             Style = TextStyle.Text8,
             Align = TextAlign.Center,
@@ -58,7 +61,7 @@ public static class PowerPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => c.Metrics.TryValue(MetricNames.CpuVcoreV, out double v) ? ValueFormat.Fixed(v, 3) + " V" : "N/A",
+            Text = c => c.Na(MetricNames.CpuVcoreV, v => ValueFormat.Fixed(v, 3) + " V"),
             ColorFn = c => c.Metrics.TryValue(MetricNames.CpuVcoreV, out double v) ? CpuRamPanelImpl.WarnColor(v, c.Warn("vcore")) : "text2",
             VisibleWhen = c => c.Shows("vcore"),
             Style = TextStyle.Bold8,
@@ -80,7 +83,7 @@ public static class PowerPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"Max: {ValueFormat.Fixed(c.Metrics.Value(gpuVolt + MetricNames.MaxSuffix), 3)} V",
+            Text = c => $"Max: {c.Na(gpuVolt + MetricNames.MaxSuffix, v => ValueFormat.Fixed(v, 3) + " V")}",
             VisibleWhen = c => showMax && c.Shows("gpuVolt"),
             Style = TextStyle.Text8,
             Align = TextAlign.Center,
@@ -90,8 +93,8 @@ public static class PowerPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => ValueFormat.Fixed(c.Metrics.Value(gpuVolt), 3) + " V",
-            ColorFn = c => CpuRamPanelImpl.WarnColor(c.Metrics.Value(gpuVolt), c.Warn("gpuVolt")),
+            Text = c => c.Na(gpuVolt, v => ValueFormat.Fixed(v, 3) + " V"),
+            ColorFn = c => c.Metrics.TryValue(gpuVolt, out double v) ? CpuRamPanelImpl.WarnColor(v, c.Warn("gpuVolt")) : "text2",
             VisibleWhen = c => c.Shows("gpuVolt"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
@@ -112,9 +115,7 @@ public static class PowerPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => c.Metrics.TryValue(MetricNames.CpuPackagePowerW, out _)
-                ? $"Max: {ValueFormat.Int0(c.Metrics.Value(MetricNames.CpuPackagePowerW + MetricNames.MaxSuffix))}W"
-                : "Max: —",
+            Text = c => $"Max: {c.Na(MetricNames.CpuPackagePowerW + MetricNames.MaxSuffix, v => ValueFormat.Int0(v) + "W")}",
             VisibleWhen = c => showMax && c.Shows("cpuPower"),
             Style = TextStyle.Text8,
             Align = TextAlign.Center,
@@ -124,7 +125,7 @@ public static class PowerPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => c.Metrics.TryValue(MetricNames.CpuPackagePowerW, out double v) ? ValueFormat.Int0(v) + "W" : "N/A",
+            Text = c => c.Na(MetricNames.CpuPackagePowerW, v => ValueFormat.Int0(v) + "W"),
             ColorFn = c => c.Metrics.TryValue(MetricNames.CpuPackagePowerW, out double v) ? CpuRamPanelImpl.WarnColor(v, c.Warn("cpuPower")) : "text2",
             VisibleWhen = c => c.Shows("cpuPower"),
             Style = TextStyle.Bold8,
@@ -146,7 +147,7 @@ public static class PowerPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"Max: {ValueFormat.Int0(c.Metrics.Value(gpuPower + MetricNames.MaxSuffix))}W",
+            Text = c => $"Max: {c.Na(gpuPower + MetricNames.MaxSuffix, v => ValueFormat.Int0(v) + "W")}",
             VisibleWhen = c => showMax && c.Shows("gpuPower"),
             Style = TextStyle.Text8,
             Align = TextAlign.Center,
@@ -156,8 +157,8 @@ public static class PowerPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => ValueFormat.Int0(c.Metrics.Value(gpuPower)) + "W",
-            ColorFn = c => CpuRamPanelImpl.WarnColor(c.Metrics.Value(gpuPower), c.Warn("gpuPower")),
+            Text = c => c.Na(gpuPower, v => ValueFormat.Int0(v) + "W"),
+            ColorFn = c => c.Metrics.TryValue(gpuPower, out double v) ? CpuRamPanelImpl.WarnColor(v, c.Warn("gpuPower")) : "text2",
             VisibleWhen = c => c.Shows("gpuPower"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,

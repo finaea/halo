@@ -36,6 +36,11 @@ public sealed class DiskIoProvider : ISensorProvider
         if (_query != 0) { PdhCloseQuery(_query); _query = 0; }
         if (PdhOpenQueryW(null, 0, out _query) != 0) return false;
 
+        // Yanking a USB drive drops its counters out of the rebuilt query, and nothing would ever
+        // write those slots again — so the last rates it happened to be doing would sit there,
+        // timestamped and reading as live, for the rest of the session. Stale them instead.
+        var gone = _counters.Select(c => c.Letter).ToList();
+
         _counters.Clear();
         foreach (char c in Volumes.Local())
         {
@@ -50,6 +55,12 @@ public sealed class DiskIoProvider : ISensorProvider
             sink.Register(MetricNames.DriveWriteBps(c), MetricType.Double, MetricUnit.BytesPerSecond, Name,
                 DefaultRateHz, MetricSemantics.IntervalAvg);
         }
+        foreach (char c in gone.Where(c => !_counters.Any(k => k.Letter == c)))
+        {
+            sink.MarkStale(MetricNames.DriveReadBps(c));
+            sink.MarkStale(MetricNames.DriveWriteBps(c));
+        }
+
         _primed = false;
         // Commit the change-detector only when we actually bound counters — otherwise a volume
         // that isn't mounted yet would be recorded as "handled" and never retried.
@@ -79,15 +90,28 @@ public sealed class DiskIoProvider : ISensorProvider
 
         foreach (var (c, r, w) in _counters)
         {
-            if (r != 0) sink.Set(MetricNames.DriveReadBps(c), Value(r));
-            if (w != 0) sink.Set(MetricNames.DriveWriteBps(c), Value(w));
+            Publish(sink, MetricNames.DriveReadBps(c), r);
+            Publish(sink, MetricNames.DriveWriteBps(c), w);
         }
     }
 
-    private static double Value(nint counter)
+    /// <summary>
+    /// 0 B/s is a real answer here (an idle volume), so it is published as 0. A counter PDH cannot
+    /// format — the instance went away between the rebuild and this read — is not a rate of zero,
+    /// it is no reading at all, and goes N/A.
+    /// </summary>
+    private static void Publish(MetricSink sink, string metric, nint counter)
+    {
+        if (counter != 0 && TryValue(counter, out double bps)) sink.Set(metric, bps);
+        else sink.MarkStale(metric);
+    }
+
+    private static bool TryValue(nint counter, out double value)
     {
         var v = new PDH_FMT_COUNTERVALUE();
-        return PdhGetFormattedCounterValue(counter, PDH_FMT_DOUBLE, out _, ref v) == 0 && v.CStatus == 0 ? v.doubleValue : 0;
+        bool ok = PdhGetFormattedCounterValue(counter, PDH_FMT_DOUBLE, out _, ref v) == 0 && v.CStatus == 0;
+        value = ok ? v.doubleValue : 0;
+        return ok;
     }
 
     public void Dispose()

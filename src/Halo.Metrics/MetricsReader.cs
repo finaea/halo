@@ -20,7 +20,18 @@ public sealed unsafe class MetricsReader : IDisposable
 {
     private NativeSection? _section;
     private readonly Dictionary<ulong, int> _indexById = new();
+    private readonly string _sectionName;
     private int _registrySeen;
+
+    public MetricsReader() : this(null) { }
+
+    /// <summary>Test seam: read a named section other than the real one. Internal on purpose —
+    /// the public surface is a published contract, so this stays inside the assembly.</summary>
+    internal MetricsReader(string? sectionName)
+        => _sectionName = sectionName ?? SharedMemoryLayout.SectionName;
+
+    /// <summary>The named section this reader attaches to.</summary>
+    internal string SectionName => _sectionName;
 
     // header-published geometry, re-read on attach (never compiled in)
     private int _providersOffset, _providerCapacity, _providerEntrySize;
@@ -40,7 +51,7 @@ public sealed unsafe class MetricsReader : IDisposable
     public bool TryAttach()
     {
         if (_section != null) return true;
-        var s = NativeSection.OpenReadOnly(SharedMemoryLayout.SectionName);
+        var s = NativeSection.OpenReadOnly(_sectionName);
         if (s == null) return false;
 
         if (*(uint*)(s.Base + SharedMemoryLayout.OffMagic) != SharedMemoryLayout.Magic)
@@ -156,11 +167,18 @@ public sealed unsafe class MetricsReader : IDisposable
     public double ReadOr(int index, double fallback)
         => TryRead(index, out double v, out _) ? v : fallback;
 
-    /// <summary>Read a string metric (seqlock retry).</summary>
+    /// <summary>Read a string metric (seqlock retry). Returns false if never written or marked N/A.</summary>
     public bool TryReadString(int index, out string value)
     {
         value = "";
         if (_section == null || index < 0) return false;
+        // Reader rule 3 is not a numbers-only rule. A string metric has a value slot too — that is
+        // the only thing MarkStale touches — so the timestamp has to gate the payload here as well.
+        // Without it a staled string reads back as live for the rest of the session: the previous
+        // public IP after the user switches external-IP lookup off, a removed drive's label, the
+        // last game's name after it exits.
+        long ts = Volatile.Read(ref *(long*)(B + _valuesOffset + index * _valueEntrySize + 8));
+        if (ts == 0) return false;
         ushort slot = *(ushort*)(RegEntry(index) + SharedMemoryLayout.RegOffStringSlot);
         if (slot == SharedMemoryLayout.NoStringSlot || slot >= _stringCapacity) return false;
         byte* s = B + _stringsOffset + slot * _stringEntrySize;

@@ -30,6 +30,17 @@ public sealed class MetricCache : IDisposable
     public bool TryValue(string name, out double value, double maxAgeS = double.MaxValue)
         => _session.TryGet(name, out value, maxAgeS);
 
+    /// <summary>
+    /// Does the collector publish this metric at all? True even when its current value is N/A.
+    ///
+    /// "This machine has no such sensor" and "the sensor did not answer" are different answers and
+    /// the panels draw them differently: an unregistered metric hides its row (a passively-cooled
+    /// card should not carry a permanent N/A), a registered one that has gone absent shows N/A. A
+    /// row gated on <see cref="TryValue"/> alone cannot tell them apart, and would make rows
+    /// appear and vanish whenever a provider blipped.
+    /// </summary>
+    public bool Has(string name) => _session.IndexOf(name) >= 0;
+
     public string Text(string name, string fallback = "") => _session.GetText(name, fallback);
 
     /// <summary>Frames that arrived since the previous Tick() (chronological).</summary>

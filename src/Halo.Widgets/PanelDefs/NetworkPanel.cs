@@ -97,7 +97,9 @@ public static class NetworkPanel
         // centred SPEED label (7pt/text), upload rate (right, Bold8/text).
         p.Elements.Add(new TextEl
         {
-            Text = c => Rate(c, c.Metrics.Value(MetricNames.NetDownBps)),
+            // Na wraps the whole formatted string, unit included: no interface means "N/A",
+            // never "N/A B/s".
+            Text = c => c.Na(MetricNames.NetDownBps, v => Rate(c, v)),
             VisibleWhen = c => c.Shows("down"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Left,
@@ -116,7 +118,7 @@ public static class NetworkPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => Rate(c, c.Metrics.Value(MetricNames.NetUpBps)),
+            Text = c => c.Na(MetricNames.NetUpBps, v => Rate(c, v)),
             VisibleWhen = c => c.Shows("up"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
@@ -128,7 +130,8 @@ public static class NetworkPanel
         // ⏷PEAK⏶ row: session peak down/up (styleSecondaryText → Text8/text2).
         p.Elements.Add(new TextEl
         {
-            Text = c => Rate(c, c.Metrics.Value(MetricNames.NetDownBps + MaxSuffix)),
+            // A .max mirrors its base: a peak that was never observed is N/A, not 0 B/s.
+            Text = c => c.Na(MetricNames.NetDownBps + MaxSuffix, v => Rate(c, v)),
             VisibleWhen = c => c.Shows("peak"),
             Style = TextStyle.Text8,
             Align = TextAlign.Left,
@@ -146,7 +149,7 @@ public static class NetworkPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => Rate(c, c.Metrics.Value(MetricNames.NetUpBps + MaxSuffix)),
+            Text = c => c.Na(MetricNames.NetUpBps + MaxSuffix, v => Rate(c, v)),
             VisibleWhen = c => c.Shows("peak"),
             Style = TextStyle.Text8,
             Align = TextAlign.Right,
@@ -204,7 +207,7 @@ public static class NetworkPanel
             Advance = t.BottomMargin - 2,
             Series =
             {
-                new GraphSeries { Color = ctx.Color("down", "netDown"), Ring = ctx.NewRing(), Sample = c => c.Metrics.Value(MetricNames.NetDownBps) },
+                new GraphSeries { Color = ctx.Color("down", "netDown"), Ring = ctx.NewRing(), Sample = c => c.NaSample(MetricNames.NetDownBps) },
             },
         });
         // upload graph (green, GraphStart Right), same row, 14px right of the download graph.
@@ -222,7 +225,7 @@ public static class NetworkPanel
             Advance = t.BottomMargin - 2,
             Series =
             {
-                new GraphSeries { Color = ctx.Color("up", "netUp"), Ring = ctx.NewRing(), Sample = c => c.Metrics.Value(MetricNames.NetUpBps) },
+                new GraphSeries { Color = ctx.Color("up", "netUp"), Ring = ctx.NewRing(), Sample = c => c.NaSample(MetricNames.NetUpBps) },
             },
         });
 

@@ -133,6 +133,13 @@ loads the timestamp first (acquire) and then the value can never see a torn pair
 
 Seqlock: read `seq`, bail if odd, copy, re-read `seq`, retry if it changed.
 
+A string metric **also has a value entry**, and that entry's `timestampQpc` is what says whether the
+string is live — it is the only thing the collector's staleness marker touches. So rule 3 applies
+here exactly as it does to a double: **check the timestamp before you trust the payload**, or a
+metric the collector has marked N/A (the public IP after the user turns external-IP lookup off, a
+removed drive's label, the last game's name after it exits) keeps reading back as a current value.
+The sample reader below gets this right; Halo's own C# reader did not until 2026-09-14.
+
 ### Provider entry (64 B)
 
 | Off | Type | Field | Notes |

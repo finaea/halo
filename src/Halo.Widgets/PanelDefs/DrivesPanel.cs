@@ -57,10 +57,10 @@ public static class DrivesPanel
             });
             p.Elements.Add(new TextEl
             {
-                // elevated-only sensor: on failure show "--°C" in text2 rather than hiding the row
-                Text = c => c.Metrics.TryValue(MetricNames.DriveTempC(d), out double tv)
-                    ? c.TempText(tv)
-                    : "--" + c.TempUnit,
+                // elevated-only sensor: on failure show N/A in text2 rather than hiding the row.
+                // The unit goes with the number — "--°C" (and "N/A °C") reads as a temperature
+                // that happens to be unprintable, which is not what is being said.
+                Text = c => c.Na(MetricNames.DriveTempC(d), c.TempText),
                 ColorFn = c => c.Metrics.TryValue(MetricNames.DriveTempC(d), out double tv)
                     ? CpuRamPanelImpl.WarnColor(tv, c.Warn($"temp.{d}"))
                     : "text2",
@@ -78,14 +78,10 @@ public static class DrivesPanel
                 // structural, so flipping a letter does not rebuild the element tree and a
                 // build-time capture left the row saying "Used:" until something else forced a
                 // rebuild — which is exactly "show free space does nothing".
-                Text = c =>
-                {
-                    double used = c.Metrics.Value(MetricNames.DriveUsedB(d));
-                    double total = c.Metrics.Value(MetricNames.DriveTotalB(d));
-                    return ShowsFree(c, d)
-                        ? $"Free: {ValueFormat.AutoScale(total - used)}B"
-                        : $"{c.Label("used", "Used:")} {ValueFormat.AutoScale(used)}B";
-                },
+                Text = c => ShowsFree(c, d)
+                    // Free needs both halves; Used needs only its own.
+                    ? $"Free: {c.Na(MetricNames.DriveTotalB(d), MetricNames.DriveUsedB(d), (total, used) => $"{ValueFormat.AutoScale(total - used)}B")}"
+                    : $"{c.Label("used", "Used:")} {c.Na(MetricNames.DriveUsedB(d), v => $"{ValueFormat.AutoScale(v)}B")}",
                 VisibleWhen = c => c.Shows("used"),
                 Style = TextStyle.Bold8,
                 Align = TextAlign.Left,
@@ -95,7 +91,7 @@ public static class DrivesPanel
             });
             p.Elements.Add(new TextEl
             {
-                Text = c => $"{c.Label("total", "Total:")} {ValueFormat.AutoScale(c.Metrics.Value(MetricNames.DriveTotalB(d)))}B",
+                Text = c => $"{c.Label("total", "Total:")} {c.Na(MetricNames.DriveTotalB(d), v => $"{ValueFormat.AutoScale(v)}B")}",
                 VisibleWhen = c => c.Shows("total"),
                 Style = TextStyle.Bold8,
                 Align = TextAlign.Right,
@@ -152,7 +148,7 @@ public static class DrivesPanel
             // Bare AutoScale output (no trailing "B"), colorText2, offset +2 within the arrow row.
             p.Elements.Add(new TextEl
             {
-                Text = c => ValueFormat.AutoScale(c.Metrics.Value(MetricNames.DriveWriteBps(d))),
+                Text = c => c.Na(MetricNames.DriveWriteBps(d), v => ValueFormat.AutoScale(v)),
                 Style = TextStyle.Text8,
                 Align = TextAlign.Left,
                 X = t.ContentMargin + 25,    // 32
@@ -164,7 +160,7 @@ public static class DrivesPanel
             });
             p.Elements.Add(new TextEl
             {
-                Text = c => ValueFormat.AutoScale(c.Metrics.Value(MetricNames.DriveReadBps(d))),
+                Text = c => c.Na(MetricNames.DriveReadBps(d), v => ValueFormat.AutoScale(v)),
                 Style = TextStyle.Text8,
                 Align = TextAlign.Right,
                 X = t.RightAlign - 25,       // 172
@@ -182,8 +178,8 @@ public static class DrivesPanel
         foreach (char letter in letters)
         {
             char d = letter;
-            writeSeries.Add(new GraphSeries { Color = ctx.Color("write", "histogram"), Ring = ctx.NewRing(), Sample = c => c.Metrics.Value(MetricNames.DriveWriteBps(d)) });
-            readSeries.Add(new GraphSeries { Color = ctx.Color("read", "histogram"), Ring = ctx.NewRing(), Sample = c => c.Metrics.Value(MetricNames.DriveReadBps(d)) });
+            writeSeries.Add(new GraphSeries { Color = ctx.Color("write", "histogram"), Ring = ctx.NewRing(), Sample = c => c.NaSample(MetricNames.DriveWriteBps(d)) });
+            readSeries.Add(new GraphSeries { Color = ctx.Color("read", "histogram"), Ring = ctx.NewRing(), Sample = c => c.NaSample(MetricNames.DriveReadBps(d)) });
         }
 
         // Either history graph is toggled by its metric setting (metrics.write.graph / read.graph).

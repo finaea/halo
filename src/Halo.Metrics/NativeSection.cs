@@ -20,7 +20,16 @@ public sealed unsafe class NativeSection : IDisposable
         IsWriter = writer;
     }
 
-    /// <summary>Create (writer side). Grants GENERIC_ALL to SYSTEM/Admins, GENERIC_READ to Everyone.</summary>
+    /// <summary>
+    /// Create (writer side). Grants GENERIC_ALL to SYSTEM/Admins, GENERIC_READ to Everyone.
+    ///
+    /// A named section that already exists is <b>reused</b>, not resized — Windows hands back the
+    /// existing object and ignores the size argument. That is the collector-restart case and it
+    /// must keep working, but it also means the view can be smaller than the caller asked for, and
+    /// <see cref="MetricsWriter"/> memsets <paramref name="size"/> bytes the moment it gets one.
+    /// So the view is mapped with the real length (not 0 = "whatever is there") and an existing
+    /// section that is too small fails here, loudly, instead of corrupting memory past the view.
+    /// </summary>
     public static NativeSection Create(string name, int size)
     {
         // D: DACL; A;;GR;;;WD = allow generic-read to Everyone; BA = builtin admins; SY = system.
@@ -34,13 +43,22 @@ public sealed unsafe class NativeSection : IDisposable
         {
             var sa = new SECURITY_ATTRIBUTES { nLength = (uint)sizeof(SECURITY_ATTRIBUTES), lpSecurityDescriptor = sd, bInheritHandle = 0 };
             nint h = CreateFileMappingW(-1, &sa, PAGE_READWRITE, 0, (uint)size, name);
+            int createError = Marshal.GetLastWin32Error();
             if (h == 0)
-                throw new InvalidOperationException($"CreateFileMapping failed: {Marshal.GetLastWin32Error()}");
-            byte* p = (byte*)MapViewOfFile(h, FILE_MAP_WRITE, 0, 0, 0);
+                throw new InvalidOperationException($"CreateFileMapping failed: {createError}");
+            bool reused = createError == ERROR_ALREADY_EXISTS;
+
+            // Asking for the real length is the check: a view longer than the section is refused,
+            // so a pre-existing undersized section cannot be mapped at all.
+            byte* p = (byte*)MapViewOfFile(h, FILE_MAP_WRITE, 0, 0, (nuint)size);
             if (p == null)
             {
+                int mapError = Marshal.GetLastWin32Error();
                 CloseHandle(h);
-                throw new InvalidOperationException($"MapViewOfFile failed: {Marshal.GetLastWin32Error()}");
+                throw new InvalidOperationException(reused
+                    ? $"'{name}' already exists and is smaller than the {size} bytes Halo needs (MapViewOfFile failed: {mapError}). " +
+                      "Another process owns that name — close it (or end an older Halo.Collector) and start the collector again."
+                    : $"MapViewOfFile failed: {mapError}");
             }
             return new NativeSection(h, p, writer: true);
         }
@@ -72,6 +90,7 @@ public sealed unsafe class NativeSection : IDisposable
     private const uint PAGE_READWRITE = 0x04;
     private const uint FILE_MAP_READ = 0x0004;
     private const uint FILE_MAP_WRITE = 0x0002;
+    private const int ERROR_ALREADY_EXISTS = 183;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct SECURITY_ATTRIBUTES { public uint nLength; public nint lpSecurityDescriptor; public int bInheritHandle; }

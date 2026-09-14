@@ -17,9 +17,12 @@ public sealed class MetricSink(MetricsWriter writer)
     private readonly ConcurrentDictionary<string, int> _indexByName = new();
     private readonly ConcurrentDictionary<string, MaxState> _maxByName = new();
     /// <summary>Registry slots each provider owns, with the nominal rate each one declared, so
-    /// the host can republish live rates without a second name→index map.</summary>
-    private readonly ConcurrentDictionary<string, List<(int Index, double NominalHz)>> _slotsByProvider =
+    /// the host can republish live rates — and stale the lot when the provider dies — without a
+    /// second name→index map.</summary>
+    private readonly ConcurrentDictionary<string, List<Slot>> _slotsByProvider =
         new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly record struct Slot(int Index, double NominalHz, bool IsMax);
 
     private sealed class MaxState
     {
@@ -44,8 +47,8 @@ public sealed class MetricSink(MetricsWriter writer)
         _indexByName[name] = idx;
         if (firstRegistrant && provider.Length != 0 && nominalRateHz > 0)
         {
-            var slots = _slotsByProvider.GetOrAdd(provider, _ => new List<(int, double)>());
-            lock (slots) slots.Add((idx, nominalRateHz));
+            var slots = _slotsByProvider.GetOrAdd(provider, _ => new List<Slot>());
+            lock (slots) slots.Add(new Slot(idx, nominalRateHz, flags.HasFlag(MetricFlags.IsMaxCompanion)));
         }
         return idx;
     }
@@ -61,8 +64,27 @@ public sealed class MetricSink(MetricsWriter writer)
     {
         if (!_slotsByProvider.TryGetValue(provider, out var slots)) return;
         lock (slots)
-            foreach (var (idx, nominal) in slots)
-                Writer.SetEffectiveRate(idx, (float)(nominal * scale));
+            foreach (var s in slots)
+                Writer.SetEffectiveRate(s.Index, (float)(s.NominalHz * scale));
+    }
+
+    /// <summary>
+    /// Mark every reading a provider owns N/A. <see cref="ProviderHost"/> calls this when a
+    /// provider fails or stops polling: without it, the last value a dead provider wrote keeps a
+    /// valid timestamp and reads as live forever.
+    ///
+    /// Two families are deliberately left out. <b>Static</b> metrics are facts about the machine
+    /// written once at discovery, not readings, and having no cadence they are not in this list at
+    /// all. <b>.max companions</b> are session extrema — the peak really was observed, and staling
+    /// one is unrecoverable anyway, because <see cref="Set"/> only republishes a max when a later
+    /// sample beats it. Only <see cref="ResetMax"/> clears those.
+    /// </summary>
+    public void MarkProviderStale(string provider)
+    {
+        if (!_slotsByProvider.TryGetValue(provider, out var slots)) return;
+        lock (slots)
+            foreach (var s in slots)
+                if (!s.IsMax) Writer.MarkStale(s.Index);
     }
 
     /// <summary>Register a double metric together with its ".max" session-extremum companion.</summary>

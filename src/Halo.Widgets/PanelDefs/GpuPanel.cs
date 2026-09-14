@@ -40,9 +40,13 @@ public static class GpuPanel
         // temp, centered at abs Y=30, staged warn colors
         p.Elements.Add(new TextEl
         {
-            Text = c => c.TempText(c.Metrics.Value(temp)),
-            ColorFn = c => CpuRamPanelImpl.WarnColor(c.Metrics.Value(temp), c.Warn("temp")),
-            VisibleWhen = c => c.Shows("temp") && c.Metrics.TryValue(temp, out _),
+            Text = c => c.Na(temp, c.TempText),
+            // Muted when absent rather than devWarn1 — see the same rule on the CPU temp row.
+            ColorFn = c => c.Metrics.TryValue(temp, out double t)
+                ? CpuRamPanelImpl.WarnColor(t, c.Warn("temp")) : "text2",
+            // Gated on registration, not on a readable value: a card that never reports a
+            // temperature has no row, one whose sensor stopped answering reads N/A in place.
+            VisibleWhen = c => c.Shows("temp") && c.Metrics.Has(temp),
             Style = TextStyle.Bold8,
             Align = TextAlign.Center,
             AbsY = 30,
@@ -53,7 +57,7 @@ public static class GpuPanel
         p.Elements.Add(new TextEl { Text = c => c.Label("usage", "GPU:"), VisibleWhen = c => c.Shows("usage"), Style = TextStyle.Bold8, Align = TextAlign.Left, AbsY = 32, FixedH = 11 });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(usage))}%",
+            Text = c => c.Na(usage, v => $"{ValueFormat.Int0(v)}%"),
             VisibleWhen = c => c.Shows("usage"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
@@ -72,7 +76,7 @@ public static class GpuPanel
         p.Elements.Add(new TextEl { Text = c => c.Label("vram", "MEM:"), VisibleWhen = c => c.Shows("vram"), Style = TextStyle.Bold8, Align = TextAlign.Left, FixedH = 11, Advance = 1 });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(vramUsed))}MB/{ValueFormat.Int0(c.Metrics.Value(vramTotal))}MB",
+            Text = c => c.Na(vramUsed, vramTotal, (u, t) => $"{ValueFormat.Int0(u)}MB/{ValueFormat.Int0(t)}MB"),
             VisibleWhen = c => c.Shows("vram"),
             Style = TextStyle.Text8,
             Color = "text2",
@@ -82,7 +86,7 @@ public static class GpuPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(vramPct))}%",
+            Text = c => c.Na(vramPct, v => $"{ValueFormat.Int0(v)}%"),
             VisibleWhen = c => c.Shows("vram"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
@@ -101,7 +105,9 @@ public static class GpuPanel
         p.Elements.Add(new TextEl { Text = c => c.Label("fan", "FAN:"), VisibleWhen = c => c.Shows("fan"), Style = TextStyle.Bold8, Align = TextAlign.Left, FixedH = 11, Advance = 0 });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(fanRpm))} rpm",
+            // 0 rpm is a real reading — zero-RPM / fan-stop mode — and shows as "0 rpm".
+            // Only an unreadable sensor reads N/A.
+            Text = c => c.Na(fanRpm, v => $"{ValueFormat.Int0(v)} rpm"),
             VisibleWhen = c => c.Shows("fan"),
             Style = TextStyle.Text8,
             Color = "text2",
@@ -111,7 +117,7 @@ public static class GpuPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{ValueFormat.Int0(c.Metrics.Value(fanPct))}%",
+            Text = c => c.Na(fanPct, v => $"{ValueFormat.Int0(v)}%"),
             VisibleWhen = c => c.Shows("fan"),
             Style = TextStyle.Bold8,
             Align = TextAlign.Right,
@@ -129,7 +135,7 @@ public static class GpuPanel
         // CORE / MEM clock chip row
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{c.Label("clockCore", "CORE:")} {ValueFormat.Int0(c.Metrics.Value(clockCore))}MHz",
+            Text = c => $"{c.Label("clockCore", "CORE:")} {c.Na(clockCore, v => $"{ValueFormat.Int0(v)}MHz")}",
             VisibleWhen = c => c.Shows("clockCore"),
             Style = TextStyle.Text8,
             ColorFn = c => c.Color("clockCore", "text2"),
@@ -142,7 +148,7 @@ public static class GpuPanel
         });
         p.Elements.Add(new TextEl
         {
-            Text = c => $"{c.Label("clockMem", "MEM:")} {ValueFormat.Int0(c.Metrics.Value(clockMem))}MHz",
+            Text = c => $"{c.Label("clockMem", "MEM:")} {c.Na(clockMem, v => $"{ValueFormat.Int0(v)}MHz")}",
             VisibleWhen = c => c.Shows("clockMem"),
             Style = TextStyle.Text8,
             ColorFn = c => c.Color("clockMem", "text2"),
@@ -162,14 +168,15 @@ public static class GpuPanel
             HistoryS = ctx.GraphHistoryS,
             Style = ctx.GraphStyle,
         };
+        // NaSample: an absent reading skips the sample rather than drawing a zero.
         if (ctx.Graphs("temp"))
-            graph.Series.Add(new GraphSeries { Color = ctx.Color("temp", "gpuTemp"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.Metrics.Value(temp) });
+            graph.Series.Add(new GraphSeries { Color = ctx.Color("temp", "gpuTemp"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.NaSample(temp) });
         if (ctx.Graphs("usage"))
-            graph.Series.Add(new GraphSeries { Color = ctx.Color("usage", "gpuUsage"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.Metrics.Value(usage) });
+            graph.Series.Add(new GraphSeries { Color = ctx.Color("usage", "gpuUsage"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.NaSample(usage) });
         if (ctx.Graphs("vram"))
-            graph.Series.Add(new GraphSeries { Color = ctx.Color("vram", "gpuMemUsage"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.Metrics.Value(vramPct) });
+            graph.Series.Add(new GraphSeries { Color = ctx.Color("vram", "gpuMemUsage"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.NaSample(vramPct) });
         if (ctx.Graphs("fan"))
-            graph.Series.Add(new GraphSeries { Color = ctx.Color("fan", "gpuFan"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.Metrics.Value(fanPct) });
+            graph.Series.Add(new GraphSeries { Color = ctx.Color("fan", "gpuFan"), Ring = ctx.NewRing(), FixedMax = 100, Sample = c => c.NaSample(fanPct) });
         p.Elements.Add(graph);
 
         return p;
