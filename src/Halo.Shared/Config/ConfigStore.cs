@@ -143,6 +143,42 @@ public sealed class ConfigStore : IDisposable
         return NoteUnreadable(file, last?.Message ?? "could not be opened");
     }
 
+    /// <summary>
+    /// Parse-check config bytes exactly the way <see cref="Load"/> parses a file, and throw
+    /// <see cref="InvalidDataException"/> naming the reason when they will not deserialize.
+    /// <para>
+    /// This is here, next to the reader, rather than at its caller on purpose. The Settings app
+    /// validates the file on disk before it writes, so a half-finished hand edit is refused instead
+    /// of clobbered — and that gate is only correct while it is exactly as strict as the reader it
+    /// guards. It drifted: the gate called <c>JsonSerializer.Deserialize(byte[], …)</c>, which
+    /// rejects a UTF-8 BOM with «'0xEF' is an invalid start of a value», while <see cref="Load"/>
+    /// reads through a <c>FileStream</c> and that overload skips one. Reported 2026-09-15 against a
+    /// settings.json some Windows PowerShell 5.1 <c>Set-Content</c> had rewritten (it writes a BOM
+    /// by default): the collector and the widget process read the file all day, and the Settings
+    /// app refused every save as invalid JSON. One reader, one verdict, no second opinion.
+    /// </para>
+    /// Takes the bytes rather than a path because the caller already holds them — it hashes the
+    /// same array to tell its own writes apart from a peer's, and that hash has to cover the file
+    /// as it actually sits on disk, BOM included.
+    /// </summary>
+    /// <exception cref="InvalidDataException">The bytes are not a valid document of type
+    /// <typeparamref name="T"/>.</exception>
+    public static void ThrowIfUnparsable<T>(byte[] utf8Json,
+        System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> ti) where T : class
+    {
+        try
+        {
+            // MemoryStream, not the byte[] overload. See above — this line is the fix.
+            using var stream = new MemoryStream(utf8Json, writable: false);
+            if (JsonSerializer.Deserialize(stream, ti) is null)
+                throw new JsonException("The file contains no configuration object.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException($"invalid JSON ({ex.Message})", ex);
+        }
+    }
+
     private const int TransientAttempts = 3;
     private const int TransientRetryMs = 50;
 

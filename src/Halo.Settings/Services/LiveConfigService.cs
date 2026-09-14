@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.IO;
-using System.Text.Json;
 using System.Windows;
 using Halo.Shared.Config;
 
@@ -284,18 +283,20 @@ public sealed class LiveConfigService : IDisposable
     {
         string path = PathFor(kind);
         if (!File.Exists(path)) return;
+        // The parse itself lives in ConfigStore, beside the reader it has to agree with: this gate
+        // exists to refuse a write over a hand edit that does not parse, and it is only correct
+        // while "does not parse" means the same thing here as it does to the loader. It did not —
+        // this method used JsonSerializer.Deserialize(byte[], …), which rejects a UTF-8 BOM that
+        // ConfigStore.Load's stream read skips, so a BOM'd settings.json blocked every save from
+        // the Settings app while the collector and the widget process read it happily.
+        //
+        // Hand it the bytes unchanged. ReadHashWithRetry hashes this same array to tell our own
+        // writes from a peer's, so the hash has to cover the file as it sits on disk, BOM included.
         byte[] bytes = ReadBytesWithRetry(path);
-        try
-        {
-            object? value = kind == ConfigFileKind.Settings
-                ? JsonSerializer.Deserialize(bytes, ConfigJsonContext.Default.AppSettings)
-                : JsonSerializer.Deserialize(bytes, ConfigJsonContext.Default.WidgetsConfig);
-            if (value is null) throw new JsonException("The file contains no configuration object.");
-        }
-        catch (JsonException ex)
-        {
-            throw new InvalidDataException($"invalid JSON ({ex.Message})", ex);
-        }
+        if (kind == ConfigFileKind.Settings)
+            ConfigStore.ThrowIfUnparsable(bytes, ConfigJsonContext.Default.AppSettings);
+        else
+            ConfigStore.ThrowIfUnparsable(bytes, ConfigJsonContext.Default.WidgetsConfig);
     }
 
     private void RememberInitialHash(ConfigFileKind kind)

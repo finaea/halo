@@ -131,6 +131,104 @@ public sealed class ConfigStoreLoadTests : IDisposable
         Assert.Empty(store.Widgets.Widgets);
     }
 
+    /// <summary>
+    /// A UTF-8 BOM is a hand edit, not corruption, and the reader has always treated it as one:
+    /// <c>Load</c> deserializes from a <c>FileStream</c>, and that overload skips a BOM. The
+    /// <c>byte[]</c> overload does not — it reports «'0xEF' is an invalid start of a value» — and
+    /// the Settings app's pre-write validator used to call it. Reported 2026-09-15 against a
+    /// settings.json a Windows PowerShell 5.1 <c>Set-Content</c> had rewritten: the collector and
+    /// the widget process read it all day while Settings refused every save as invalid JSON.
+    /// <para>
+    /// So this pins the contract the two sides have to agree on rather than one call site: a BOM'd
+    /// file <b>parses</b>, and — the half that actually bit — a BOM'd file is still <b>writable</b>.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void ByteOrderMark_ParsesAndStillAcceptsWrites()
+    {
+        using var store = Seeded();
+        store.SaveSettings();
+
+        // Put values on disk that the in-memory document does not have, then add the BOM. Asserting
+        // the seeded 11 would pass on the fallback path too — LoadOutcome.Unreadable keeps the last
+        // known-good copy, which holds exactly that. Only a real parse of these bytes yields 77.
+        using (var onDisk = new ConfigStore(_dir, watch: false))
+        {
+            onDisk.Reload();
+            onDisk.Widgets.Widgets.Single(w => w.Id == "cpu").X = 77;
+            onDisk.Settings.LockAll = true;
+            onDisk.SaveWidgets();
+            onDisk.SaveSettings();
+        }
+        PrependBom(WidgetsPath);
+        PrependBom(SettingsPath);
+
+        store.Reload();
+
+        Assert.Equal(2, store.Widgets.Widgets.Count);
+        Assert.Equal(77, store.Widgets.Widgets.Single(w => w.Id == "cpu").X);
+        Assert.True(store.Settings.LockAll);
+
+        // The write gate has to reach the same verdict as the reader. This is the assertion that
+        // fails if anyone puts a byte[] deserialize back in front of a config write.
+        Assert.True(store.UpdateWidget("cpu", w => w.X = 99));
+        store.UpdateWidgets(c => c.Arrange = WidgetsConfig.ArrangePending);
+        store.UpdateSettings(s => s.LockAll = false);
+
+        store.Reload();
+        Assert.Equal(99, store.Widgets.Widgets.Single(w => w.Id == "cpu").X);
+        Assert.False(store.Settings.LockAll);
+    }
+
+    /// <summary>
+    /// The gate the Settings app runs before it writes, on the file that broke it. This is the
+    /// assertion that was failing in the field: <c>ThrowIfUnparsable</c> deserialized from
+    /// <c>byte[]</c>, which stops dead on the BOM's first byte, so a file every other Halo process
+    /// could read was rejected here and the save was refused.
+    /// </summary>
+    [Theory]
+    [InlineData(ConfigStore.SettingsFile)]
+    [InlineData(ConfigStore.WidgetsFile)]
+    public void ThrowIfUnparsable_AcceptsAByteOrderMark(string file)
+    {
+        using var store = Seeded();
+        store.SaveSettings();
+        string path = Path.Combine(_dir, file);
+        PrependBom(path);
+
+        byte[] bytes = File.ReadAllBytes(path);
+        Assert.Equal(new byte[] { 0xEF, 0xBB, 0xBF }, bytes[..3]);
+
+        // The whole bug in one line. Pre-fix this threw InvalidDataException wrapping
+        // «'0xEF' is an invalid start of a value. Path: $ | LineNumber: 0 | BytePositionInLine: 0.»
+        if (file == ConfigStore.SettingsFile)
+            ConfigStore.ThrowIfUnparsable(bytes, ConfigJsonContext.Default.AppSettings);
+        else
+            ConfigStore.ThrowIfUnparsable(bytes, ConfigJsonContext.Default.WidgetsConfig);
+    }
+
+    /// <summary>The other half: tolerating a BOM must not turn the gate into a rubber stamp.</summary>
+    [Fact]
+    public void ThrowIfUnparsable_StillRejectsAHalfWrittenFile()
+    {
+        using var store = Seeded();
+        Truncate(WidgetsPath);
+        PrependBom(WidgetsPath);
+
+        byte[] bytes = File.ReadAllBytes(WidgetsPath);
+        Assert.Throws<InvalidDataException>(
+            () => ConfigStore.ThrowIfUnparsable(bytes, ConfigJsonContext.Default.WidgetsConfig));
+    }
+
+    /// <summary>Rewrites the file with a UTF-8 BOM in front, byte for byte otherwise.</summary>
+    private static void PrependBom(string path)
+    {
+        byte[] body = File.ReadAllBytes(path);
+        using var fs = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None);
+        fs.Write([0xEF, 0xBB, 0xBF]);
+        fs.Write(body);
+    }
+
     /// <summary>A half-written hand edit: the real trigger, unlike a trailing comma.</summary>
     private static string Truncate(string path)
     {
