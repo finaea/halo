@@ -304,14 +304,44 @@ public sealed class GraphEl : Element
     public bool FrameDisplayedOnly;
     /// <summary>Optional per-frame predicate — lane selection by FrameFlags (tap vs resolved).</summary>
     public Func<PanelContext, Halo.Metrics.FrameEntry, bool>? FrameFilter;
+    /// <summary>
+    /// Optional identity of what is being graphed, evaluated every Update. When it changes, every
+    /// series ring is emptied: the samples already in it describe something else now.
+    ///
+    /// A history graph only means anything while the thing it measures stays the same thing. Two
+    /// ways that breaks on the frame graphs: the game changes (the previous title's bars sit there
+    /// until they scroll out — ~3 s at 60 fps, and forever if the new foreground app never
+    /// presents), and the presented lane flips between the door-1 tap and the resolved stream,
+    /// which puts up to a full ring of bars from two different semantic lanes on one graph.
+    /// </summary>
+    public Func<PanelContext, long>? ResetKey;
 
     private bool _dirty = true;
     private long _lastBucket = long.MinValue;
     private double _lastWidth = 188;
     private double[] _cols = [];
+    private long _resetKey;
+    private bool _resetKeySeen;
 
     public override bool Update(PanelContext ctx)
     {
+        if (ResetKey != null)
+        {
+            long key = ResetKey(ctx);
+            if (!_resetKeySeen) { _resetKey = key; _resetKeySeen = true; }
+            else if (key != _resetKey)
+            {
+                _resetKey = key;
+                foreach (var s in Series)
+                {
+                    s.Ring.Clear();
+                    s.BucketMax = double.NegativeInfinity;
+                }
+                _lastBucket = long.MinValue;
+                _dirty = true;
+            }
+        }
+
         if (FrameSample != null)
         {
             // frames arrive in small timestamped batches (≤17 ms resolved lane, per-flush tap

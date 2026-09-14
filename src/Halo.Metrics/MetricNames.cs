@@ -103,6 +103,11 @@ public static class MetricNames
     public const string FpsFgRatio = "fps.fgratio";                      // displayed:presented
     public const string FpsRefreshHz = "fps.refresh.hz";                 // active monitor refresh
     public const string FpsAppName = "fps.app.name";
+    /// <summary>PID of the foreground app the frame pipeline is tracking, 0 when there is none.
+    /// A reading, not a Static: it changes on every app switch. Doubles as the identity of the
+    /// current capture — PclStatsProvider scopes its Reflex markers to it, and the widget's
+    /// frame graphs clear when it changes, so one game's bars never bleed into the next.</summary>
+    public const string FpsAppPid = "fps.app.pid";
     public const string LatencyClickMs = "latency.click.ms";             // Click-to-Photon
     public const string LatencyAllInputMs = "latency.allinput.ms";       // All-Input-to-Photon
     public const string LatencyQueueMs = "latency.queue.ms";             // input queue wait: PCLStatsInput post → ping consume (I2FS, ②a)
