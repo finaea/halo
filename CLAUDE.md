@@ -107,11 +107,26 @@ shortcuts and an ARP entry, and leaves PawnIO behind on uninstall (shared driver
   `no-sdk`, `failed`.
 - Only one process can own the PresentMon ETW session, so a second collector's fps metrics read
   N/A while the production one runs. Expected, not a bug.
-- **Never re-`Open()` a LibreHardwareMonitor `Computer` with `IsCpuEnabled` in quick succession.**
-  LHM 0.9.6 throws an NRE out of `CpuId.Get` on a re-open and, when two land a few seconds apart,
-  access-violates (`0xC0000005`) inside `CpuId..ctor` — an AV, so uncatchable, process gone
-  (measured 2026-09-13). Tens of seconds apart it survives, which is why the host's poll-failure
-  retry is fine. `LhmProvider.Part.Cpu` therefore opts out of `rescan`.
+- **LHM's `OpCode`/`Mutexes` plumbing is process-global and not reference counted — and Halo has
+  four `Computer` instances.** LHM 0.9.6's `Computer.Open()`/`Close()` call `OpCode.Open()`/
+  `Close()` unconditionally; `OpCode` is an `internal static` class whose `Open()` VirtualAllocs
+  **one** PAGE_EXECUTE_READWRITE page holding the rdtsc/cpuid stubs and points its static
+  delegates at it, and whose `Close()` nulls those delegates and `MEM_RELEASE`s the page. Only
+  `Computer._open` is per-instance. So **any** part's `Close()` breaks every other live part:
+  `NullReferenceException` out of `GenericCpu.Update` / `GenericCpu.EstimateTimeStampCounterFrequency`
+  (calling a null delegate), and `0xC0000005` when the page is freed while another thread is
+  executing in it — uncatchable, process gone. `LhmProvider` obeys **two** rules, and it needs
+  both: (1) serialise every LHM call behind its one static `ReaderWriterLockSlim` — write =
+  `Open`/`Close`, read = `hw.Update()`, **never call LHM outside that gate**; and (2) **never
+  leave a `Close()` unpaired** — every `Close` must be followed by an `Open` before the write lock
+  is released, so no part ever exits the gate with LHM's globals shut. Rule 1 alone is not enough
+  and looks like it is: measured 2026-09-14, with the gate in place but `Initialize`'s
+  "no hardware found" path still closing, an unelevated `lhm-storage` retry broke `lhm-cpu`'s poll
+  129 ms later. That is why an unavailable part keeps its empty `Computer` open until its next
+  retry re-opens it. Diagnosed 2026-09-14 — the earlier note here blamed "re-`Open()` in quick
+  succession" and `CpuId.Get`, both symptoms of this, and wrongly concluded the host's
+  poll-failure retry path was safe. `Part.Cpu` still opts out of `rescan`, now only because it has
+  nothing to re-enumerate.
 - PawnIO (`C:\Program Files\PawnIO`) is a **shared** driver — FanControl, LHM and HWiNFO use the
   same one. Halo's installer offers it (`Halo.Settings.exe --install-pawnio`, exit 3010 = reboot
   needed) and never removes it on uninstall.
