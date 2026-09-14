@@ -7,8 +7,8 @@ App** with one low-overhead app.
 
 ![Halo widget suite](preview.png)
 
-Eleven widget types, all independent windows you drag where you like
-(`src/Halo.Shared/Panels/PanelCatalog.cs:102-312`):
+Eleven widget types, all independent windows that can be dragged anywhere
+(`src/Halo.Shared/Panels/PanelCatalog.cs:100-328`):
 
 | | |
 | --- | --- |
@@ -37,7 +37,7 @@ Disk: ~57 MB to download, ~173 MB installed (one shared .NET runtime for all thr
 **Elevation model, in two sentences.** The collector runs elevated because ring-0 sensor reads and
 ETW frame capture need it; the widgets and the settings app run as a normal user process at medium
 integrity. They talk through a shared-memory section whose DACL grants read to everyone at medium
-integrity, so nothing you interact with is elevated.
+integrity, so nothing a user clicks on is elevated.
 
 ## Install
 
@@ -47,32 +47,34 @@ integrity, so nothing you interact with is elevated.
    - **PawnIO driver for CPU temps, fans, drive temps** — a signed third-party kernel driver
      ([namazso/PawnIO](https://github.com/namazso/PawnIO), GPL-2.0-or-later). LibreHardwareMonitor
      0.9.6 has no other way to read those sensors. If it says a restart is needed, those rows stay
-     `N/A` until you reboot; nothing else is affected. Untick it if you'd rather not, you can turn
-     it on later from System check. If a PawnIO is already on the machine (FanControl, HWiNFO and
+     `N/A` until the machine is restarted; nothing else is affected. It can be unticked, and turned
+     on later from System check. If a PawnIO is already on the machine (FanControl, HWiNFO and
      LibreHardwareMonitor install the same driver), this component isn't shown and the existing
      driver is used as is, whatever its version.
    - **Start with Windows** — registers two scheduled tasks (`\Halo\Collector` at highest
      privileges, `\Halo\Widgets` at normal) so nothing prompts for UAC at logon.
    There's also a **Create a desktop shortcut** checkbox.
-4. Widgets appear, and **Settings opens on the System check page**: what your hardware actually
+4. Widgets appear, and **Settings opens on the System check page**: what the hardware actually
    exposes, which providers are OK / degraded / unavailable and why, and buttons to fix the
-   fixable. First run also offers to generate a starting layout for your monitors.
+   fixable. First run also offers to generate a starting layout for the monitors it finds.
 
-### Starting Halo yourself
+### Starting Halo by hand
 
-Halo doesn't start itself unless you ticked **Start with Windows**. The **Halo** shortcut (Start
-menu, and your desktop if you asked for it) is the one to click: the overlay comes up, then Windows
-asks to let the collector run as administrator. Say yes — that's what reads CPU temps, fans, drive
-temps and the FPS pipeline. Say no and everything else still works, those rows just read `N/A`.
+Without **Start with Windows**, Halo does not start itself. The **Halo** shortcut — Start menu, and
+the desktop if that box was ticked — is the one to click: the overlay comes up, then Windows asks
+to let the collector run as administrator. Approving it is what enables CPU temps, fans, drive
+temps and the FPS pipeline; declining leaves everything else working, with those rows reading
+`N/A`.
 
-Clicking it again while Halo is already running is safe: the widgets are single-instance, and the
-collector is only started if there isn't one. `Halo Widgets` and `Halo Settings` still start one
-process each, with no prompt, and `Halo.Collector.exe` on its own is still unelevated — `--dump`,
+Clicking it again while Halo is already up is safe. The widgets are single-instance, and the
+collector is started only when the section says none is running
+(`src/Halo.Widgets/CollectorLauncher.cs:80-88`). `Halo Widgets` and `Halo Settings` still start one
+process each with no prompt, and `Halo.Collector.exe` on its own is still unelevated — `--dump`,
 `--migrate-config` and the smoketests never ask for anything.
 
-Prefer portable? `Halo-<version>-win-x64.zip` from the same release unzips to a folder that keeps
-its config and logs in `.\data` next to the exes (that's what the `portable.marker` file inside
-does). Run `Halo.Collector.exe` as admin, then `Halo.Widgets.exe`.
+There is a portable build too. `Halo-<version>-win-x64.zip` from the same release unzips to a
+folder that keeps its config and logs in `.\data` next to the exes (that's what the
+`portable.marker` file inside does). Run `Halo.Collector.exe` as admin, then `Halo.Widgets.exe`.
 
 ### Where things go
 
@@ -83,7 +85,8 @@ does). Run `Halo.Collector.exe` as admin, then `Halo.Widgets.exe`.
 | Autostart | scheduled tasks `\Halo\Collector` and `\Halo\Widgets` |
 | PawnIO | `C:\Program Files\PawnIO` — **left behind on uninstall**, it's a shared driver |
 
-Full footprint, including what uninstall removes: [docs/global-installs.md](docs/global-installs.md).
+Full footprint, what rides inside the app folder, and what uninstall removes:
+[docs/install-footprint.md](docs/install-footprint.md).
 
 ## What works without the optional pieces
 
@@ -92,10 +95,10 @@ Full footprint, including what uninstall removes: [docs/global-installs.md](docs
 the OS, not the driver), RAM, GPU, network, drive space and read/write rates, FPS, latency, top
 processes, clock.
 
-**Without an NVIDIA GPU** — AMD and Intel cards are enumerated through LibreHardwareMonitor, so you
-get the temp / load / clock / VRAM rows it exposes. NVML-only extras (some power and clock detail),
-DLSS state and Reflex PC latency read `N/A`. Multi-GPU is handled either way: read `gpu.count` and
-pick the card per widget.
+**Without an NVIDIA GPU** — AMD and Intel cards are enumerated through LibreHardwareMonitor, so the
+temp / load / clock / VRAM rows it exposes still work. NVML-only extras (some power and clock
+detail), DLSS state and Reflex PC latency read `N/A`. Multi-GPU is handled either way: read
+`gpu.count` and pick the card per widget.
 
 **Without admin** (running the exe by hand instead of through the task) — LibreHardwareMonitor's
 CPU / SuperIO / storage parts and both ETW pipelines (PresentMon frames, Reflex markers) are gone,
@@ -130,75 +133,142 @@ src/Halo.Widgets     rendering engine, panel definitions, window management
 src/Halo.Settings    WPF settings app (WPF-UI), System check, first run
 src/Halo.Shared      paths, config models, panel manifest, logging
 src/Halo.Metrics     the public client package: layout, reader, writer, control pipe
-config/reference     the v2 config layout for reference (your real config lives in %LOCALAPPDATA%)
+config/reference     the v2 config layout for reference (the real config lives in %LOCALAPPDATA%)
 tools/extracted      faithful JSON transcriptions of the original Rainmeter skins (spec source)
 ```
+
+How the three processes fit together, and why the boundary sits where it does:
+[docs/architecture.md](docs/architecture.md).
 
 ## For widget developers
 
 Halo's metrics are a public, documented interface. Any process running as the same user can read
-them — you do not need Halo's code, and you do not need admin.
+them — no Halo code required, and no admin.
 
 - **[docs/metrics-protocol.md](docs/metrics-protocol.md)** — the contract: section
   `Local\Halo.Metrics.v2`, byte-exact struct layouts, the five reader rules, the control pipe, and
-  a ~60-line Python reader you can paste.
+  a ready-to-paste ~60-line Python reader.
 - **[docs/current-metrics-inventory.md](docs/current-metrics-inventory.md)** — what every metric
   name means and how fresh it is.
 - **`src/Halo.Metrics`** — a dependency-free, AOT-friendly .NET client. `CollectorSession`
-  implements all five reader rules for you.
+  implements all five reader rules already.
 - **`Halo.Collector.exe --dump`** for a human-readable snapshot, `--dump --json` for the documented
   machine shape.
 
 Indexed families (`gpu.<i>.*`, `cpu.core.<i>.*`, `fan.<n>.*`, `drive.<x>.*`) are discovered at
 runtime — read `gpu.count` / `cpu.logical.count` / `fan.count` and never assume one of anything.
-Every metric also publishes the real cadence it changes at, so you know when polling faster buys
-you nothing.
+Every metric also publishes the real cadence it changes at, so a consumer knows when polling faster
+buys nothing.
 
 ## Troubleshooting
 
-**"Windows protected your PC" / SmartScreen.** Halo is not code-signed yet — a certificate costs
-money and v1 doesn't have one. Click **More info → Run anyway**. If that bothers you, build from
-source instead; the hash of what you build is the hash of what you run.
+**Settings → System check is the first stop for most of these.** It lists every data source with
+OK / degraded / unavailable, says *why* in plain words, and has buttons for the two things that are
+fixable from there: installing PawnIO and repairing autostart.
 
-**A file vanished, or Defender flagged something.** Happened once, 2026-07-19: Defender's ML
-heuristic quarantined `Halo.Collector.csproj` as `Trojan:Win32/Bearfoos.A!ml` — a false positive on
-plain MSBuild XML. Unsigned binaries make a repeat more likely. Check `Get-MpThreatDetection`,
-restore the file, and report it to Microsoft as a false positive. Halo's installer deliberately does
-**not** add a Defender exclusion — that's your call, not ours.
+**Temperatures, fan speeds or drive temperatures show "N/A".**
+Those particular readings need a small helper driver called PawnIO, and it is either not installed
+or installed but not loaded yet. Open Settings → System check. If it offers an **Install PawnIO**
+button, use it. If it says a restart is needed, restart — the driver cannot load until then.
+Everything else keeps working in the meantime.
 
-**Widgets disappeared after Explorer restarted.** Explorer taking the desktop host window down
-takes the widgets with it. Halo notices within ~2 s and rebuilds them
-(`src/Halo.Widgets/App.cs:376-393`). If they don't come back, check
-`%LOCALAPPDATA%\Halo\logs\widgets-*.log`.
+> Windows will not let ordinary software read CPU package temperature, motherboard fan headers or
+> SMART data directly, so LibreHardwareMonitor 0.9.6 reads them through PawnIO's signed kernel
+> driver. It is shared: FanControl, HWiNFO and LibreHardwareMonitor install the same one, so a
+> machine that already runs any of those has it.
 
-**Laptop on battery: did Halo stop?** No. Both tasks are registered with
-`DisallowStartIfOnBatteries` and `StopIfGoingOnBatteries` off
-(`src/Halo.Settings/Services/AutostartManager.cs:182-183`) — `schtasks`' defaults would have
-stopped them, which is why Halo registers through the Task Scheduler API instead.
-
-**Temps and fans read N/A.** PawnIO is either not installed or not loaded (it needs a restart after
-install). Settings → System check tells you which, and has an Install PawnIO button.
-
-**FPS reads N/A while a game is running.** Only one process can own the PresentMon ETW session, so a
-second collector — or another capture tool holding it — gets nothing. Also check the collector is
-actually elevated (System check says).
-
-**Widgets in the wrong place / wrong monitor.** Positions are stored per monitor device id. Drag one
-once and the drop saves instantly, including which monitor it landed on.
-
-**Everything reads N/A and there was no UAC prompt.** You probably started `Halo Widgets` rather
-than **Halo** — the plain entry is the overlay on its own. Start `Halo` instead, or start
+**Everything reads N/A, and no UAC prompt ever appeared.**
+That usually means Halo was started from the `Halo Widgets` entry rather than **Halo**. The plain
+entry is the overlay on its own — it never starts the collector. Start **Halo** instead, or run
 `Halo.Collector.exe` as administrator by hand.
 
-**I hand-edited `widgets.json` and my widgets vanished.** They shouldn't any more: a config file
-that's present but doesn't parse is ignored and the last good copy is kept, with a line in
-`%LOCALAPPDATA%\Halo\logs\widgets-*.log` saying which file and why. Halo also won't overwrite it
-while it's broken, so a widget you drag in the meantime won't stick until the JSON is valid again.
+**The numbers froze, or every panel shows a "stale" badge.**
+The background process that reads the sensors (the collector) has stopped. If autostart is on, Halo
+restarts it by itself within a few seconds. If it isn't, clicking the **Halo** shortcut again
+starts one — that is what the badges are waiting for. The log is at
+`%LOCALAPPDATA%\Halo\logs\collector-*.log`.
 
-**On a standard-user account, Settings changes don't reach the collector.** UAC asked for an
-admin's password, so the collector is running as *that* user and resolves a different
-`%LOCALAPPDATA%\Halo`. Use portable mode, or tick "Start with Windows" — the scheduled task always
-runs as you. Details in [docs/global-installs.md](docs/global-installs.md#6-known-limitation-the-halo-shortcut-on-a-standard-user-account).
+> The widget process treats the collector as stale after 5 s without a heartbeat and asks the
+> `\Halo\Collector` scheduled task to start it, backing off 1 s, 5 s, 30 s. With no task registered
+> it logs one line and leaves the badges up rather than raising a UAC dialog on an idle desktop,
+> and re-probes for the task every 60 s in case autostart gets switched on. A collector that is
+> alive but wedged is `/End`ed before the restart, because the task ignores a second instance
+> (`src/Halo.Widgets/App.cs:550-606`).
+
+**The widgets didn't come back after a restart.**
+Halo starts itself at logon only if the "Start with Windows" option was ticked during install.
+Settings → System check says whether the two startup entries are there, and **Repair autostart**
+re-creates them. Either way, the **Halo** shortcut starts everything by hand.
+
+> The entries are scheduled tasks, `\Halo\Collector` (highest privileges) and `\Halo\Widgets`
+> (normal), not registry Run values — that is what lets the elevated half start at logon with no
+> UAC prompt. Full detail in [docs/install-footprint.md](docs/install-footprint.md).
+
+**The widgets vanished, with nothing else obviously wrong.**
+This normally means Windows Explorer restarted and took the desktop with it. Halo notices within
+about 2 seconds and rebuilds the widgets. If they don't come back, the log at
+`%LOCALAPPDATA%\Halo\logs\widgets-*.log` says why.
+
+> The widgets are child windows of the desktop host (`Progman` / `WorkerW`), and Win32 destroys a
+> window's children with it. A guard re-validates the host every 2 s and rebuilds onto whatever
+> host exists then, even before the shell has finished coming back
+> (`src/Halo.Widgets/App.cs:423-456`).
+
+**Widgets are on the wrong monitor, or in the wrong place.**
+Just drag one where it belongs — the position saves the moment it is dropped, including which
+monitor it landed on. If a monitor is unplugged, the widgets that lived on it are packed onto the
+primary one temporarily; plugging it back in puts them home, and the saved layout is never
+overwritten in the meantime.
+
+**The FPS counter reads "N/A" while a game is running.**
+Only one program on the machine can capture frame timings at a time. If another capture tool
+(another copy of Halo, CapFrameX, FrameView, HWiNFO's frame counter) is running, close it. If that
+isn't it, System check will say the collector is not running with administrator rights, which frame
+capture needs.
+
+> "One at a time" is a Windows ETW limitation on the PresentMon session, not a Halo choice. A second
+> collector on the same machine reads N/A for fps and nothing else — expected, not a bug.
+
+**Halo is running on a laptop — does it stop on battery?**
+No. It keeps collecting and rendering unplugged.
+
+> Both tasks are registered with `DisallowStartIfOnBatteries` and `StopIfGoingOnBatteries` off
+> (`src/Halo.Settings/Services/AutostartManager.cs:220-221`). `schtasks` defaults to stopping on
+> battery, which is why Halo registers through the Task Scheduler API instead.
+
+**"Windows protected your PC" appears when running the installer.**
+That is SmartScreen reacting to an app it has not seen before, not a virus warning. Halo is not
+code-signed — a certificate costs money that v1 doesn't have. Click **More info → Run anyway**.
+Anyone who would rather not take that on faith can build from source instead; the hash of the build
+is the hash of what runs.
+
+**Windows Defender deleted or quarantined a file.**
+It happens to unsigned software: Defender's machine-learning heuristic occasionally flags something
+harmless. Check what it took with `Get-MpThreatDetection` in PowerShell, restore the file, and
+report it to Microsoft as a false positive. Halo's installer deliberately does **not** add a
+Defender exclusion — punching a hole in antivirus is the machine owner's decision, not the
+installer's.
+
+> Recorded instance, 2026-07-19: `Halo.Collector.csproj` — a plain MSBuild XML file, not a binary —
+> quarantined as `Trojan:Win32/Bearfoos.A!ml`.
+
+**A hand-edited `widgets.json` made the widgets disappear.**
+It shouldn't, any more. A config file that is present but does not parse is ignored, the last good
+copy is kept, and `%LOCALAPPDATA%\Halo\logs\widgets-*.log` names the file and the reason. Fix the
+JSON and the widgets come back on the next save.
+
+> Halo also refuses to overwrite a file it could not read, so a widget dragged in the meantime
+> won't stick until the JSON is valid again — overwriting would throw away whatever was being
+> hand-edited (`src/Halo.Shared/Config/ConfigStore.cs:139-155`).
+
+**Settings changes don't reach the collector, on a standard-user account.**
+This happens when UAC asked for an administrator's password rather than just consent. The collector
+is then running as *that* account and reads a different `%LOCALAPPDATA%\Halo` from the one Settings
+writes. Use portable mode, or tick "Start with Windows" — the scheduled task always runs as the
+logged-in user.
+
+> Full explanation, including why the metrics still arrive while the settings diverge:
+> [docs/install-footprint.md](docs/install-footprint.md#known-limitation-the-halo-shortcut-on-a-standard-user-account).
 
 ## Privacy
 
@@ -207,8 +277,8 @@ No telemetry. Nothing is uploaded, no analytics, no crash reporting, no update c
 The only outbound network request Halo can make is an external-IP lookup against
 `https://api.ipify.org` for the Network widget's public-IP row. It is **off by default** on a fresh
 install and is a single switch in Settings → General (`collector.externalIp.enabled`). Everything
-else — ETW sessions, the PresentMon service, the shared-memory section, the control pipe — is local
-to your machine.
+else — ETW sessions, the PresentMon service, the shared-memory section, the control pipe — stays on
+the machine.
 
 ## Credits and licences
 

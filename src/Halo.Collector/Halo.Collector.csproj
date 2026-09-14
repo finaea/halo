@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Halo Collector: elevated sensor-data process. See native-widget-implementation-plan.md §4.
+<!-- Halo Collector: elevated sensor-data process. See docs\architecture.md.
      Note: 2026-07-19 Defender ML false-positive (Bearfoos.A!ml) quarantined this file once;
      content is plain MSBuild XML. If it happens again, restore from git and consider an
      exclusion for this folder (user decision). -->
@@ -24,8 +24,8 @@
   <ItemGroup>
     <!-- Everything the exe reads at runtime is resolved from its own folder (Halo.Shared.Paths),
          so the build output has to be a complete, runnable layout — the same one the installer
-         ships. The PresentMon SDK binaries are gitignored today, so this glob is empty on a
-         fresh clone and the frame pipeline degrades exactly as it does without the SDK. -->
+         ships. The PresentMon SDK binaries ARE committed (MIT, ~5.4 MB — .gitignore spells out
+         why), so a fresh clone builds a working frame pipeline with no extra download. -->
     <Content Include="..\..\tools\presentmon\sdk\**\*.*" LinkBase="presentmon" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\assets\halo.ico" Link="assets\halo.ico" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

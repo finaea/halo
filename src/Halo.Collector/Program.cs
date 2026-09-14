@@ -140,7 +140,7 @@ host.Add(new NetworkProvider(configStore));           // net rates
 host.Add(new NvmlProvider());                         // GPU: cap 20 Hz
 host.Add(new LhmProvider(LhmProvider.Part.Cpu));      // MSR: 5 Hz
 host.Add(new LhmProvider(LhmProvider.Part.SuperIo));  // fans/Vcore: 1 Hz (cap 2)
-host.Add(new LhmProvider(LhmProvider.Part.Storage));  // SMART temps: 1/30 s
+host.Add(new LhmProvider(LhmProvider.Part.Storage));  // SMART temps: every 10 s
 host.Add(new LhmProvider(LhmProvider.Part.Gpu));      // NVAPI extras: voltage, fan RPM
 host.Add(new PresentMonProvider(configStore));        // frame data: event-driven
 // NVIDIA PCL Stats ETW consumer: true Reflex PC latency + rendered (pre-FG) rate.
