@@ -11,7 +11,7 @@ namespace Halo.Widgets;
 /// and both ETW pipelines are administrator-only, and without them temps, fans, drive temps, FPS
 /// and latency all read N/A.
 ///
-/// The UAC prompt is deliberate (Jack, 2026-09-14), but it belongs here rather than in the
+/// The UAC prompt is deliberate (product decision, 2026-09-14), but it belongs here rather than in the
 /// collector's manifest. <c>requireAdministrator</c> would make it unconditional — including for
 /// <c>--dump</c>, <c>--migrate-config</c> and the two smoketests — and would delete the "degrades
 /// gracefully unelevated" property the collector is built around.

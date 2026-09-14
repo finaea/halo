@@ -17,7 +17,7 @@ Three ways to consume it, easiest first:
 | --- | --- |
 | `Halo.Collector.exe --dump --json` | scripts, one-shot reads, debugging |
 | `Halo.Metrics.dll` (.NET, no dependencies) | .NET widgets and tools — `CollectorSession` implements every rule below |
-| Map the section yourself | any language; ~60 lines, see the Python example at the end |
+| Map the section directly | any language; ~60 lines, see the Python example at the end |
 
 ## Names
 
@@ -101,8 +101,8 @@ move or grow regions, and a reader that trusts the header keeps working.
 | 92–127 | — | reserved |  |
 
 `nominalRateHz` is not always the provider's poll rate: `fps.app.name` is refreshed once a second
-inside a 40 Hz drain, `net.ip.external` every few minutes. Use it to bound your own refresh rate —
-polling a 1 Hz metric at 10 Hz just burns CPU. **`nominalRateHz == 0` means the metric has no
+inside a 40 Hz drain, `net.ip.external` every few minutes. It is there to bound a consumer's own
+refresh rate — polling a 1 Hz metric at 10 Hz just burns CPU. **`nominalRateHz == 0` means the metric has no
 cadence at all**: it is written once when the hardware is discovered (semantics 6, `static`) and
 again only if that hardware is re-enumerated — re-reading it is pointless, and its age is expected
 to grow without bound. Everything the collector re-reads on each poll carries a non-zero rate.
@@ -135,7 +135,7 @@ Seqlock: read `seq`, bail if odd, copy, re-read `seq`, retry if it changed.
 
 A string metric **also has a value entry**, and that entry's `timestampQpc` is what says whether the
 string is live — it is the only thing the collector's staleness marker touches. So rule 3 applies
-here exactly as it does to a double: **check the timestamp before you trust the payload**, or a
+here exactly as it does to a double: **check the timestamp before trusting the payload**, or a
 metric the collector has marked N/A (the public IP after the user turns external-IP lookup off, a
 removed drive's label, the last game's name after it exits) keeps reading back as a current value.
 The sample reader below gets this right; Halo's own C# reader did not until 2026-09-14.
@@ -171,9 +171,10 @@ Frame flags: `1` displayed · `2` dropped · `4` application frame · `8` genera
 `16` repeated · `32` provisional (seen at present time by the low-latency tap; its fate is never
 revised, so never mix provisional and resolved entries in one graph).
 
-Entries are written, then `frameCursor` is published. Read `[yourCursor, frameCursor)`; if you fell
-behind by more than the capacity, the oldest frames are gone — start from `frameCursor - capacity`.
-The entries themselves carry no lock, so a slow copy can be overtaken mid-read — see reader rule 5.
+Entries are written, then `frameCursor` is published. Read `[lastSeenCursor, frameCursor)`; a reader
+that fell behind by more than the capacity has lost the oldest frames and should start from
+`frameCursor - capacity`. The entries themselves carry no lock, so a slow copy can be overtaken
+mid-read — see reader rule 5.
 
 ## Enums
 
@@ -203,17 +204,19 @@ flags:     1 has-max-companion (a "<name>.max" metric exists)
    guess.
 2. **Watch `collectorStartQpc`.** A restarted collector reuses the same section name and rebuilds
    the registry from scratch, so every cached name→index mapping becomes wrong — and wrong here
-   means silently reading a different metric. When the value changes, clear your cache and
-   re-resolve. (This cost us a real corruption bug on 2026-07-19.)
+   means silently reading a different metric. When the value changes, drop the cache and
+   re-resolve. (Ignoring this caused a real corruption bug on 2026-07-19.)
 3. **`timestampQpc == 0` is N/A**, and that is different from old: a metric with a timestamp has a
-   real value, which may simply be stale. Compute the age as
-   `(QueryPerformanceCounter() - timestampQpc) / qpcFrequency` and decide for yourself.
+   real value, which may simply be stale. Age is
+   `(QueryPerformanceCounter() - timestampQpc) / qpcFrequency`; how stale is too stale is the
+   consumer's call.
 4. **Strings need the seqlock retry** above.
 5. **Re-check `frameCursor` after copying frames.** The ring has no per-entry lock: bounding the
-   read to the capacity *before* the copy is not enough, because the writer can lap you during it.
-   Snapshot `frameCursor` again afterwards and discard everything below `frameCursor₂ - capacity` —
-   those slots now hold newer frames, not the ones you asked for. Without this a reader that stalls
-   mid-copy (or just reads a full ring at 40 Hz+) hands its caller a silently reordered timeline.
+   read to the capacity *before* the copy is not enough, because the writer can lap the reader
+   during it. Snapshot `frameCursor` again afterwards and discard everything below
+   `frameCursor₂ - capacity` — those slots now hold newer frames, not the ones that were asked for.
+   Without this a reader that stalls mid-copy (or just reads a full ring at 40 Hz+) hands its caller
+   a silently reordered timeline.
 
 Plus one for liveness: the collector is gone if `heartbeatQpc` has not moved for several seconds
 *and* `collectorPid` no longer exists. Heartbeat alone can lag on a busy machine.
@@ -320,14 +323,14 @@ for i in range(count):
     else:
         print(f"{name:<38} {value:>14.3f}  age={age:.2f}s @{nominal_hz:g}Hz")
 
-# Cache name->index if you poll repeatedly, and drop the cache whenever start_qpc changes.
+# Cache name->index for repeated polling, and drop the cache whenever start_qpc changes.
 ```
 
 ## Compatibility promise
 
-- **Same major version = same rules.** Regions may move and capacities may grow; the header tells
-  you where everything is. New metrics, new providers, new enum values may appear at any time —
-  ignore what you do not recognise.
+- **Same major version = same rules.** Regions may move and capacities may grow; the header says
+  where everything is. New metrics, new providers, new enum values may appear at any time — a
+  reader should ignore what it does not recognise.
 - **A breaking change gets a new major version and a new section name**, so old consumers see
   "collector not running" instead of garbage.
 - Metric *names* are not part of the layout contract, but renaming one is treated as a breaking

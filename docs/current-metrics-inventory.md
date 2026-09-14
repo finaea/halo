@@ -120,7 +120,7 @@ scanout stages are identical. With no frames flowing the panel falls back to **T
 
 ### Two things the totals deliberately separate
 
-**Transport latency** (the bold number) is *how old the newest sample is when you see it*.
+**Transport latency** (the bold number) is *how old the newest sample is by the time it is on screen*.
 **Aggregation settle** is *how long until a change is fully reflected* — a rolling 1 s FPS shows
 the newest frame within ~47 ms but takes a full second to finish moving. Only the frame graph has
 neither: it draws raw per-frame values with no window at all.
@@ -324,7 +324,7 @@ is hand-written.
 | `gpu.<i>.voltage.v` | 1 | V | latest | 1 | 0.970 |
 | `gpu.<i>.voltage.v.max` | 1 | V | running max | 1 | 0.975 |
 
-**`presentmon`** *(values N/A here: no 3D app, and Jack's production collector owns the one
+**`presentmon`** *(values N/A here: no 3D app, and a production collector owns the one
 PresentMon ETW session)*
 
 | Metric | n | Unit | Semantics | Nominal Hz | Example |

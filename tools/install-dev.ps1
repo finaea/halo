@@ -91,5 +91,5 @@ else {
 }
 
 Write-Host ""
-Write-Host "Done. Global footprint: two scheduled tasks under \Halo\. See docs\global-installs.md." -ForegroundColor Green
+Write-Host "Done. Global footprint: two scheduled tasks under \Halo\. See docs\install-footprint.md." -ForegroundColor Green
 Write-Host "Remove with: tools\uninstall-dev.ps1"

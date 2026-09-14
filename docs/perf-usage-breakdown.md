@@ -15,7 +15,7 @@ the ~7 ms coalesce cap (~140/s). Idle-desktop numbers will be far lower (no even
 | 1 | **Halo.Widgets** | **24.8%** | 1.24% | 1.7% | 121 MB |
 | 2 | **PresentMonService** (bundled child) | **16.6%** | 0.83% | 0.0% | **190 MB** |
 | 3 | Halo.Collector | 6.5% | 0.33% | 0.0% | 74 MB |
-| — | dwm (shared; includes our composition + everything else) | — | — | 2.6% | — |
+| — | dwm (shared; includes Halo's composition + everything else) | — | — | 2.6% | — |
 
 **Total Halo footprint under worst-case game load: ~2.4% of the machine, ~48% of one core.**
 GPU is a non-issue across the board.
@@ -47,11 +47,11 @@ repaint ~140×/s each wake. Cost drivers, ranked by suspicion (hypotheses — pr
 
 ## 2. PresentMonService — 16.6% of one core, 190 MB RAM
 
-Bundled Intel service, our child. Drivers:
+Bundled Intel service, spawned as a child of the collector. Drivers:
 
 | Driver | Why suspected | Action |
 |---|---|---|
-| **Internal hardware telemetry sampling** | the service polls GPU/CPU telemetry (power, clocks, temps) for its own metric system — **we never consume any of it** and never called `pmSetTelemetryPollingPeriod`, so it runs at the service default | **Strong lead, zero cost:** call `pmSetTelemetryPollingPeriod(session, 0, 5000)` (max period) at SDK start — likely a large cut of both CPU and the 190 MB (telemetry rings) |
+| **Internal hardware telemetry sampling** | the service polls GPU/CPU telemetry (power, clocks, temps) for its own metric system — **Halo consumes none of it** and never calls `pmSetTelemetryPollingPeriod`, so it runs at the service default | **Strong lead, zero cost:** call `pmSetTelemetryPollingPeriod(session, 0, 5000)` (max period) at SDK start — likely a large cut of both CPU and the 190 MB (telemetry rings) |
 | Manual ETW flush every 5 ms | 200 kernel buffer sweeps/s (`pmSetEtwFlushPeriod`) | raising `presentMonEtwFlushMs` 5→10 halves it, but **also slows the tap** (shared setting) — split into two settings first if pursued |
 | Event volume at 218 fps | ETW parse + frame resolution + NSM writes per frame | inherent; scales with game fps |
 
@@ -73,7 +73,7 @@ across ~20 provider/ETW threads.
 ## 4. GPU + RAM notes
 
 - Widgets GPU 1.7% at 140 repaints/s — D2D on the 5070 Ti is loafing; ignore.
-- dwm's 2.6% includes composing our layered windows + the game + everything; not attributable.
+- dwm's 2.6% includes composing Halo's layered windows + the game + everything; not attributable.
 - RAM: service 190 MB is the outlier (trace buffers + frame stores + telemetry rings — the
   telemetry fix above may shrink it); Widgets 121 MB (D2D + layout caches + .NET) and collector
   74 MB are unremarkable.
@@ -263,7 +263,7 @@ whole-process check of that prediction.
 Two builds of the same commit — one with the R1 rates, one with the pre-ticket-02 ones, differing
 in nothing but `CollectorRates.cs` — were run **interleaved** (new, old, new, old, …) so machine
 drift across the ~20-minute run cancels between the arms. 25 s of settling, then a 120 s window,
-4 repetitions each. Unelevated, idle desktop, Jack's production v1 stack running throughout.
+4 repetitions each. Unelevated, idle desktop, a production v1 stack running throughout.
 
 | Arm | % of one core, per rep | mean | sd | RAM |
 |---|---|---|---|---|
@@ -333,7 +333,7 @@ costs. Rates plan R5 predicted "≤10 Hz × ~11 widgets ≈ 2× today's 1.9 % of
 **Method**: the same `TotalProcessorTime` delta as above — 25 s settling, then a 120 s window,
 on the Halo.Widgets process. The two arms were run **interleaved** (5, 10, 5, 10) by editing
 `rateHz` in the config and letting the live-apply path pick it up, so no restart and no rebuild
-happened between arms. Jack's migrated 11-widget layout, an unelevated Debug collector, and his
+happened between arms. A migrated 11-widget layout, an unelevated Debug collector, and a
 production v1 stack running throughout.
 
 | Arm | % of one core, per rep | mean | RAM |

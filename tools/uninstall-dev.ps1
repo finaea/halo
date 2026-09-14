@@ -83,5 +83,5 @@ if ($p.ExitCode -ne 0) {
 Write-Host "    OK" -ForegroundColor Green
 
 Write-Host ""
-Write-Host "Done. Nothing global left (docs\global-installs.md)." -ForegroundColor Green
-Write-Host "Kept on purpose: PawnIO (shared driver) and %LOCALAPPDATA%\Halo (your config and layouts)." -ForegroundColor DarkGray
+Write-Host "Done. Nothing global left (docs\install-footprint.md)." -ForegroundColor Green
+Write-Host "Kept on purpose: PawnIO (shared driver) and %LOCALAPPDATA%\Halo (config and layouts)." -ForegroundColor DarkGray

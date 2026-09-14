@@ -1,13 +1,14 @@
 # Halo — Hardware Analytics & Live Overlay
 
 Native Windows 11 desktop widget suite replacing the Rainmeter + Rainformer + HWiNFO +
-Afterburner + RTSS + NVIDIA App stack. Design doc: [native-widget-implementation-plan.md](docs/native-widget-implementation-plan.md).
+Afterburner + RTSS + NVIDIA App stack. Architecture overview: [architecture.md](docs/architecture.md).
 Docs live in `docs/`; personal/machine-specific notes in `docs/private/` (git-ignored).
 
 ## Build & run
 
 ```powershell
 dotnet build Halo.sln -c Debug            # all projects (SDK pinned in global.json, targets net10.0)
+dotnet test Halo.sln                      # tests\Halo.Tests — xUnit, 39 tests, no hardware needed
 # run (order matters only for data availability):
 src\Halo.Collector\bin\Debug\net10.0\win-x64\Halo.Collector.exe   # data process (full sensors need admin)
 src\Halo.Widgets\bin\Debug\net10.0\win-x64\Halo.Widgets.exe        # widget windows + tray
@@ -22,19 +23,39 @@ tools\build.ps1 [-Clean] [-Installer] [-Zip] [-NoReadyToRun]   # -Installer need
 # stop -> build -> start, in the only order that works: tools\redeploy-halo.ps1
 ```
 
+**Tests** live in `tests\Halo.Tests` — the pure, I/O-free parts (frame-stat arithmetic, section
+layout, provider freshness, config load/write). Anything needing live hardware or the PresentMon
+ETW session stays a hand check (`--pm-smoketest`, `--tap-smoketest`). The project is in the
+solution, so `dotnet build` and `dotnet test` both pick it up, and deliberately **not** in
+`build.ps1`'s publish list — that script names the three shipping exes one by one, so nothing here
+can reach `dist\app`. `OutputType=Exe` + `GenerateProgramFile=false` + the hand-written
+`Program.cs` are **one unit**: the cross-process config test spawns a second copy of itself and a
+default test project produces no apphost. Removing any of the three gives CS5001.
+
 **Paths** come from `Halo.Shared.Paths`, never from walking up to `Halo.sln`. Assets, fonts and the
 bundled PresentMon SDK are read from the exe's own folder (the build copies them there); config and
 logs live in `%LOCALAPPDATA%\Halo`, or `<app root>\data` when a `portable.marker` file sits next to
 the exe. `config\reference\` is the documented v2 layout, not what a running Halo reads.
 
-Portable-first policy (docs/global-installs.md): the NuGet cache is project-local
+Portable-first policy (docs/install-footprint.md): the NuGet cache is project-local
 (`tools\nuget-cache`); so is the PawnIO redist (`installer\redist\`, fetched by `build.ps1` against
 a pinned SHA-256, gitignored). Only global footprints: scheduled tasks `\Halo\Collector` (Highest)
 and `\Halo\Widgets` (Limited), created by `Halo.Settings.exe --register-autostart` — which the
 installer, `install-dev.ps1` and the System check "Repair autostart" button all call, so the task
 definition lives in exactly one place (`AutostartManager`). **No HKCU Run value any more**; the verb
-deletes a leftover `HaloWidgets` one. An installed copy adds `Program Files\Halo`, two Start-menu
-shortcuts and an ARP entry, and leaves PawnIO behind on uninstall (shared driver).
+deletes a leftover `HaloWidgets` one. An installed copy adds `Program Files\Halo`, three Start-menu
+shortcuts (`Halo`, `Halo Settings`, `Halo Widgets`), an optional desktop icon and an ARP entry, and
+leaves PawnIO behind on uninstall (shared driver).
+
+**Autostart is optional, and declining it is a supported configuration.** System check separates
+`AutostartStatus.Off` (no tasks at all — neutral, button reads "Turn on autostart") from
+`NeedsAttention` (`!Healthy && !Off`: half-registered, pointing at a different Halo, or a legacy
+HKCU Run value — the actual fault). The `Halo` Start-menu entry and the desktop icon both run
+`Halo.Widgets.exe --start-collector`: overlay first, then `CollectorLauncher` starts the collector
+through the `runas` verb (one UAC prompt), skipped when the section header already names a live
+collector pid. The elevation lives there rather than in the collector's manifest on purpose —
+`requireAdministrator` would make it unconditional, including for `--dump`, `--migrate-config` and
+the smoketests, and would delete the "degrades gracefully unelevated" property.
 
 ## Architecture (three processes)
 
@@ -57,15 +78,22 @@ shortcuts and an ARP entry, and leaves PawnIO behind on uninstall (shared driver
 - **Halo.Metrics**: the public client package — section layout, reader, writer, `CollectorSession`
   and the control-pipe client. Dependency-free and AOT-friendly so anyone can read Halo's metrics
   (`docs\metrics-protocol.md`). Halo.Shared depends on it, never the other way round.
+  Its test seam is `InternalsVisibleTo("Halo.Tests")` plus **internal** constructor overloads
+  taking a section name — the tests must point a `MetricsWriter` at a private section, because
+  constructing one *clears* the section and a test using the real name would wipe a running
+  collector. **The public surface is deliberately unchanged**: this is a published third-party
+  contract, and widening it to serve a test would be a permanent decision made for the wrong
+  reason. Shadowing `SharedMemoryLayout` is not an alternative — `SectionName` is a `const`, so it
+  is inlined into `Halo.Metrics.dll` at its own compile time and a consumer still gets the real one.
 
 ## Conventions
 
 - Layout coordinates are **logical units** (panel = 206 wide); theme scale (1.7) is applied
   once in the renderer. 8-pt text rows use `FixedH = 11` (Rainformer's effective line height).
 - Colors only via `Theme` tokens (extracted from the Rainformer skin's `@Resources\Variables.inc` —
-  values only, no GPL code; reference copy lives at
-  `C:\Users\final\Documents\Rainmeter\Skins\RainformerHWi`, no longer vendored in this repo).
-  Staged warn colors: `CpuRamPanelImpl.WarnColor`.
+  values only, no GPL code). The skin is **not vendored here**: a reference copy comes from a
+  Rainmeter install of Rainformer 3.1 HWiNFO Edition, under
+  `%USERPROFILE%\Documents\Rainmeter\Skins\`. Staged warn colors: `CpuRamPanelImpl.WarnColor`.
 - Metric names: `Halo.Metrics\MetricNames.cs`; `.max` suffix = session maximum. Indexed families
   (`gpu.<i>.*`, `cpu.core.<i>.*`, `fan.<n>.*`, `drive.<x>.*`) are discovered at runtime — read
   `gpu.count` / `cpu.logical.count` / `fan.count`, never assume one of anything. The GPU index
@@ -75,6 +103,31 @@ shortcuts and an ARP entry, and leaves PawnIO behind on uninstall (shared driver
   a sub-cadence metric says so (presentmon's lows are 2 Hz inside a 40 Hz poll). `Static`
   semantics means nominal 0 Hz and a single write at discovery; `MetricSink.Register` enforces
   the 0. Never re-write a Static metric every poll.
+- **Freshness contract: a value is fresh or absent, never stale-but-plausible.** Value timestamp
+  0 = N/A. `ProviderHost` marks a failed provider's whole metric set N/A, and a watchdog thread
+  does the same for any provider that has gone `max(10 s, 10 × its period)` without completing a
+  poll. Widgets render an absent reading through `PanelContext.Na` (`Render\Elements.cs:145-151`),
+  which replaces the **whole formatted string including its unit** — units are concatenated outside
+  the number formatter, so the decision has to live one level up or a dead sensor reads `N/A °C`.
+  Graph series use `NaSample` → `NaN`, which holds the previous bar rather than drawing a cliff to
+  zero. The test for which a metric gets is **"is this a reading, or a fact about the machine?"** —
+  readings go N/A, counts and booleans keep their zero. Fan RPM is the case to remember: a stopped
+  fan genuinely reports 0, so only an *unreadable* sensor is N/A (`LhmProvider.cs:325-326`).
+- **Frame rates come from summed intervals, not a count over a span.** Each frame carries its own
+  present-to-present interval, so k frames carry k intervals and mean-frametime → rate is exact;
+  under two samples there is no interval at all and the answer is 0/N/A, not the old `Math.Max(0.1,
+  span)` floor's hard 10 fps (`FrameStats.Rate`). `fps.app.pid` does double duty: PCL Stats filters
+  its markers on it, and the FPS panel uses it as the frame-graph `ResetKey`, so alt-tabbing to a
+  non-presenting app clears the graph instead of freezing it. Click and all-input latency are a
+  rolling **20 s window** (`PresentMonProvider.InputLatencyWindowS`), not a sample-count
+  accumulator, and they register `RollingWindow` semantics with that `windowMs` so a reader sees it.
+- **Config writes are cross-process, not just cross-thread.** Both the Settings app and the widget
+  process write `widgets.json`/`settings.json`. A named interprocess mutex
+  (`Local\Halo.Config.<key>.<file>`, 5 s timeout) spans the whole read → mutate → `File.Move`, and
+  temp files are per-process-unique. The in-process `Lock` alone was never enough — two
+  read-modify-write cycles interleaved and one process's change vanished. A config file that is
+  present but does not parse is **not** treated as absent: last good copy kept, reason logged,
+  writes to it refused rather than clobbering a hand edit (`ConfigStore.cs:139-155`).
 - What each panel shows, which options it takes and which theme tokens it paints with is declared
   once in `Halo.Shared\Panels\PanelCatalog.cs`; the renderer and the Settings app both read it.
   Per-widget overrides live in `widgets.json` (`metrics`, `options`, `appearance`).
@@ -98,9 +151,11 @@ shortcuts and an ARP entry, and leaves PawnIO behind on uninstall (shared driver
 ## Gotchas
 
 - Defender ML false-positive (2026-07-19): quarantined `Halo.Collector.csproj` as
-  `Trojan:Win32/Bearfoos.A!ml`. If a file vanishes, check `Get-MpThreatDetection`,
-  restore from git. Folder exclusion is available via `install-halo.ps1 -AddDefenderExclusion`
-  (off by default — user decision).
+  `Trojan:Win32/Bearfoos.A!ml`. If a file vanishes, check `Get-MpThreatDetection`, restore from
+  git. **No Halo script offers a Defender exclusion** — the old `install-halo.ps1
+  -AddDefenderExclusion` is gone along with that script, and nothing replaced it. Punching a hole
+  in antivirus stays a manual, deliberate `Add-MpPreference -ExclusionPath` by whoever owns the
+  machine.
 - LHM CPU/SuperIO/Storage parts and PresentMon/PCL Stats (ETW) need elevation; unelevated they
   mark metrics N/A (or never register them at all) and the widgets render "N/A"/idle states.
   The provider table's `lastError` says which — `unelevated`, `no-driver`, `no-hw`, `no-nvml`,

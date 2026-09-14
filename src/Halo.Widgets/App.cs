@@ -544,7 +544,7 @@ public sealed unsafe class App : IDisposable
     /// No task is a perfectly normal state now that Halo is started from a shortcut — every user
     /// who declined "Start with Windows" is in it — so it stays exactly what it was: stale badges
     /// and one log line. Putting a UAC dialog on an idle desktop because a background heartbeat
-    /// lapsed would be worse than the badge (settled with Jack, 2026-09-14).
+    /// lapsed would be worse than the badge (product decision, 2026-09-14).
     /// </para>
     /// </summary>
     private void Watchdog()
