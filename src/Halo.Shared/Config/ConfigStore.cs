@@ -135,13 +135,31 @@ public sealed class ConfigStore : IDisposable
                 NoteReadable(file);
                 return LoadOutcome.Loaded;
             }
-            catch (IOException ex) { last = ex; Thread.Sleep(50); }
+            catch (Exception ex) when (IsTransient(ex)) { last = ex; Thread.Sleep(TransientRetryMs); }
             catch (JsonException ex) { return NoteUnreadable(file, ex.Message); }
         }
         // Held open by something else for 150 ms: present, just not readable right now. Treating
         // that as "missing" is what turned a locked file into a fresh default document.
         return NoteUnreadable(file, last?.Message ?? "could not be opened");
     }
+
+    private const int TransientAttempts = 3;
+    private const int TransientRetryMs = 50;
+
+    /// <summary>
+    /// Someone else is holding the file for a moment — retry rather than lose the change.
+    /// <para>
+    /// <see cref="UnauthorizedAccessException"/> is in here for a measured reason, and it is the
+    /// half that is easy to drop by mistake: it derives from <c>SystemException</c>, <b>not</b>
+    /// <see cref="IOException"/>, so catching only the latter misses it entirely. A real-time
+    /// scanner holding a freshly renamed config file produces exactly this — reproduced at 13.6%
+    /// (3 runs in 22) as <c>UnauthorizedAccessException "Access to the path is denied."</c> on the
+    /// first write after another process had just replaced widgets.json milliseconds earlier.
+    /// </para>
+    /// Unhandled, one of those costs the user a widget move and leaves nothing but a log line —
+    /// the same "Halo forgot where I put it" symptom the unique temp name was meant to end.
+    /// </summary>
+    private static bool IsTransient(Exception ex) => ex is IOException or UnauthorizedAccessException;
 
     // Logged on the way into the bad state and on the way out, not on every poll: the debounce
     // timer re-reads on every watcher event and an unreadable file usually stays unreadable.
@@ -343,17 +361,35 @@ public sealed class ConfigStore : IDisposable
         // FileShare.None, so two overlapping saves handed one of them an IOException — and the
         // only thing either caller can do with that is drop the change, which the user reads as
         // "Halo forgot where I put that widget". The .tmp suffix stays: the watchers glob *.json.
-        string tmp = $"{path}.{Environment.ProcessId:x}-{Interlocked.Increment(ref _tempSequence):x}.tmp";
-        try
+        // Retried, because a write that is merely inconvenient must not cost the user their
+        // change. Reads have always retried; writes did not, and that asymmetry is what made a
+        // single transient denial from a file-system filter drop a widget move (see IsTransient).
+        // A fresh temp name per attempt on purpose: whatever was holding the last one is exactly
+        // what we are waiting out, so reusing the name would retry into the same object.
+        //
+        // The loop has no upper bound in its header because the filter carries it: on the last
+        // attempt `attempt < TransientAttempts` is false, the transient handler no longer matches,
+        // and the bare catch below rethrows with the original stack intact.
+        for (int attempt = 1; ; attempt++)
         {
-            using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
-                JsonSerializer.Serialize(fs, value, ti);
-            File.Move(tmp, path, overwrite: true);
-        }
-        catch
-        {
-            try { File.Delete(tmp); } catch { /* best effort */ }
-            throw;
+            string tmp = $"{path}.{Environment.ProcessId:x}-{Interlocked.Increment(ref _tempSequence):x}.tmp";
+            try
+            {
+                using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
+                    JsonSerializer.Serialize(fs, value, ti);
+                File.Move(tmp, path, overwrite: true);
+                return;
+            }
+            catch (Exception ex) when (attempt < TransientAttempts && IsTransient(ex))
+            {
+                try { File.Delete(tmp); } catch { /* best effort */ }
+                Thread.Sleep(TransientRetryMs);
+            }
+            catch
+            {
+                try { File.Delete(tmp); } catch { /* best effort */ }
+                throw;
+            }
         }
     }
 
