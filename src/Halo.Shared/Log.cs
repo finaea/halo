@@ -88,6 +88,13 @@ public static class Log
 
     public static LogLevel Level { get; private set; } = LogLevel.Info;
 
+    /// <summary>
+    /// True when <see cref="LevelEnvVar"/> set the level, which makes <see cref="SetLevel"/> a
+    /// no-op. Public because a UI offering to change the level has to be able to say "your choice
+    /// is not what is in effect" — a control that silently does nothing is worse than no control.
+    /// </summary>
+    public static bool LevelPinnedByEnv => _levelPinnedByEnv;
+
     /// <summary>The file this process is writing to, or "" when file logging is unavailable.</summary>
     public static string CurrentPath => _path;
 
