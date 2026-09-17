@@ -52,6 +52,9 @@ public static class Log
     private const int QueueCapacity = 8192;
     /// <summary>Above this depth, Debug records are shed to keep room for Warn/Error.</summary>
     private const int DebugShedDepth = QueueCapacity * 3 / 4;
+    /// <summary>How long a <see cref="Durable"/> record waits for the queue to catch up before it
+    /// forces itself out ahead of the backlog. Short: a crash handler is often the caller.</summary>
+    private const int DurableDrainMs = 150;
     private const int RetentionDays = 7;
     private const long InstalledMaxFileBytes = 8L * 1024 * 1024;
     private const long PortableMaxFileBytes = 2L * 1024 * 1024;
@@ -207,6 +210,14 @@ public static class Log
     public static void Durable(LogLevel level, string msg, string component = "-")
     {
         if (level < Level && level != LogLevel.Error) return;
+
+        // Let the backlog land first, bounded. Without this a synchronous record jumps ahead of
+        // everything still queued, so a crash line lands in the file BEFORE the events that led to
+        // it — measured 2026-09-17, and exactly backwards for the case this API exists to serve.
+        // Bounded, because the record matters more than the order: if the pump is wedged, write
+        // anyway and say what was left behind.
+        long pending = DrainBefore(DurableDrainMs);
+
         string line = Format(level, component, msg);
         if (AlsoConsole) Console.WriteLine(line);
         Interlocked.Increment(ref _accepted);
@@ -217,8 +228,37 @@ public static class Log
             // one the pump already holds.
             if (WriteLocked(line + Environment.NewLine))
                 Interlocked.Increment(ref _persisted);
+            if (pending > 0)
+            {
+                Interlocked.Increment(ref _accepted);
+                string note = Format(LogLevel.Warn, "logger",
+                    $"{pending} queued record(s) were still unwritten when the record above was "
+                    + "forced out — they follow it out of order, or were lost with the process");
+                if (WriteLocked(note + Environment.NewLine))
+                    Interlocked.Increment(ref _persisted);
+            }
         }
     }
+
+    /// <summary>Wait for the queue to catch up, up to <paramref name="timeoutMs"/>. Returns how
+    /// many records were still outstanding when it gave up; 0 when it caught up.</summary>
+    private static long DrainBefore(int timeoutMs)
+    {
+        long target = Interlocked.Read(ref _accepted);
+        if (Outstanding(target) <= 0) return 0;
+        var sw = Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            if (Outstanding(target) <= 0) return 0;
+            Thread.Sleep(2);
+        }
+        return Math.Max(0, Outstanding(target));
+    }
+
+    private static long Outstanding(long target) => target
+        - Interlocked.Read(ref _persisted)
+        - Interlocked.Read(ref _droppedQueueFull)
+        - Interlocked.Read(ref _droppedWriteFailed);
 
     public static void Durable(LogLevel level, string msg, Exception ex, string component = "-")
         => Durable(level, Describe(msg, ex), component);
@@ -350,6 +390,16 @@ public static class Log
             // expected — this path belongs to this process instance alone.
             _stream = new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.Read);
             _written = _stream.Length;
+            if (_written == 0)
+            {
+                // A UTF-8 BOM, once, on a brand new file. Halo's messages are full of "—" and "·",
+                // and without the BOM both Notepad and Windows PowerShell 5.1 decode the file as
+                // ANSI and render them as mojibake — on a log whose whole job is to be readable by
+                // a stranger who has been asked to open it and look.
+                _stream.Write([0xEF, 0xBB, 0xBF], 0, 3);
+                _stream.Flush();
+                _written = 3;
+            }
             return true;
         }
         catch (Exception ex)
