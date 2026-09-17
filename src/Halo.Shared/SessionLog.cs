@@ -104,6 +104,57 @@ public static class SessionLog
         Save();
     }
 
+    /// <summary>
+    /// Declare that <b>another</b> process is about to be stopped on purpose, so its next start
+    /// does not report a crash. The killer records the intent because the victim gets no chance to:
+    /// <c>schtasks /End</c> and <c>Stop-Process -Force</c> give it no notice at all.
+    /// <para>The widgets watchdog ending a wedged collector is the case this exists for — three
+    /// such restarts on 2026-09-17 left no trace of who asked or why.</para>
+    /// </summary>
+    public static void RecordExternalStop(int pid, string reason)
+    {
+        if (pid <= 0) return;
+        try
+        {
+            string dir = Path.Combine(Paths.LogsDir, Dir);
+            Directory.CreateDirectory(dir);
+            var sb = new StringBuilder();
+            sb.Append('{');
+            Field(sb, "reason", reason); sb.Append(',');
+            Field(sb, "byProcess", _process.Length > 0 ? _process : "?"); sb.Append(',');
+            sb.Append("\"byPid\":").Append(Environment.ProcessId).Append(',');
+            Field(sb, "atUtc", DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+            sb.Append('}');
+            File.WriteAllText(Path.Combine(dir, $"{StopIntentPrefix}{pid}.json"), sb.ToString());
+        }
+        catch { /* best effort: a missing intent only costs us a false "unclean" */ }
+    }
+
+    private const string StopIntentPrefix = "stop-intent-";
+
+    /// <summary>An external stop intent recorded for this pid after it started, if any.</summary>
+    private static string? ExternalStopFor(string dir, string pidText, string startedUtc)
+    {
+        if (!int.TryParse(pidText, out int pid)) return null;
+        string path = Path.Combine(dir, $"{StopIntentPrefix}{pid}.json");
+        Dictionary<string, string>? rec = TryRead(path);
+        if (rec is null) return null;
+
+        // The marker has to post-date the session it claims to explain, or a pid reused later
+        // would inherit an unrelated intent.
+        if (DateTime.TryParse(startedUtc, CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind, out DateTime started)
+            && DateTime.TryParse(rec.GetValueOrDefault("atUtc", ""), CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind, out DateTime at)
+            && at < started)
+            return null;
+
+        try { File.Delete(path); } catch { }
+        string reason = rec.GetValueOrDefault("reason", "external stop");
+        string by = rec.GetValueOrDefault("byProcess", "?");
+        return $"{reason} (by {by}, pid {rec.GetValueOrDefault("byPid", "?")})";
+    }
+
     private static DateTime OwnProcessStartUtc()
     {
         try { return Process.GetCurrentProcess().StartTime.ToUniversalTime(); }
@@ -185,6 +236,13 @@ public static class SessionLog
             Liveness live = CheckLive(pid, rec.GetValueOrDefault("processStartUtc", ""));
             if (live == Liveness.Alive)
                 continue; // A live sibling. Never touch it, never call it crashed.
+
+            // It never got to record its own intent, but whoever stopped it may have.
+            if (intent.Length == 0 && ExternalStopFor(dir, pid, started) is { } external)
+            {
+                intent = external;
+                rec["stopIntent"] = external; // keep the record and the log line telling one story
+            }
 
             SessionState verdict = live == Liveness.Indeterminate
                 ? SessionState.Unknown
