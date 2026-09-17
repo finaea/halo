@@ -554,6 +554,13 @@ public static class Log
     /// records should say so in the file it did manage to write.</summary>
     public static void Shutdown(string reason)
     {
+        // Drain the backlog BEFORE the shutdown record, not after. Info-level durable records skip
+        // the drain by design (it would stall hot-path breadcrumbs holding a lock), so without this
+        // the last line in the file jumps ahead of the work it is reporting the end of: measured
+        // 2026-09-17, where `shutting down: verb --register-autostart exit 0` landed above the four
+        // lines describing the registration, including `register finished — exit 0`. This is a
+        // shutdown path, so waiting is free and being last is the whole point of the line.
+        Flush();
         Durable(LogLevel.Info, $"shutting down: {reason}", "lifecycle");
         FlushResult result = Flush();
         if (!result.Reached || result.Dropped > 0)

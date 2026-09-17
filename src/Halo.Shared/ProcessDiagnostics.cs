@@ -124,27 +124,71 @@ public static class ProcessDiagnostics
         catch { return "?"; }
     }
 
-    /// <summary>Integrity level, not just "is admin". A task registered at Limited and one at
-    /// Highest behave differently, and the difference has been the answer before.</summary>
+    /// <summary>
+    /// Integrity level, not just "is admin". A task registered at Limited and one at Highest
+    /// behave differently — UIPI blocks window messages from Medium to High, which is why a
+    /// Medium-IL tool cannot even ask an elevated Halo to close.
+    /// <para>Read through <c>GetTokenInformation(TokenIntegrityLevel)</c>. The first attempt
+    /// scanned <see cref="WindowsIdentity.Groups"/> for the well-known <c>S-1-16-*</c> SIDs, which
+    /// looks plausible and does not work: it reported <c>?</c> for both an elevated and an
+    /// unelevated process on 2026-09-17, because that collection does not surface the token's
+    /// integrity SID. A field that always reads <c>?</c> is worse than no field, so this reads the
+    /// token directly.</para>
+    /// </summary>
     private static string IntegrityLevel()
     {
+        nint token = 0;
+        nint buffer = 0;
         try
         {
-            using WindowsIdentity identity = WindowsIdentity.GetCurrent();
-            foreach (IdentityReference group in identity.Groups ?? [])
+            if (!OpenProcessToken(GetCurrentProcess(), TokenQuery, out token)) return "?";
+            // Ask for the size, then the value: the structure ends in a variable-length SID.
+            GetTokenInformation(token, TokenIntegrityLevel, 0, 0, out uint size);
+            if (size == 0) return "?";
+            buffer = Marshal.AllocHGlobal((int)size);
+            if (!GetTokenInformation(token, TokenIntegrityLevel, buffer, size, out _)) return "?";
+
+            nint sid = Marshal.ReadIntPtr(buffer); // TOKEN_MANDATORY_LABEL.Label.Sid
+            int count = GetSidSubAuthorityCount(sid) is var c && c != 0 ? Marshal.ReadByte(c) : 0;
+            if (count == 0) return "?";
+            uint rid = (uint)Marshal.ReadInt32(GetSidSubAuthority(sid, (uint)(count - 1)));
+
+            return rid switch
             {
-                string sid = group.Value;
-                switch (sid)
-                {
-                    case "S-1-16-4096": return "Low";
-                    case "S-1-16-8192": return "Medium";
-                    case "S-1-16-8448": return "MediumPlus";
-                    case "S-1-16-12288": return "High";
-                    case "S-1-16-16384": return "System";
-                }
-            }
-            return "?";
+                < 0x1000 => "Untrusted",
+                < 0x2000 => "Low",
+                < 0x3000 => "Medium",
+                < 0x4000 => "High",
+                _ => "System",
+            };
         }
         catch { return "?"; }
+        finally
+        {
+            if (buffer != 0) Marshal.FreeHGlobal(buffer);
+            if (token != 0) CloseHandle(token);
+        }
     }
+
+    private const int TokenIntegrityLevel = 25;
+    private const uint TokenQuery = 0x0008;
+
+    [DllImport("kernel32.dll")]
+    private static extern nint GetCurrentProcess();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(nint handle);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool OpenProcessToken(nint process, uint access, out nint token);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(nint token, int infoClass, nint info,
+        uint length, out uint returnLength);
+
+    [DllImport("advapi32.dll")]
+    private static extern nint GetSidSubAuthorityCount(nint sid);
+
+    [DllImport("advapi32.dll")]
+    private static extern nint GetSidSubAuthority(nint sid, uint index);
 }
