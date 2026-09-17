@@ -17,6 +17,8 @@ namespace Halo.Collector.Providers;
 /// </summary>
 public sealed class NvmlProvider : ISensorProvider
 {
+    private static readonly ComponentLog Log2 = Log.For("nvml");
+
     public string Name => "nvml";
     public double MaxRateHz => 20;
     public double DefaultRateHz => CollectorRates.Nvml;
@@ -88,7 +90,7 @@ public sealed class NvmlProvider : ISensorProvider
         {
             // Runs on whichever provider thread reaches the index space first, so it must never
             // throw into that provider's Initialize — an unreadable NVML just means no NVIDIA GPUs.
-            Log.Warn($"nvml probe failed ({ex.GetType().Name}: {ex.Message}) — no NVIDIA GPUs published");
+            Log2.Warn($"probe failed ({ex.GetType().Name}: {ex.Message}) — no NVIDIA GPUs published");
         }
 
         // Devices whose bus id we could not read sort last but keep their relative NVML order.
@@ -106,7 +108,7 @@ public sealed class NvmlProvider : ISensorProvider
         int r = nvmlInit_v2();
         if (r != 0)
         {
-            Log.Warn($"nvmlInit_v2 -> {r}");
+            Log2.Warn($"nvmlInit_v2 -> {r}");
             _unavailableReason = ProviderError.NoNvml;
             return false;
         }
@@ -128,7 +130,7 @@ public sealed class NvmlProvider : ISensorProvider
         {
             if (nvmlDeviceGetHandleByIndex_v2(nvmlIndex, out nint handle) != 0)
             {
-                Log.Warn($"nvml: no handle for device {nvmlIndex} ({devName}) — gpu.{haloIndex}.* stays N/A");
+                Log2.Warn($"no handle for device {nvmlIndex} ({devName}) — gpu.{haloIndex}.* stays N/A");
                 continue;
             }
             // The fan-RPM API exists on newer drivers only; probe the export once per process.
@@ -180,9 +182,9 @@ public sealed class NvmlProvider : ISensorProvider
             d.PowerCeilingMw = (ulong)limitMw * PowerCeilingFactor;
 
         if (d.PowerCeilingMw > 0)
-            Log.Info($"nvml gpu.{i} ({d.Name}): power ceiling {d.PowerCeilingMw / 1000.0:0.#} W ({PowerCeilingFactor}x card limit) — samples above are dropped");
+            Log2.Info($"gpu.{i} ({d.Name}): power ceiling {d.PowerCeilingMw / 1000.0:0.#} W ({PowerCeilingFactor}x card limit) — samples above are dropped");
         else
-            Log.Warn($"nvml gpu.{i} ({d.Name}): power limit unavailable — power samples are unfiltered");
+            Log2.Warn($"gpu.{i} ({d.Name}): power limit unavailable — power samples are unfiltered");
     }
 
     public void Poll(MetricSink sink)
@@ -259,7 +261,7 @@ public sealed class NvmlProvider : ISensorProvider
                 if (DateTime.UtcNow >= d.NextRejectLog)
                 {
                     d.NextRejectLog = DateTime.UtcNow.AddMinutes(1);
-                    Log.Warn($"nvml gpu.{i}: power sample rejected: {mw / 1000.0:0.#} W > ceiling {d.PowerCeilingMw / 1000.0:0.#} W");
+                    Log2.Warn($"gpu.{i}: power sample rejected: {mw / 1000.0:0.#} W > ceiling {d.PowerCeilingMw / 1000.0:0.#} W");
                 }
             }
             else

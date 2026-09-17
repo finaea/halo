@@ -8,7 +8,7 @@ Docs live in `docs/`; personal/machine-specific notes in `docs/private/` (git-ig
 
 ```powershell
 dotnet build Halo.sln -c Debug            # all projects (SDK pinned in global.json, targets net10.0)
-dotnet test Halo.sln                      # tests\Halo.Tests — xUnit, 39 tests, no hardware needed
+dotnet test Halo.sln                      # tests\Halo.Tests — xUnit, 102 cases, no hardware needed
 # run (order matters only for data availability):
 src\Halo.Collector\bin\Debug\net10.0\win-x64\Halo.Collector.exe   # data process (full sensors need admin)
 src\Halo.Widgets\bin\Debug\net10.0\win-x64\Halo.Widgets.exe        # widget windows + tray
@@ -24,13 +24,23 @@ tools\build.ps1 [-Clean] [-Installer] [-Zip] [-NoReadyToRun]   # -Installer need
 ```
 
 **Tests** live in `tests\Halo.Tests` — the pure, I/O-free parts (frame-stat arithmetic, section
-layout, provider freshness, config load/write). Anything needing live hardware or the PresentMon
-ETW session stays a hand check (`--pm-smoketest`, `--tap-smoketest`). The project is in the
-solution, so `dotnet build` and `dotnet test` both pick it up, and deliberately **not** in
+layout, provider freshness, config load/write) plus the logger (flush durability, envelope framing,
+level filtering, rotation, debug shedding, session classification). Anything needing live hardware
+or the PresentMon ETW session stays a hand check (`--pm-smoketest`, `--tap-smoketest`). The project
+is in the solution, so `dotnet build` and `dotnet test` both pick it up, and deliberately **not** in
 `build.ps1`'s publish list — that script names the three shipping exes one by one, so nothing here
 can reach `dist\app`. `OutputType=Exe` + `GenerateProgramFile=false` + the hand-written
 `Program.cs` are **one unit**: the cross-process config test spawns a second copy of itself and a
 default test project produces no apphost. Removing any of the three gives CS5001.
+
+Two things about the log tests specifically. **`tests\Halo.Tests\portable.marker` is load-bearing**
+(a `Content` item in the csproj): `SessionLog` has no path seam and `Paths.DataDir` has no setter,
+so without it `SessionLog.Begin` would reclassify, rewrite and prune the **real** installation's
+session records on the dev machine every time the suite ran. And the log classes share one
+xUnit collection with `DisableParallelization` — `Log` is a single path/queue/pump/counter set and
+`ConfigStore` logs too, so parallel classes corrupt each other's counters. Teardown pushes a
+sentinel through and waits for it on disk, because `ResetForTests` cannot reach a batch the pump has
+already taken and that batch's count would otherwise land on the next test's zeroed counters.
 
 **Paths** come from `Halo.Shared.Paths`, never from walking up to `Halo.sln`. Assets, fonts and the
 bundled PresentMon SDK are read from the exe's own folder (the build copies them there); config and
@@ -128,6 +138,36 @@ the smoketests, and would delete the "degrades gracefully unelevated" property.
   read-modify-write cycles interleaved and one process's change vanished. A config file that is
   present but does not parse is **not** treated as absent: last good copy kept, reason logged,
   writes to it refused rather than clobbering a hand edit (`ConfigStore.cs:139-155`).
+- **Logging is evidence, so it is allowed to cost something.** `Halo.Shared\Log.cs` writes
+  **one file per process instance** (`logs\<proc>-<yyyyMMdd-HHmmss>-<pid>.log`) — a shared per-day
+  file could not survive more than one writer, and five collectors once interleaved into one file
+  with no way to tell their lines apart. Records are
+  `<ISO 8601 + offset> <LVL> <sessionId> <component> <message>`, and a multi-line stack trace
+  repeats the whole envelope with a `+` marker so no physical line is ever bare. The component
+  column pads but never truncates, so **there is one guaranteed space after it** — a name longer
+  than 12 characters used to run into the `+`.
+  `Log.Durable(level, msg)` writes **synchronously**, through the same stream and lock as the pump;
+  use it for anything whose value is surviving the next instruction (crash handlers, breadcrumbs
+  around native calls that can end the process). **Durability is not severity** — a routine
+  breadcrumb is `Debug`, not an error. Only `Warn`/`Error` wait for the queue to drain first:
+  `LhmProvider` crumbs every `hw.Update()` at 5 Hz inside LHM's read gate, and making those wait
+  would stall polling until the freshness watchdog marked the provider N/A.
+  **The accounting rule, because breaking it makes `Log.Flush` lie:** `_accepted` counts records
+  the logger took responsibility for, and only persistence or `_droppedWriteFailed` discharges one.
+  Records shed or refused *before* acceptance never enter either side. `Flush` and `DrainBefore`
+  share one `Outstanding` definition on purpose; they each had their own copy once, and `Flush`
+  reported success with 6015 records still in the queue.
+  Level comes from `settings.json > diagnostics.logLevel`, and **`HALO_LOG_LEVEL` overrides it** —
+  the escape hatch for a config file that will not parse, which is exactly when you need verbose
+  logging. `Log.LevelPinnedByEnv` exists so the Settings toggle can admit when it is not in charge.
+- **`SessionLog` answers "why is this process gone", and its identity is pid AND OS process start
+  time.** Pids are reused, so pid alone would let a fresh instance declare a **live sibling**
+  crashed. A process that cannot be queried is `Unknown`, never `Unclean` — "I could not look" is
+  not evidence of a crash. Whoever kills another process calls
+  `SessionLog.RecordExternalStop(pid, reason)` first (the widgets watchdog before `schtasks /End`),
+  because the victim gets no chance to record its own shutdown and a restart must not read as a
+  fault. `SessionLog.SetPhase` is **not** level-gated: the last phase written is what a native
+  crash or a hard kill leaves behind.
 - What each panel shows, which options it takes and which theme tokens it paints with is declared
   once in `Halo.Shared\Panels\PanelCatalog.cs`; the renderer and the Settings app both read it.
   Per-widget overrides live in `widgets.json` (`metrics`, `options`, `appearance`).

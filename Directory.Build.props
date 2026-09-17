@@ -19,7 +19,7 @@
   <!-- One version for the whole product: stamped into every assembly, into the metrics section
        header (sys.collector.version) and into the installer file name. -->
   <PropertyGroup>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
     <Product>Halo</Product>
     <Company>Halo</Company>
     <Authors>finaea</Authors>

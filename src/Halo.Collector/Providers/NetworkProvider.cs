@@ -22,6 +22,8 @@ namespace Halo.Collector.Providers;
 /// </remarks>
 public sealed class NetworkProvider(ConfigStore config) : ISensorProvider
 {
+    private static readonly ComponentLog Log2 = Log.For("network");
+
     public string Name => "network";
     public double MaxRateHz => 64;
     public double DefaultRateHz => CollectorRates.Network;
@@ -65,13 +67,13 @@ public sealed class NetworkProvider(ConfigStore config) : ISensorProvider
                     best = ni;
             }
         }
-        catch (Exception ex) { Log.Warn($"nic enumeration: {ex.Message}"); }
+        catch (Exception ex) { Log2.Warn($"nic enumeration: {ex.Message}"); }
 
         if (best?.Id != _nic?.Id)
         {
             _nic = best;
             _prevRx = _prevTx = -1;
-            Log.Info($"network interface: {best?.Name ?? "none"}");
+            Log2.Info($"interface: {best?.Name ?? "none"}");
         }
         else if (best != null)
         {

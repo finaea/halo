@@ -24,6 +24,8 @@ namespace Halo.Collector.Providers;
 /// </summary>
 public sealed class PclStatsProvider(string providerName, Guid providerGuidOverride) : ISensorProvider
 {
+    private static readonly ComponentLog Log2 = Log.For("pclstats");
+
     public string Name => "pclstats";
     public double MaxRateHz => 20;
     public double DefaultRateHz => CollectorRates.PclStats;
@@ -85,7 +87,7 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
         Guid guid = providerGuidOverride != Guid.Empty
             ? providerGuidOverride
             : TraceEventProviders.GetEventSourceGuidFromName(providerName);
-        Log.Info($"pclstats: provider '{providerName}' guid {guid}");
+        Log2.Info($"provider '{providerName}' guid {guid}");
 
         try
         {
@@ -99,18 +101,18 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
 
             _stopping = false;
             _windowStartMs = -1;
-            _etwThread = new Thread(() => { try { _session.Source.Process(); } catch (Exception ex) { if (!_stopping) Log.Error("pclstats ETW process", ex); } })
+            _etwThread = new Thread(() => { try { _session.Source.Process(); } catch (Exception ex) { if (!_stopping) Log2.Error("ETW process", ex); } })
             { IsBackground = true, Name = "halo-pcl-etw" };
             _etwThread.Start();
 
             // No ping broadcast: per NVIDIA's reference pclstats.h the game self-pings once the
             // provider is enabled (the ETW enable callback flips its internal g_PCLStatsEnable).
-            Log.Info("pclstats: ETW session started");
+            Log2.Info("ETW session started");
             return true;
         }
         catch (Exception ex)
         {
-            Log.Error("pclstats init", ex);
+            Log2.Error("init", ex);
             _unavailableReason = ProviderError.Failed;
             Dispose();
             return false;
@@ -152,7 +154,7 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
             if (_discoverySeen.Add($"{data.ProviderName}/{data.EventName}/{(int)data.ID}"))
             {
                 var fields = string.Join(",", data.PayloadNames);
-                Log.Info($"pcl-discovery: prov='{data.ProviderName}' ev='{data.EventName}' id={data.ID} fields=[{fields}]");
+                Log2.Info($"pcl-discovery: prov='{data.ProviderName}' ev='{data.EventName}' id={data.ID} fields=[{fields}]");
             }
         }
     }
@@ -270,7 +272,7 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
             _nextHistLog = DateTime.UtcNow.AddSeconds(3);
             string hist;
             lock (_lock) hist = string.Join(" ", _markerHist.OrderBy(k => k.Key).Select(k => $"m{k.Key}={k.Value}"));
-            Log.Info($"pcl-hist: {hist} | render={render:0.0} queue={queue:0.0} renderN={_renderWin.Count} inputPost={(_lastInputPostMs >= 0 ? "y" : "n")}");
+            Log2.Info($"pcl-hist: {hist} | render={render:0.0} queue={queue:0.0} renderN={_renderWin.Count} inputPost={(_lastInputPostMs >= 0 ? "y" : "n")}");
         }
     }
 

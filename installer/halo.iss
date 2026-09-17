@@ -17,6 +17,14 @@
   #define HaloAppDir "..\dist\app"
 #endif
 
+; Inno Setup 6.4.0 is the floor, not plain "6". Two things this script now uses arrived in that
+; release (Inno Setup whatsnew.htm, 6.4.0, "Pascal Scripting changes"): ExecAndCaptureOutput, so
+; the verbs' stdout/stderr can be kept instead of thrown away, and the CopyFile spelling of the
+; old FileCopy. Fail here, with a reason, rather than at "Unknown identifier" halfway down.
+#if Ver < EncodeVer(6,4,0)
+  #error This installer needs Inno Setup 6.4.0 or newer (ExecAndCaptureOutput, CopyFile).
+#endif
+
 #define HaloName "Halo"
 #define HaloPublisher "finaea"
 
@@ -54,6 +62,24 @@ MinVersion=10.0.17763
 ; Halo's own processes are stopped explicitly in CurStepChanged(ssInstall) below, scoped
 ; by image path, so Restart Manager never gets to offer to close an unrelated app.
 CloseApplications=no
+
+; Logging is ON, and it was not. Both directives default to "no"
+; (https://jrsoftware.org/ishelp/topic_setup_setuplogging.htm,
+;  https://jrsoftware.org/ishelp/topic_setup_uninstalllogging.htm) and Log() is "ignored if
+; logging is not enabled" (https://jrsoftware.org/ishelp/topic_isxfunc_log.htm) — so until this
+; line existed, EVERY Log() call in this script wrote nothing at all. That includes the ones whose
+; own comments promise "a line in the /LOG file when nobody is watching" for a silent install, and
+; the PawnIO-already-present and autostart-unregister paths, which are precisely the outcomes
+; nobody is watching. DeinitializeSetup below then copies the log out of %TEMP% and into Halo's own
+; logs folder, because "Setup Log 2026-09-17 #001.txt" in %TEMP% is somewhere nobody looks.
+;
+; UninstallLogging "has no effect if CreateUninstallRegKey is not set to yes". That default IS yes
+; (https://jrsoftware.org/ishelp/topic_setup_createuninstallregkey.htm) and this installer relies
+; on the key for its ARP entry anyway — stated here so the dependency is visible rather than
+; true by luck.
+SetupLogging=yes
+UninstallLogging=yes
+CreateUninstallRegKey=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -154,6 +180,92 @@ Type: filesandordirs; Name: "{app}"
 [Code]
 const
   SQ = #39;   { a single quote, so the PowerShell one-liners below stay readable }
+
+var
+  { What this install decided, accumulated as it runs and written out as install-state.json at the
+    end of ssPostInstall. See WriteInstallState for why the file exists. }
+  HaloAutostartResult: String;
+  HaloPawnIoResult: String;
+  HaloRebootPending: Boolean;
+  HaloLogCopyName: String;
+
+{ ---------------------------------------------------------------------------
+  Where Halo's own data (and therefore its logs) live, from in here.
+
+  Same caveat the uninstaller's data-folder prompt carries: this installer is elevated, so
+  "localappdata" resolves for whoever APPROVED the elevation. In the normal case - an admin
+  installing their own copy - that is the person who will run Halo. If a standard user typed an
+  administrator's credentials, the install log lands in the administrator's profile instead.
+  install-state.json records "installedBy" so a wrong guess is visible in the data rather than
+  silent. There is no better constant available: Inno has no "the user at the keyboard" path, and
+  Halo.Settings.exe resolves that itself (AutostartManager.InteractiveUser) precisely because of
+  this. No brace constants in this comment - a closing brace would end it early.
+  --------------------------------------------------------------------------- }
+function HaloDataDir: String;
+begin
+  Result := ExpandConstant('{localappdata}\Halo');
+end;
+
+function HaloLogsDir: String;
+begin
+  Result := AddBackslash(HaloDataDir) + 'logs';
+end;
+
+{ One name per run, computed once, so install-state.json can name the same file DeinitializeSetup
+  will write. }
+function HaloLogCopyFileName: String;
+begin
+  if HaloLogCopyName = '' then
+    HaloLogCopyName := 'install-{#HaloVersion}-' + GetDateTimeString('yyyymmdd-hhnnss', '-', '-') + '.log';
+  Result := HaloLogCopyName;
+end;
+
+function JsonEsc(const S: String): String;
+begin
+  { Backslash first, then quote: the other order would double the backslash this one just added. }
+  Result := S;
+  StringChangeEx(Result, '\', '\\', True);
+  StringChangeEx(Result, '"', '\"', True);
+end;
+
+{ ---------------------------------------------------------------------------
+  Run one of Halo.Settings.exe's verbs and KEEP what it said.
+
+  Plain Exec threw the reasons away, and those reasons are the whole diagnosis. AutostartManager
+  .Register writes the real Task Scheduler error to Console.Error; this script ran it with SW_HIDE
+  and no capture and kept nothing but the exit code, so "Could not register Halo to start with
+  Windows" was the entire story a user ever got.
+
+  ExecAndCaptureOutput needs Inno 6.4.0+ (guarded at the top of this file), must always be
+  ewWaitUntilTerminated, and hides console programs regardless of ShowCmd
+  (https://jrsoftware.org/ishelp/topic_isxfunc_execandcaptureoutput.htm). Halo.Settings.exe skips
+  its AttachConsole when output is already redirected, which is exactly this case, so the pipe
+  stays intact and its Console.Error writes really do land here.
+
+  This is defence in depth, not the only copy: the verbs also write the same reasons to their own
+  log file under Halo's logs folder now. Two independent records of the same failure is the point.
+  --------------------------------------------------------------------------- }
+function ExecHaloSettings(const Params: String; var ResultCode: Integer): Boolean;
+var
+  Output: TExecOutput;
+  I: Integer;
+begin
+  Log('Halo: running Halo.Settings.exe ' + Params);
+  Result := ExecAndCaptureOutput(ExpandConstant('{app}\Halo.Settings.exe'), Params, '',
+                                 SW_HIDE, ewWaitUntilTerminated, ResultCode, Output);
+  if not Result then
+  begin
+    Log('Halo: could not START Halo.Settings.exe ' + Params);
+    exit;
+  end;
+  for I := 0 to GetArrayLength(Output.StdOut) - 1 do
+    if Trim(Output.StdOut[I]) <> '' then Log('Halo: [out] ' + Output.StdOut[I]);
+  for I := 0 to GetArrayLength(Output.StdErr) - 1 do
+    if Trim(Output.StdErr[I]) <> '' then Log('Halo: [err] ' + Output.StdErr[I]);
+  if Output.Error then
+    Log('Halo: output capture failed or was truncated; see Halo' + SQ + 's own settings-*.log');
+  Log('Halo: Halo.Settings.exe ' + Params + ' exited ' + IntToStr(ResultCode));
+end;
 
 { A MsgBox still pops in /SILENT and /VERYSILENT and blocks forever with nobody to click
   it, so every message below goes through these: a dialog when someone is watching, a line
@@ -260,20 +372,25 @@ begin
   if PawnIoInstalled then
   begin
     Log('Halo: PawnIO ' + PawnIoInstalledVersion + ' is already installed; not running the bundled installer');
+    HaloPawnIoResult := 'already-installed (' + PawnIoInstalledVersion + ')';
     exit;
   end;
 
   if not WizardIsComponentSelected('pawnio') then
-    exit;
-
-  if not Exec(ExpandConstant('{app}\Halo.Settings.exe'), '--install-pawnio', '',
-              SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
+    HaloPawnIoResult := 'not-selected';
+    exit;
+  end;
+
+  if not ExecHaloSettings('--install-pawnio', ResultCode) then
+  begin
+    HaloPawnIoResult := 'could-not-start';
     SayInstall('Could not start the PawnIO installer. CPU temperatures, fan speeds and drive'
       + ' temperatures will read N/A.' + #13#10#13#10
       + 'You can install it later from Halo Settings > System check.', mbError);
     exit;
   end;
+  HaloPawnIoResult := 'exit ' + IntToStr(ResultCode);
 
   { 183 = ERROR_ALREADY_EXISTS: the setup found a PawnIO the check above missed. Nothing was
     changed and the existing driver keeps working, so it is a log line, not an error. }
@@ -282,11 +399,16 @@ begin
   { 3010 = ERROR_SUCCESS_REBOOT_REQUIRED: installed, but the driver does not load until a
     restart. Halo's NeedRestart event function cannot carry this — Inno queries it during
     ssInstall, before this code runs (Setup.Install.pas:2880) — so say it plainly instead
-    of silently rebooting anyone. }
+    of silently rebooting anyone. It is also recorded as rebootPending in install-state.json:
+    that is the fact which explains "PawnIO is installed and the temperatures still read N/A"
+    in the session straight after an install. }
   else if ResultCode = 3010 then
+  begin
+    HaloRebootPending := True;
     SayInstall('PawnIO was installed and needs a restart before the driver loads.' + #13#10#13#10
       + 'Until you restart, CPU temperatures, fan speeds and drive temperatures will read'
-      + ' N/A. Everything else works.', mbInformation)
+      + ' N/A. Everything else works.', mbInformation);
+  end
   else if ResultCode <> 0 then
     SayInstall('The PawnIO installer returned ' + IntToStr(ResultCode) + '.' + #13#10#13#10
       + 'CPU temperatures, fan speeds and drive temperatures will read N/A. You can retry'
@@ -306,28 +428,41 @@ begin
       install folder, so a source build registered by install-dev.ps1, or a second install
       somewhere else, is left alone. On a fresh install there is nothing to remove and this
       is a no-op. Never a dialog: "nothing to unregister" and "unregistered" look the same
-      from here, and the user did not ask for autostart either way. }
-    if not Exec(ExpandConstant('{app}\Halo.Settings.exe'), '--unregister-autostart', '',
-                SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-      Log('Halo: could not run --unregister-autostart')
-    else if ResultCode <> 0 then
-      Log('Halo: --unregister-autostart returned ' + IntToStr(ResultCode));
+      from here, and the user did not ask for autostart either way.
+
+      It is not silent any more, though. The verb now names every task it removed and, more
+      importantly, every task it deliberately LEFT ALONE and why - that second list is the
+      safety property this whole branch rests on, and ExecHaloSettings keeps it. }
+    if not ExecHaloSettings('--unregister-autostart', ResultCode) then
+      HaloAutostartResult := 'declined; unregister could not start'
+    else
+      HaloAutostartResult := 'declined; unregister exit ' + IntToStr(ResultCode);
     exit;
   end;
 
   { --user is deliberately omitted. Inno's "username" constant under UAC is whoever's
     credentials approved the elevation, which is not necessarily the person at the
     keyboard; the verb resolves the interactive console user itself
-    (WTSGetActiveConsoleSessionId in AutostartManager.InteractiveUser). }
-  if (not Exec(ExpandConstant('{app}\Halo.Settings.exe'), '--register-autostart', '',
-               SW_HIDE, ewWaitUntilTerminated, ResultCode)) or (ResultCode <> 0) then
+    (WTSGetActiveConsoleSessionId in AutostartManager.InteractiveUser) and now logs which
+    account it settled on, and whether it had to fall back. }
+  if not ExecHaloSettings('--register-autostart', ResultCode) then
+    HaloAutostartResult := 'register could not start'
+  else if ResultCode <> 0 then
+    HaloAutostartResult := 'register FAILED, exit ' + IntToStr(ResultCode)
+  else
+    HaloAutostartResult := 'registered';
+
+  if HaloAutostartResult <> 'registered' then
   begin
     { Do not quote the button's caption here: it is conditional now. With no tasks registered -
       which is exactly where a failure lands - it reads "Turn on autostart", and a dialog naming
       a caption the user cannot find is worse than one that just says where to go. }
     SayInstall('Could not register Halo to start with Windows.' + #13#10#13#10
-      + 'Open Halo Settings > System check and use the autostart button there to try again.',
-      mbError);
+      + 'Open Halo Settings > System check and use the autostart button there to try again.'
+      + #13#10#13#10
+      + 'What went wrong is written down, in:' + #13#10
+      + '  ' + AddBackslash(HaloLogsDir) + HaloLogCopyFileName + #13#10
+      + 'and in the settings-*.log files beside it.', mbError);
     exit;
   end;
 
@@ -336,6 +471,118 @@ begin
     user clicks Finish — as the original user, and only after this has run. }
   Exec(ExpandConstant('{sys}\schtasks.exe'), '/Run /TN "\Halo\Collector"', '',
        SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Log('Halo: schtasks /Run of the Collector task returned ' + IntToStr(ResultCode));
+  HaloAutostartResult := HaloAutostartResult + ', schtasks /Run exit ' + IntToStr(ResultCode);
+end;
+
+function JsonBool(const Value: Boolean): String;
+begin
+  if Value then Result := 'true' else Result := 'false';
+end;
+
+{ ---------------------------------------------------------------------------
+  install-state.json - what this install decided.
+
+  AutostartStatus asks for this file by name, in its own comment in
+  src\Halo.Settings\Services\AutostartManager.cs: "nothing distinguishes that from a deliberate
+  decline without recording installer intent". A --register-autostart that failed and a user who
+  unticked "Start with Windows" both end with no scheduled tasks at all, System check renders both
+  as "Autostart off", and afterwards the machine holds no evidence of which one happened. It holds
+  this now.
+
+  Written to the data folder's ROOT and deliberately not into config\: LiveConfigService watches
+  that folder for *.json and reacts to what appears there, and this is a record rather than user
+  configuration. Hand-rolled JSON because Inno's Pascal has no serializer and this is one flat
+  object. No brace constants in this comment - a closing brace would end it early.
+  --------------------------------------------------------------------------- }
+procedure WriteInstallState;
+var
+  Dir, Path, Json, PawnVersion: String;
+begin
+  Dir := HaloDataDir;
+  if not ForceDirectories(Dir) then
+  begin
+    Log('Halo: could not create ' + Dir + ', so install-state.json was not written');
+    exit;
+  end;
+  if PawnIoInstalled then PawnVersion := PawnIoInstalledVersion else PawnVersion := '';
+  Path := AddBackslash(Dir) + 'install-state.json';
+  Json :=
+    '{' + #13#10 +
+    '  "version": "' + JsonEsc('{#HaloVersion}') + '",' + #13#10 +
+    '  "installedAtLocal": "' + JsonEsc(GetDateTimeString('yyyy-mm-dd hh:nn:ss', '-', ':')) + '",' + #13#10 +
+    '  "installDir": "' + JsonEsc(ExpandConstant('{app}')) + '",' + #13#10 +
+    '  "installedBy": "' + JsonEsc(ExpandConstant('{username}')) + '",' + #13#10 +
+    '  "silent": ' + JsonBool(WizardSilent) + ',' + #13#10 +
+    '  "components": "' + JsonEsc(WizardSelectedComponents(False)) + '",' + #13#10 +
+    '  "tasks": "' + JsonEsc(WizardSelectedTasks(False)) + '",' + #13#10 +
+    '  "autostart": "' + JsonEsc(HaloAutostartResult) + '",' + #13#10 +
+    '  "pawnIo": "' + JsonEsc(HaloPawnIoResult) + '",' + #13#10 +
+    '  "pawnIoVersion": "' + JsonEsc(PawnVersion) + '",' + #13#10 +
+    '  "rebootPending": ' + JsonBool(HaloRebootPending) + ',' + #13#10 +
+    '  "setupLog": "' + JsonEsc(ExpandConstant('{log}')) + '",' + #13#10 +
+    '  "setupLogCopy": "' + JsonEsc(AddBackslash(HaloLogsDir) + HaloLogCopyFileName) + '"' + #13#10 +
+    '}' + #13#10;
+  if SaveStringToFile(Path, Json, False) then
+    Log('Halo: wrote ' + Path + ' -> autostart: ' + HaloAutostartResult + ' | pawnIO: ' + HaloPawnIoResult)
+  else
+    Log('Halo: could not write ' + Path);
+end;
+
+{ ---------------------------------------------------------------------------
+  Put Inno's own log where somebody will find it.
+
+  With SetupLogging on, the log lands in the TEMP folder as "Setup Log 2026-09-17 #001.txt" -
+  technically present, practically invisible. This copies it in beside Halo's other logs as
+  install-<version>-<timestamp>.log.
+
+  Two things here were checked rather than assumed.
+
+  (1) The log file is still OPEN at this point and stays open until Setup exits, so the copy is
+  missing the last handful of lines Inno writes after this - including the one written below. It is
+  not missing anything earlier: Inno writes each record straight through WriteFile with no buffer of
+  its own (Shared.FileClass.pas, TFile.WriteBuffer calls WriteFile per Write), so everything logged
+  up to now is already on disk.
+
+  (2) The copy is possible at all because Setup holds the file with fsRead sharing
+  (Setup.LoggingFunc.pas, StartLogging: TTextFileWriter.Create(Filename, fdCreateNew, faWrite,
+  fsRead)) and Win32 CopyFile tolerates a writer holding it that way - measured 2026-09-17 against
+  a file held open faWrite+fsRead, where CopyFileW returned success and copied the flushed content.
+
+  The fallback is not decoration: if the copy cannot be made, leave a stub that NAMES Inno's log
+  path, so Halo's logs folder still points at the real thing instead of staying silent.
+  --------------------------------------------------------------------------- }
+procedure CopySetupLogIntoHaloLogs;
+var
+  Source, Dir, Dest: String;
+begin
+  Source := ExpandConstant('{log}');
+  { Empty when logging is disabled. SetupLogging=yes makes that a can't-happen, except that /LOG-
+    on the command line still turns it off - so this is a real check, not a formality. }
+  if Source = '' then
+  begin
+    Log('Halo: no setup log to copy - logging is disabled');
+    exit;
+  end;
+  Dir := HaloLogsDir;
+  if not ForceDirectories(Dir) then
+  begin
+    Log('Halo: could not create ' + Dir + ', so the setup log stays at ' + Source);
+    exit;
+  end;
+  Dest := AddBackslash(Dir) + HaloLogCopyFileName;
+  if CopyFile(Source, Dest, False) then
+    Log('Halo: copied this setup log to ' + Dest)
+  else if SaveStringToFile(Dest,
+      'Halo {#HaloVersion} install' + #13#10#13#10
+      + 'Setup could not copy its own log into this folder while it was still open.' + #13#10
+      + 'The full setup log is at:' + #13#10
+      + '  ' + Source + #13#10#13#10
+      + 'Halo' + SQ + 's own record of this install is install-state.json, one folder up,' + #13#10
+      + 'and the settings-*.log files beside this one hold what the setup verbs said.' + #13#10, False) then
+    Log('Halo: could not copy the setup log; wrote a pointer to it at ' + Dest)
+  else
+    Log('Halo: could not copy the setup log or write a pointer to it; it stays at ' + Source);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -355,7 +602,17 @@ begin
   begin
     InstallPawnIo;
     RegisterAutostart;
+    { Last, so it records what the two above actually did rather than what was about to be
+      attempted. }
+    WriteInstallState;
   end;
+end;
+
+procedure DeinitializeSetup;
+begin
+  { Runs on every exit, a cancelled or failed install included - which is the case where the log is
+    worth the most. }
+  CopySetupLogIntoHaloLogs;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -369,7 +626,11 @@ begin
       with install-dev.ps1, or an older install) — ending it killed exactly that during the
       2026-09-13 test. The [UninstallRun] entry's --unregister-autostart stops and deletes
       only the tasks whose action points into the install folder, while Halo.Settings.exe
-      still exists. No brace constants in this comment: a closing brace would end it early. }
+      still exists. That entry is a [UninstallRun] line rather than script, so its output
+      cannot be captured the way ExecHaloSettings captures the install-side verbs - but the
+      verb writes its own settings-*.log now, and with UninstallLogging on its exit code
+      lands in the uninstall log. No brace constants in this comment: a closing brace would
+      end it early. }
     StopHaloProcesses(ExpandConstant('{app}'));
   end
   else if CurUninstallStep = usPostUninstall then
@@ -400,4 +661,23 @@ begin
         + ' one. Remove it from Settings > Apps if nothing else needs it.',
         mbInformation);
   end;
+end;
+
+procedure DeinitializeUninstall;
+var
+  Source, Dir, Dest: String;
+begin
+  { The uninstall log, on the same principle as the install one - but only when Halo's data folder
+    survived. The prompt above may have just deleted it at the user's request, and recreating the
+    folder to drop a log into it would undo precisely what they asked for. }
+  Source := ExpandConstant('{log}');
+  if (Source = '') or (not DirExists(HaloDataDir)) then exit;
+  Dir := HaloLogsDir;
+  if not ForceDirectories(Dir) then exit;
+  Dest := AddBackslash(Dir) + 'uninstall-{#HaloVersion}-'
+    + GetDateTimeString('yyyymmdd-hhnnss', '-', '-') + '.log';
+  if CopyFile(Source, Dest, False) then
+    Log('Halo: copied this uninstall log to ' + Dest)
+  else
+    Log('Halo: could not copy the uninstall log; it stays at ' + Source);
 end;

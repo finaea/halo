@@ -42,6 +42,8 @@ public sealed class ProviderHost : IDisposable
     /// tens of seconds, so a second of resolution is free.</summary>
     private static readonly TimeSpan WatchdogInterval = TimeSpan.FromSeconds(1);
 
+    private static readonly ComponentLog Log2 = Log.For("provider-host");
+
     private readonly MetricSink _sink;
     private readonly List<Runner> _runners = new();
     private readonly CancellationTokenSource _cts = new();
@@ -85,7 +87,7 @@ public sealed class ProviderHost : IDisposable
             }
             catch (Exception ex)
             {
-                Log.Error("freshness watchdog", ex);
+                Log2.Error("freshness watchdog pass", ex);
             }
         }
     }
@@ -140,6 +142,9 @@ public sealed class ProviderHost : IDisposable
         public double LastPollMs;
 
         private readonly int _providerIndex = sink.RegisterProvider(provider.Name, provider.NeedsElevation);
+        /// <summary>Tags this runner's lines with the provider they are about, so the name no
+        /// longer has to be repeated inside every message.</summary>
+        private readonly ComponentLog _log = Log.For(provider.Name);
         private Thread? _thread;
         private string? _lastErrorSig;
         private DateTime _nextErrorLog;
@@ -229,7 +234,7 @@ public sealed class ProviderHost : IDisposable
             double age = (double)(Stopwatch.GetTimestamp() - last) / Stopwatch.Frequency;
             double bound = Math.Max(StaleFloorSeconds, StalePeriodMultiple / RateHz);
             if (age < bound) return;
-            Log.Warn($"{Provider.Name}: no completed poll for {age:0.#} s (bound {bound:0.#} s) — its metrics now read N/A");
+            _log.Warn($"no completed poll for {age:0.#} s (bound {bound:0.#} s) — its metrics now read N/A");
             StaleMetrics();
         }
 
@@ -245,7 +250,7 @@ public sealed class ProviderHost : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    Log.Error($"{Provider.Name}: Initialize threw", ex);
+                    _log.Error("Initialize threw", ex);
                     Available = false;
                     sink.SetProviderState(_providerIndex, ProviderState.Unavailable, RateHz, ProviderError.Failed);
                 }
@@ -257,7 +262,7 @@ public sealed class ProviderHost : IDisposable
                     StaleMetrics();
                     int delay = initFailures switch { 0 => 1000, 1 => 5000, 2 => 30000, _ => 60000 };
                     initFailures++;
-                    if (initFailures <= 3) Log.Warn($"{Provider.Name}: unavailable, retry in {delay} ms");
+                    if (initFailures <= 3) _log.Warn($"unavailable, retry in {delay} ms");
                     // A rescan cuts the backoff short — that is exactly the case where the user
                     // just plugged in the hardware this provider was waiting for.
                     if (WaitHandle.WaitAny([ct.WaitHandle, _wake], delay) == 0) return;
@@ -267,7 +272,7 @@ public sealed class ProviderHost : IDisposable
 
                 initFailures = 0;
                 PublishHealthy();
-                Log.Info($"{Provider.Name}: initialised, polling at {RateHz:0.##} Hz (cap {Provider.MaxRateHz} Hz)");
+                _log.Info($"initialised, polling at {RateHz:0.##} Hz (cap {Provider.MaxRateHz} Hz)");
 
                 // ---- poll loop ----
                 long periodTicks = (long)(Stopwatch.Frequency / RateHz);
@@ -286,7 +291,7 @@ public sealed class ProviderHost : IDisposable
                     if (_rescanRequested)
                     {
                         _rescanRequested = false;
-                        Log.Info($"{Provider.Name}: re-enumerating hardware (rescan)");
+                        _log.Info("re-enumerating hardware (rescan)");
                         break;  // Available stays true, so the outer loop re-runs Initialize now
                     }
 
@@ -309,18 +314,18 @@ public sealed class ProviderHost : IDisposable
                         string sig = $"{ex.GetType().Name}:{ex.Message}";
                         if (sig != _lastErrorSig)
                         {
-                            Log.Error($"{Provider.Name}: poll failed ({consecutiveErrors})", ex);
+                            _log.Error($"poll failed ({consecutiveErrors})", ex);
                             _lastErrorSig = sig;
                             _nextErrorLog = DateTime.UtcNow.AddMinutes(5);
                         }
                         else if (DateTime.UtcNow >= _nextErrorLog)
                         {
-                            Log.Warn($"{Provider.Name}: poll still failing ({sig})");
+                            _log.Warn($"poll still failing ({sig})");
                             _nextErrorLog = DateTime.UtcNow.AddMinutes(5);
                         }
                         if (consecutiveErrors >= 10)
                         {
-                            Log.Warn($"{Provider.Name}: too many poll failures, re-initialising");
+                            _log.Warn("too many poll failures, re-initialising");
                             Available = false;
                             break; // back to init loop
                         }

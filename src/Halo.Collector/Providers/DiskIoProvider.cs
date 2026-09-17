@@ -17,6 +17,8 @@ namespace Halo.Collector.Providers;
 /// </summary>
 public sealed class DiskIoProvider : ISensorProvider
 {
+    private static readonly ComponentLog Log2 = Log.For("disk-io");
+
     public string Name => "disk-io";
     public double MaxRateHz => 64;
     public double DefaultRateHz => CollectorRates.DiskIo;
@@ -80,7 +82,7 @@ public sealed class DiskIoProvider : ISensorProvider
         string live = Volumes.Key(Volumes.Local());
         if (live != _activeLetters)
         {
-            Log.Info($"disk-io: volumes changed ({_activeLetters} -> {live}) — rebuilding counters");
+            Log2.Info($"volumes changed ({_activeLetters} -> {live}) — rebuilding counters");
             if (!BuildCounters(sink)) return;   // no valid counters yet; try again next poll
         }
 

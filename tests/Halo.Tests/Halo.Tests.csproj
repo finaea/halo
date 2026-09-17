@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <!-- Halo's unit tests. Deliberately NOT in tools\build.ps1's publish list, so nothing here can
      reach dist\app: that script names the three shipping exes one by one. `dotnet build Halo.sln`
      and `dotnet test Halo.sln` both pick it up because it is in the solution.
@@ -14,7 +14,7 @@
     <!-- Directory.Build.props pins RuntimeIdentifier=win-x64 for the shipping exes; the test
          host is happy with it and it keeps this project on the same restore graph. -->
 
-    <!-- These two and Program.cs are ONE unit — remove any of the three and the build breaks.
+    <!-- These two and Program.cs are ONE unit â€” remove any of the three and the build breaks.
          The cross-process config test spawns a second copy of itself, which needs a real
          apphost; a test project is OutputType=Library by default and produces none, so
          Environment.ProcessPath is testhost.exe and there is nothing to re-launch. OutputType
@@ -42,4 +42,20 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- Redirects Paths.DataDir into this project's own output folder.
+
+       SessionLog has no path seam: Begin and RecordExternalStop always resolve
+       Paths.LogsDir\sessions, and Paths.DataDir is %LOCALAPPDATA%\Halo with no setter
+       (Paths.cs:38-58). Without this marker, SessionLogTests would read, reclassify, rewrite and
+       prune the session records of a real Halo installation on the developer's machine, because
+       ReportPrevious processes every file it finds in that directory. Paths.IsPortable is
+       File.Exists(exeFolder\portable.marker), and AppContext.BaseDirectory under testhost.exe is
+       this output folder (measured 2026-09-17), so the marker moves the data folder to
+       bin\...\data and each worktree's tests get an isolated one.
+
+       Nothing else in the suite reads Paths, and the only other consumers of IsPortable are the
+       three exes' entry points, which the tests never run. -->
+  <ItemGroup>
+    <Content Include="portable.marker" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

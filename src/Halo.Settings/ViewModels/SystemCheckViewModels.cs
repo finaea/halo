@@ -148,12 +148,15 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
     private bool _canInstallPawnIo;
     private bool _canRepairAutostart;
     private bool _canRescan;
+    private bool _verboseLogging;
+    private bool _applyingLogLevel;
     private string _pawnIoButtonText = "Install PawnIO…  ⛨";
     private string _pawnIoButtonToolTip = "Installs the optional PawnIO driver with administrator permission.";
     private string _autostartButtonText = "Repair autostart…  ⛨";
     private string _autostartButtonToolTip = "Recreates both scheduled tasks with administrator permission.";
     private string _actionStatus = "";
     private string _collectorVersion = "Not connected";
+    private string _lastCheckTrace = "";
     private bool _pawnInstalled;
     private bool _hasExistingLayout;
     private DateTimeOffset _rescanBlockedUntilUtc;
@@ -170,6 +173,20 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
     public bool CanInstallPawnIo { get => _canInstallPawnIo; private set => Set(ref _canInstallPawnIo, value); }
     public bool CanRepairAutostart { get => _canRepairAutostart; private set => Set(ref _canRepairAutostart, value); }
     public bool CanRescan { get => _canRescan; private set => Set(ref _canRescan, value); }
+    public bool VerboseLogging
+    {
+        get => _verboseLogging;
+        set
+        {
+            if (!Set(ref _verboseLogging, value) || _applyingLogLevel) return;
+            string level = value ? "debug" : "info";
+            _config.QueueSettings("diagnostics.logLevel", settings => settings.Diagnostics.LogLevel = level, flushImmediately: true);
+            Log.SetLevel(value ? LogLevel.Debug : LogLevel.Info);
+        }
+    }
+    public bool IsLogLevelPinnedByEnvironment => Log.LevelPinnedByEnv;
+    public bool IsVerboseLoggingEnabled => !IsLogLevelPinnedByEnvironment;
+    public string LogLevelEnvironmentMessage => "HALO_LOG_LEVEL is controlling the active log level. This setting will not take effect until that environment variable is removed.";
     public string PawnIoButtonText { get => _pawnIoButtonText; private set => Set(ref _pawnIoButtonText, value); }
     public string PawnIoButtonToolTip { get => _pawnIoButtonToolTip; private set => Set(ref _pawnIoButtonToolTip, value); }
     public string AutostartButtonText { get => _autostartButtonText; private set => Set(ref _autostartButtonText, value); }
@@ -198,13 +215,46 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
         _config = config;
         _isFirstRun = firstRun;
         _hasExistingLayout = File.Exists(Path.Combine(_config.ConfigDir, "widgets.json"));
+        _verboseLogging = IsLogLevelPinnedByEnvironment
+            ? Log.Level == LogLevel.Debug
+            : IsLogLevelDebug(_config.Settings.Diagnostics.LogLevel);
         foreach (string key in new[] { "collector", "pawnio", "autostart", "readiness" })
         {
             var card = new CheckCardViewModel(key);
             _cards[key] = card;
             SummaryCards.Add(card);
         }
+        _config.ExternalChanged += Config_ExternalChanged;
     }
+
+    public void RefreshLoggingFromCurrent()
+        => ApplyLogLevelFromStore(_config.DirtyPaths(ConfigFileKind.Settings));
+
+    private void Config_ExternalChanged(object? sender, ConfigChangedEventArgs e)
+    {
+        if (e.File == ConfigFileKind.Settings) ApplyLogLevelFromStore(e.DirtyPaths);
+    }
+
+    private void ApplyLogLevelFromStore(IReadOnlySet<string> dirty)
+    {
+        if (Conflicts("diagnostics.logLevel", dirty)) return;
+        _applyingLogLevel = true;
+        try
+        {
+            VerboseLogging = IsLogLevelPinnedByEnvironment
+                ? Log.Level == LogLevel.Debug
+                : IsLogLevelDebug(_config.Settings.Diagnostics.LogLevel);
+            if (!IsLogLevelPinnedByEnvironment) Log.SetLevel(VerboseLogging ? LogLevel.Debug : LogLevel.Info);
+        }
+        finally { _applyingLogLevel = false; }
+    }
+
+    private static bool IsLogLevelDebug(string? level)
+        => string.Equals(level, "debug", StringComparison.OrdinalIgnoreCase);
+
+    private static bool Conflicts(string path, IReadOnlySet<string> dirty)
+        => dirty.Any(candidate => candidate == "$" || candidate == path ||
+            candidate.StartsWith(path + ".", StringComparison.Ordinal) || path.StartsWith(candidate + ".", StringComparison.Ordinal));
 
     public async Task RefreshAsync()
     {
@@ -229,6 +279,7 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
             AutostartStatus autostart = await Task.Run(AutostartManager.GetStatus);
 
             ApplyCards(connected, collectorElevated, pawnVersion, autostart);
+            TraceCheck(connected, collectorElevated, autostart);
             ReconcileProviders(_providerInfos);
             BuildHardware(connected, collectorElevated);
             BuildPanelStatuses(connected);
@@ -256,38 +307,69 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
             CanRescan = false;
             ActionStatus = $"Could not refresh System check: {ex.Message}";
             _cards["collector"].Apply("Collector check failed", ex.Message, CheckLevel.Error);
+            Log.For("system-check").Error("refresh failed", ex);
         }
         finally { _refreshing = false; }
+    }
+
+    /// <summary>
+    /// The verdict this page reached, once per change.
+    /// <para>This is the screen a user quotes in a bug report — "System check said collector not
+    /// running" — and until the Settings app logged anything at all, that sentence had no
+    /// counterpart on disk. <see cref="RefreshAsync"/> runs on a 5 s timer, so only a change earns
+    /// a line.</para>
+    /// </summary>
+    private void TraceCheck(bool connected, bool collectorElevated, AutostartStatus autostart)
+    {
+        string trace = connected
+            ? $"collector connected: version={CollectorVersion} pid={_session.CollectorPid} elevated={collectorElevated}"
+            : $"collector NOT running: no live {SharedMemoryLayout.SectionName} section"
+              + $" (attached={_session.Attached} stale={_session.Stale})";
+        trace += $" · pawnIo={(_pawnInstalled ? "installed" : "absent")} · autostart {autostart.Trace}";
+        if (trace == _lastCheckTrace) return;
+        _lastCheckTrace = trace;
+        Log.For("system-check").Info(trace);
     }
 
     public async Task<int?> InstallPawnIoAsync()
     {
         ActionStatus = "Waiting for administrator permission…";
-        int? result = await PawnIoManager.RunElevatedAsync();
-        ActionStatus = result switch
+        ElevatedOutcome outcome = await PawnIoManager.RunElevatedAsync();
+        ActionStatus = outcome.ExitCode switch
         {
             null => "PawnIO installation was cancelled.",
             0 => "PawnIO installed. Refreshing checks…",
-            3010 => "PawnIO installed; Windows must restart before the driver is available.",
-            _ => $"PawnIO installer failed with exit code {result}.",
+            CommandLineDispatcher.PawnIoAlreadyExists => "PawnIO was already installed; nothing was changed.",
+            CommandLineDispatcher.PawnIoRebootRequired => "PawnIO installed; Windows must restart before the driver is available.",
+            _ => WithDetail($"PawnIO installer failed with exit code {outcome.ExitCode}.", outcome.Detail),
         };
         await RefreshAsync();
-        return result;
+        return outcome.ExitCode;
     }
 
     public async Task<int?> RepairAutostartAsync()
     {
         ActionStatus = "Waiting for administrator permission…";
-        int? result = await AutostartManager.RunElevatedAsync(enable: true);
-        ActionStatus = result switch
+        ElevatedOutcome outcome = await AutostartManager.RunElevatedAsync(enable: true);
+        ActionStatus = outcome.ExitCode switch
         {
             null => "Autostart repair was cancelled.",
             0 => "Autostart repaired.",
-            _ => $"Autostart repair failed with exit code {result}.",
+            CommandLineDispatcher.NeedsElevation => WithDetail("Autostart repair needs administrator rights.", outcome.Detail),
+            _ => WithDetail($"Autostart repair failed (exit code {outcome.ExitCode}).", outcome.Detail),
         };
         await RefreshAsync();
-        return result;
+        return outcome.ExitCode;
     }
+
+    /// <summary>
+    /// Put the elevated child's own words in front of the user instead of a bare exit code. Its
+    /// stderr cannot be piped back through <c>runas</c>, so this text was read out of its log file
+    /// (<see cref="ElevatedVerb"/>) — which is the whole reason the exit code used to be all there
+    /// was to show.
+    /// </summary>
+    private static string WithDetail(string headline, string detail)
+        => detail.Length > 0 ? $"{headline} {detail}" : headline;
 
     public async Task<bool> RescanAsync()
     {
@@ -624,5 +706,9 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
         },
     };
 
-    public void Dispose() => _session.Dispose();
+    public void Dispose()
+    {
+        _config.ExternalChanged -= Config_ExternalChanged;
+        _session.Dispose();
+    }
 }

@@ -24,6 +24,22 @@ public sealed class AppSettings
     public AppearanceSettings Appearance { get; set; } = new();
 
     public CollectorSettings Collector { get; set; } = new();
+
+    public DiagnosticsSettings Diagnostics { get; set; } = new();
+}
+
+/// <summary>
+/// Logging knobs. Top level, not under <see cref="CollectorSettings"/>, because all three
+/// processes read them.
+/// <para>Adding this block is additive: an existing settings.json without it deserializes to these
+/// defaults and gains the block on its next write, so no schema bump is needed.</para>
+/// </summary>
+public sealed class DiagnosticsSettings
+{
+    /// <summary>"debug" | "info" | "warn" | "error". The <c>HALO_LOG_LEVEL</c> environment
+    /// variable overrides this — deliberately, so a settings.json that will not parse cannot lock
+    /// you out of the verbose logging you need to find out why.</summary>
+    public string LogLevel { get; set; } = "info";
 }
 
 /// <summary>Global look: the defaults every widget inherits unless it overrides them.</summary>

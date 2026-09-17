@@ -15,6 +15,8 @@ namespace Halo.Collector.Providers;
 /// </summary>
 public sealed unsafe class CpuKernelProvider : ISensorProvider
 {
+    private static readonly ComponentLog Log2 = Log.For("cpu-kernel");
+
     public string Name => "cpu-kernel";
     public double MaxRateHz => 64;
     public double DefaultRateHz => CollectorRates.CpuKernel;
@@ -59,7 +61,7 @@ public sealed unsafe class CpuKernelProvider : ISensorProvider
     {
         if (topology.Count == 0)
         {
-            Log.Warn("cpu topology unavailable — cpu.core.<i>.class/.physical not published");
+            Log2.Warn("cpu topology unavailable — cpu.core.<i>.class/.physical not published");
             return;
         }
         foreach (var l in topology)
@@ -71,7 +73,7 @@ public sealed unsafe class CpuKernelProvider : ISensorProvider
             sink.Set(MetricNames.CpuCorePhysical(l.Index), l.PhysicalCore);
         }
         int perf = topology.Count(l => l.Class == 0);
-        Log.Info($"cpu topology: {topology.Count} logical / {topology.Select(l => l.PhysicalCore).Distinct().Count()} physical" +
+        Log2.Info($"cpu topology: {topology.Count} logical / {topology.Select(l => l.PhysicalCore).Distinct().Count()} physical" +
                  $" across {_groupCount} group(s); {perf} logical on performance cores, {topology.Count - perf} on efficiency cores");
     }
 
@@ -87,7 +89,7 @@ public sealed unsafe class CpuKernelProvider : ISensorProvider
         if (n < _coreCount && !_shortReadLogged)
         {
             _shortReadLogged = true;
-            Log.Warn($"cpu-kernel: the kernel returned {n} of {_coreCount} logical CPUs — cpu.core.{n}..{_coreCount - 1}.pct stay N/A");
+            Log2.Warn($"the kernel returned {n} of {_coreCount} logical CPUs — cpu.core.{n}..{_coreCount - 1}.pct stay N/A");
         }
 
         double totalBusyDelta = 0, totalDelta = 0;

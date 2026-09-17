@@ -1,0 +1,1 @@
+﻿Halo.Tests: keeps Paths.DataDir inside this project's output folder. See Halo.Tests.csproj.
