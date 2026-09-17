@@ -123,12 +123,12 @@ if (!isNew)
 // exception to stderr" writes to a console that does not exist. Without these a fault anywhere
 // below leaves no trace at all — which is exactly what happened on 2026-09-17.
 // Qualified: bare `Diagnostics` binds to the System.Diagnostics namespace here, not to the class.
-Halo.Shared.Diagnostics.InstallCrashHandlers();
+ProcessDiagnostics.InstallCrashHandlers();
 Log.Init("collector", alsoConsole: args.Contains("--console"));
 // Opens this instance's session record AND classifies every previous one, so a start that
 // follows a crash says so instead of looking like an ordinary boot.
 SessionLog.Begin("collector");
-Halo.Shared.Diagnostics.LogEnvironment("collector");
+ProcessDiagnostics.LogEnvironment("collector");
 
 var lifecycle = Log.For("lifecycle");
 bool elevated = Elevation.IsElevated;

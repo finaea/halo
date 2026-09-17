@@ -8,7 +8,14 @@ bool startCollector = args.Contains("--start-collector", StringComparer.OrdinalI
 
 // Before anything that can throw. Both shipping exes are WinExe, so the runtime's default
 // "print the unhandled exception to stderr" writes to a console that does not exist.
-Diagnostics.InstallCrashHandlers();
+//
+// The widgets opt in to the last-gasp dialog. The try/catch below only covers what unwinds through
+// it; a throw on one of the background threads reaches AppDomain.UnhandledException instead, and
+// without this the user would still be left with a process that vanished and no window to explain
+// it. The collector deliberately does NOT opt in — it is a background service and must not put a
+// modal dialog on an idle desktop.
+ProcessDiagnostics.OnFatal = detail => ShowFatalDialog("Halo's widgets stopped unexpectedly.", detail);
+ProcessDiagnostics.InstallCrashHandlers();
 
 using var singleInstance = new Mutex(true, "Local\\Halo.Widgets.SingleInstance.v2", out bool isNew);
 if (!isNew)
@@ -44,7 +51,7 @@ if (!isNew)
 // App's constructor is what builds it.
 Log.Init("widgets");
 SessionLog.Begin("widgets");
-Diagnostics.LogEnvironment("widgets");
+ProcessDiagnostics.LogEnvironment("widgets");
 
 string reason = "message loop ended";
 int exitCode = 0;
@@ -61,7 +68,10 @@ catch (Exception ex)
     // Durable, not queued: the dialog below blocks until the user clicks, and if they kill the
     // process instead of clicking, this line has to already be on disk.
     Log.Durable(LogLevel.Error, $"fatal (phase: {SessionLog.Phase})", ex, "lifecycle");
-    ShowFatalDialog(ex);
+    // Clear the hook: this path reports the failure itself, and the handler must not show a second
+    // dialog for the same exception if it also surfaces as unhandled during teardown.
+    ProcessDiagnostics.OnFatal = null;
+    ShowFatalDialog("Halo's widgets could not start.", $"{ex.GetType().Name}: {ex.Message}");
     exitCode = 2;
 }
 
@@ -73,14 +83,14 @@ return exitCode;
 // covers every managed failure and none of the pure-native ones — an access violation inside a GPU
 // driver never reaches here at all, which is why the Dx breadcrumbs exist alongside this rather
 // than instead of it.
-static void ShowFatalDialog(Exception ex)
+static void ShowFatalDialog(string headline, string detail)
 {
     try
     {
         string where = Log.CurrentPath.Length > 0 ? Log.CurrentPath : "(no log file could be opened)";
         Native.MessageBoxW(0,
-            "Halo's widgets could not start.\n\n"
-            + $"{ex.GetType().Name}: {ex.Message}\n\n"
+            $"{headline}\n\n"
+            + $"{detail}\n\n"
             + $"Halo {AppVersion.Current} · phase: {SessionLog.Phase}\n"
             + $"Log: {where}",
             "Halo — widgets failed to start",
