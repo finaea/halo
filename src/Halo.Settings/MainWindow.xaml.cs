@@ -19,6 +19,11 @@ public partial class MainWindow : FluentWindow
         _firstRun = FirstRunState.IsPending;
         InitializeComponent();
         _config = new LiveConfigService(Paths.ConfigDir);
+        // settings.json > diagnostics.logLevel, applied here because this is the first point at
+        // which config has been read. The CLI verbs run long before any of this and stay on the
+        // default or on HALO_LOG_LEVEL — which is the escape hatch by design: the moment you most
+        // need verbose logging is when settings.json is the thing that will not parse.
+        if (Log.TryParseLevel(_config.Settings.Diagnostics.LogLevel, out LogLevel level)) Log.SetLevel(level);
         _config.StatusChanged += Config_StatusChanged;
         ConfigPathText.Text = Paths.ConfigDir;
         ConfigPathText.ToolTip = Paths.ConfigDir;

@@ -154,6 +154,7 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
     private string _autostartButtonToolTip = "Recreates both scheduled tasks with administrator permission.";
     private string _actionStatus = "";
     private string _collectorVersion = "Not connected";
+    private string _lastCheckTrace = "";
     private bool _pawnInstalled;
     private bool _hasExistingLayout;
     private DateTimeOffset _rescanBlockedUntilUtc;
@@ -229,6 +230,7 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
             AutostartStatus autostart = await Task.Run(AutostartManager.GetStatus);
 
             ApplyCards(connected, collectorElevated, pawnVersion, autostart);
+            TraceCheck(connected, collectorElevated, autostart);
             ReconcileProviders(_providerInfos);
             BuildHardware(connected, collectorElevated);
             BuildPanelStatuses(connected);
@@ -256,38 +258,69 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
             CanRescan = false;
             ActionStatus = $"Could not refresh System check: {ex.Message}";
             _cards["collector"].Apply("Collector check failed", ex.Message, CheckLevel.Error);
+            Log.For("system-check").Error("refresh failed", ex);
         }
         finally { _refreshing = false; }
+    }
+
+    /// <summary>
+    /// The verdict this page reached, once per change.
+    /// <para>This is the screen a user quotes in a bug report — "System check said collector not
+    /// running" — and until the Settings app logged anything at all, that sentence had no
+    /// counterpart on disk. <see cref="RefreshAsync"/> runs on a 5 s timer, so only a change earns
+    /// a line.</para>
+    /// </summary>
+    private void TraceCheck(bool connected, bool collectorElevated, AutostartStatus autostart)
+    {
+        string trace = connected
+            ? $"collector connected: version={CollectorVersion} pid={_session.CollectorPid} elevated={collectorElevated}"
+            : $"collector NOT running: no live {SharedMemoryLayout.SectionName} section"
+              + $" (attached={_session.Attached} stale={_session.Stale})";
+        trace += $" · pawnIo={(_pawnInstalled ? "installed" : "absent")} · autostart {autostart.Trace}";
+        if (trace == _lastCheckTrace) return;
+        _lastCheckTrace = trace;
+        Log.For("system-check").Info(trace);
     }
 
     public async Task<int?> InstallPawnIoAsync()
     {
         ActionStatus = "Waiting for administrator permission…";
-        int? result = await PawnIoManager.RunElevatedAsync();
-        ActionStatus = result switch
+        ElevatedOutcome outcome = await PawnIoManager.RunElevatedAsync();
+        ActionStatus = outcome.ExitCode switch
         {
             null => "PawnIO installation was cancelled.",
             0 => "PawnIO installed. Refreshing checks…",
-            3010 => "PawnIO installed; Windows must restart before the driver is available.",
-            _ => $"PawnIO installer failed with exit code {result}.",
+            CommandLineDispatcher.PawnIoAlreadyExists => "PawnIO was already installed; nothing was changed.",
+            CommandLineDispatcher.PawnIoRebootRequired => "PawnIO installed; Windows must restart before the driver is available.",
+            _ => WithDetail($"PawnIO installer failed with exit code {outcome.ExitCode}.", outcome.Detail),
         };
         await RefreshAsync();
-        return result;
+        return outcome.ExitCode;
     }
 
     public async Task<int?> RepairAutostartAsync()
     {
         ActionStatus = "Waiting for administrator permission…";
-        int? result = await AutostartManager.RunElevatedAsync(enable: true);
-        ActionStatus = result switch
+        ElevatedOutcome outcome = await AutostartManager.RunElevatedAsync(enable: true);
+        ActionStatus = outcome.ExitCode switch
         {
             null => "Autostart repair was cancelled.",
             0 => "Autostart repaired.",
-            _ => $"Autostart repair failed with exit code {result}.",
+            CommandLineDispatcher.NeedsElevation => WithDetail("Autostart repair needs administrator rights.", outcome.Detail),
+            _ => WithDetail($"Autostart repair failed (exit code {outcome.ExitCode}).", outcome.Detail),
         };
         await RefreshAsync();
-        return result;
+        return outcome.ExitCode;
     }
+
+    /// <summary>
+    /// Put the elevated child's own words in front of the user instead of a bare exit code. Its
+    /// stderr cannot be piped back through <c>runas</c>, so this text was read out of its log file
+    /// (<see cref="ElevatedVerb"/>) — which is the whole reason the exit code used to be all there
+    /// was to show.
+    /// </summary>
+    private static string WithDetail(string headline, string detail)
+        => detail.Length > 0 ? $"{headline} {detail}" : headline;
 
     public async Task<bool> RescanAsync()
     {

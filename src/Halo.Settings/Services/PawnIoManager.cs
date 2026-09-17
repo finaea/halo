@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.IO;
 using Microsoft.Win32;
 using Halo.Shared;
@@ -8,6 +7,8 @@ namespace Halo.Settings.Services;
 public static class PawnIoManager
 {
     public const string MissingPayloadMessage = @"Installer payload not found (redist\PawnIO_setup.exe)";
+    public const string InstallVerb = "--install-pawnio";
+    public const string Component = "install-pawnio";
 
     public static string InstallerPath => Path.Combine(Paths.RedistDir, "PawnIO_setup.exe");
     public static bool PayloadPresent => File.Exists(InstallerPath);
@@ -19,29 +20,19 @@ public static class PawnIoManager
         return HasUninstallEntry(RegistryView.Registry64) || HasUninstallEntry(RegistryView.Registry32);
     }
 
-    public static async Task<int?> RunElevatedAsync()
+    /// <summary>
+    /// Run our own <c>--install-pawnio</c> verb elevated. Same channel as autostart: the elevated
+    /// child's stderr cannot be piped back through <c>runas</c>, so the reason comes out of its log
+    /// file — see <see cref="ElevatedVerb"/>.
+    /// </summary>
+    public static Task<ElevatedOutcome> RunElevatedAsync()
     {
-        if (!PayloadPresent) return 1;
-        string? exe = Environment.ProcessPath;
-        if (string.IsNullOrWhiteSpace(exe)) return 1;
-        try
+        if (!PayloadPresent)
         {
-            using Process? process = Process.Start(new ProcessStartInfo
-            {
-                FileName = exe,
-                Arguments = "--install-pawnio",
-                UseShellExecute = true,
-                Verb = "runas",
-                WorkingDirectory = Paths.AppRoot,
-            });
-            if (process is null) return 1;
-            await process.WaitForExitAsync();
-            return process.ExitCode;
+            Log.For(Component).Error($"{MissingPayloadMessage} — looked at {InstallerPath}");
+            return Task.FromResult(new ElevatedOutcome(1, MissingPayloadMessage));
         }
-        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
-        {
-            return null;
-        }
+        return ElevatedVerb.RunAsync(Component, InstallVerb);
     }
 
     private static bool HasUninstallEntry(RegistryView view)
