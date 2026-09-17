@@ -90,6 +90,15 @@ internal static unsafe partial class Native
     [DllImport("user32")] public static extern nint GetForegroundWindow();
     [DllImport("user32")] public static extern bool SetForegroundWindow(nint hwnd);
 
+    // The only dialog this process ever shows. Halo.Widgets is a WinExe with no window until the
+    // overlay is up, so a startup failure has nowhere to surface: stderr goes to a console that
+    // does not exist, and the user sees a shortcut click that did nothing. Settings gets this for
+    // free from WPF's MessageBox (Halo.Settings\App.xaml.cs:29); here it is one import.
+    [DllImport("user32", CharSet = CharSet.Unicode)]
+    public static extern int MessageBoxW(nint hwnd, string text, string caption, uint type);
+    public const uint MB_OK = 0x00000000, MB_ICONERROR = 0x00000010,
+        MB_SETFOREGROUND = 0x00010000, MB_TOPMOST = 0x00040000;
+
     // menus
     [DllImport("user32")] public static extern nint CreatePopupMenu();
     [DllImport("user32", CharSet = CharSet.Unicode)] public static extern bool AppendMenuW(nint menu, uint flags, nuint id, string? item);

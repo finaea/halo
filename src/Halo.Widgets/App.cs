@@ -18,6 +18,10 @@ public sealed unsafe class App : IDisposable
     public MetricCache Metrics { get; } = new();
     public nint DesktopHost { get; private set; }
 
+    private static readonly ComponentLog WatchdogLog = Log.For("watchdog");
+    private static readonly ComponentLog PlacementLog = Log.For("placement");
+    private static readonly ComponentLog DxLog = Log.For("dx");
+
     private readonly Dx _dx;
     private readonly List<WidgetWindow> _windows = new();
     private readonly List<MonitorInfo> _monitors = new();
@@ -52,11 +56,19 @@ public sealed unsafe class App : IDisposable
     {
         _startCollector = startCollector;
         bool freshInstall = !File.Exists(Path.Combine(Paths.ConfigDir, "widgets.json"));
+        SessionLog.SetPhase("loading config");
         ConfigStore = new ConfigStore(Paths.ConfigDir);
+        ApplyLogLevel();
+
+        // The phase is set before the device stack because what happens inside it can end the
+        // process with no managed exception at all — see the breadcrumbs in Dx.CreateCore.
+        SessionLog.SetPhase("creating the DirectX device stack");
         _dx = new Dx(Paths.FontsDir);
+
+        SessionLog.SetPhase("resolving monitors and the desktop host");
         RefreshMonitors();
         DesktopHost = FindDesktopHost();
-        Log.Info($"desktop host: 0x{DesktopHost:X}");
+        PlacementLog.Info($"desktop host: 0x{DesktopHost:X}");
 
         if (freshInstall && ConfigStore.Widgets.Widgets.Count == 0)
         {
@@ -65,22 +77,50 @@ public sealed unsafe class App : IDisposable
             // there is no overlay to paint yet. Prompting after would bake in the minimal offline
             // layout — every user who installs without "Start with Windows" would get it — and
             // nothing regenerates a layout once widgets.json exists.
+            SessionLog.SetPhase("first run: generating a layout");
             if (_startCollector) { CollectorLauncher.EnsureRunning(); _collectorLaunchHandled = true; }
             GenerateFirstRunLayout();
         }
-        if (ArrangeRequested) Log.Info("config asks for an arrange pass — widgets will be packed onto the primary monitor");
+        if (ArrangeRequested) PlacementLog.Info("config asks for an arrange pass — widgets will be packed onto the primary monitor");
 
         ConfigStore.Changed += () => _configDirty = true;
     }
 
+    private string _logLevelApplied = "";
+
+    /// <summary>
+    /// Push <c>settings.json &gt; diagnostics &gt; logLevel</c> into the logger. Called once the
+    /// config exists and again on every reload, so turning debug logging on costs no restart.
+    /// <para>Gated on the raw string actually changing: a config write happens every time a widget
+    /// is dragged, and re-applying on each one would either churn "log level X -&gt; Y" lines or
+    /// repeat the same complaint about an unparseable value forever. <see cref="Log.SetLevel"/>
+    /// additionally ignores this once <c>HALO_LOG_LEVEL</c> has pinned the level, which is the
+    /// whole point of that env var.</para>
+    /// </summary>
+    private void ApplyLogLevel()
+    {
+        // Null-safe on purpose: a settings.json carrying "diagnostics": null deserialises the
+        // property to null, and this runs inside App's constructor - it must not be the thing
+        // that takes startup down. An absent value is silent; only a present-but-wrong one warns.
+        string raw = ConfigStore.Settings.Diagnostics?.LogLevel ?? "";
+        if (raw == _logLevelApplied) return;
+        _logLevelApplied = raw;
+        if (Log.TryParseLevel(raw, out LogLevel level)) Log.SetLevel(level);
+        else if (raw.Length > 0)
+            Log.Warn($"diagnostics.logLevel '{raw}' is not one of debug|info|warn|error —"
+                + $" leaving the level at {Log.Level}");
+    }
+
     public void Run()
     {
+        SessionLog.SetPhase("creating the tray icon");
         _tray = new TrayIcon(this);
         // Panels are built from discovered hardware — the core grid's P/E classes, the drive and
         // fan channel lists, the GPU count. Attach before building or every one of those reads
         // its fallback and the first layout is wrong until something else forces a rebuild.
         Metrics.Tick();
         _wasAttached = Metrics.Attached;
+        SessionLog.SetPhase("building widget windows");
         BuildWindows();
         // Give the overlay a beat to paint before a UAC dialog dims the desktop — and give a
         // collector that the autostart task or the installer started moments ago the same beat to
@@ -88,6 +128,7 @@ public sealed unsafe class App : IDisposable
         if (_startCollector && !_collectorLaunchHandled)
             _collectorLaunchDueQpc = Stopwatch.GetTimestamp() + 2 * Stopwatch.Frequency;
         _ = timeBeginPeriod(1);
+        SessionLog.SetPhase("running");
         try { Loop(); }
         finally { _ = timeEndPeriod(1); }
     }
@@ -306,6 +347,7 @@ public sealed unsafe class App : IDisposable
     private void ApplyConfigChange()
     {
         _configDirty = false;
+        ApplyLogLevel();
         var wanted = ConfigStore.Widgets.Widgets.Where(w => w.Enabled).ToList();
         var settings = ConfigStore.Settings;
 
@@ -393,7 +435,7 @@ public sealed unsafe class App : IDisposable
     private void RecoverDevice()
     {
         _deviceLost = false;
-        Log.Warn("recreating D3D/D2D/DComp devices");
+        DxLog.Warn("recreating D3D/D2D/DComp devices");
         try
         {
             _dx.Recreate(Paths.FontsDir);
@@ -401,7 +443,7 @@ public sealed unsafe class App : IDisposable
         }
         catch (Exception ex)
         {
-            Log.Error("device recovery failed, retrying in 2s", ex);
+            DxLog.Error("device recovery failed, retrying in 2s", ex);
             Thread.Sleep(2000);
             _deviceLost = true;
         }
@@ -432,7 +474,7 @@ public sealed unsafe class App : IDisposable
         if (hostDead || windowsDead)
         {
             nint host = FindDesktopHost();
-            Log.Warn($"desktop host lost (0x{DesktopHost:X}) — rebuilding widgets on 0x{host:X}");
+            PlacementLog.Warn($"desktop host lost (0x{DesktopHost:X}) — rebuilding widgets on 0x{host:X}");
             DesktopHost = host;
             // Rebuild even when the shell isn't back yet (host == 0): ApplyZMode then falls back
             // to an unparented bottom-of-z-order window, which is visible. Waiting for a host
@@ -449,7 +491,7 @@ public sealed unsafe class App : IDisposable
         {
             nint host = FindDesktopHost();
             if (host == 0) return;
-            Log.Info($"desktop host adopted: 0x{host:X}");
+            PlacementLog.Info($"desktop host adopted: 0x{host:X}");
             DesktopHost = host;
             foreach (var w in _windows) { w.ApplyZMode(); w.Reposition(); w.ForceRedraw(); }
         }
@@ -483,7 +525,7 @@ public sealed unsafe class App : IDisposable
             var (ax, ay, _, _) = w.ScreenRect();
             if (Math.Abs(ax - ex) > 2 || Math.Abs(ay - ey) > 2)
             {
-                Log.Info($"position guard: re-pinning {w.Config.Id} ({ax},{ay}) -> ({ex},{ey})");
+                PlacementLog.Info($"position guard: re-pinning {w.Config.Id} ({ax},{ay}) -> ({ex},{ey})");
                 w.Reposition();
                 w.ForceRedraw();
             }
@@ -557,7 +599,7 @@ public sealed unsafe class App : IDisposable
         if (DateTime.UtcNow < _nextWatchdogAttempt) return;
         int delayS = _watchdogFailures switch { 0 => 1, 1 => 5, _ => 30 };
         _nextWatchdogAttempt = DateTime.UtcNow.AddSeconds(delayS);
-        _watchdogFailures++;
+        int attempt = ++_watchdogFailures;
         try
         {
             // "No task" is not a permanent answer: autostart can be turned on at any time from
@@ -573,12 +615,28 @@ public sealed unsafe class App : IDisposable
                 if (_collectorTaskExists == false && !_noTaskLogged)
                 {
                     _noTaskLogged = true;
-                    Log.Warn("watchdog: no \\Halo\\Collector task — start Halo from its shortcut, or turn on "
+                    WatchdogLog.Warn("watchdog: no \\Halo\\Collector task — start Halo from its shortcut, or turn on "
                         + "\"Start with Windows\" in Halo Settings > System check; until then the panels show stale badges");
                 }
             }
+            // Every input the branch below turns on, on one line, before anything is done about
+            // it. The three restarts on 2026-09-17 each arrived with no stated reason: the inputs
+            // were only ever logged on the "alive but silent" branch, so a *missing* line was the
+            // only evidence that the collector had already exited — a fact you had to
+            // reconstruct from the source before the log could be read at all.
+            string taskState = _collectorTaskExists switch
+            {
+                true => "registered",
+                false => "missing",
+                _ => "not probed yet",
+            };
+            string inputs = $"stale={Metrics.Stale} attached={Metrics.Attached} "
+                + $"pid={Metrics.CollectorPid} heartbeat={Metrics.HeartbeatAge:0.0}s "
+                + $"task={taskState} attempt={attempt} backoff={delayS}s";
+
             if (_collectorTaskExists == true)
             {
+                WatchdogLog.Warn($"watchdog: restarting the collector — {inputs}");
                 // The task is registered with Task Scheduler's default MultipleInstances
                 // (IGNORE_NEW), which is right — two collectors fight over the same shared-memory
                 // section and the PresentMon ETW session. The cost is that /Run against a collector
@@ -589,19 +647,34 @@ public sealed unsafe class App : IDisposable
                 // plain /Run works.
                 if (CollectorLauncher.IsRunning(Metrics.Attached, Metrics.CollectorPid))
                 {
-                    Log.Warn($"watchdog: collector pid {Metrics.CollectorPid} is alive but silent for "
+                    WatchdogLog.Warn($"watchdog: collector pid {Metrics.CollectorPid} is alive but silent for "
                         + $"{Metrics.HeartbeatAge:0.0}s — ending the task before restarting it");
+                    // schtasks /End gives the collector no notice whatsoever, so the killer is the
+                    // only one who can record why. Without this the collector's next start finds a
+                    // session record with no shutdown and no stop intent, and reports a crash that
+                    // was really a deliberate restart. Recorded BEFORE the kill, and the pid is
+                    // read before it too — afterwards the section it comes from may be gone.
+                    SessionLog.RecordExternalStop(Metrics.CollectorPid,
+                        $"watchdog restart: alive but silent for {Metrics.HeartbeatAge:0.0}s");
                     int end = Schtasks("/End /TN \"\\Halo\\Collector\"", waitMs: 5000);
                     if (end != 0)
-                        Log.Warn($"watchdog: schtasks /End returned {end} — the hung collector may outlive the restart request");
+                        WatchdogLog.Warn($"watchdog: schtasks /End returned {end} — the hung collector may outlive the restart request");
                 }
                 Schtasks("/Run /TN \"\\Halo\\Collector\"");
-                Log.Info("watchdog: requested collector start via scheduled task");
+                WatchdogLog.Info("watchdog: requested collector start via scheduled task");
+            }
+            else
+            {
+                // Debug, not Warn: no task is a supported configuration (every user who declined
+                // "Start with Windows"), and this runs every 30 s for as long as the collector is
+                // absent. The once-only warning above already states the reason; this exists so
+                // that turning logLevel up shows the watchdog is alive and deliberately idle.
+                WatchdogLog.Debug($"watchdog: nothing to act on — {inputs}");
             }
         }
         catch (Exception ex)
         {
-            Log.Warn($"watchdog: {ex.Message}");
+            WatchdogLog.Warn($"watchdog: {ex.Message}");
         }
     }
 
@@ -634,7 +707,7 @@ public sealed unsafe class App : IDisposable
             $"{m.Device} {m.W}x{m.H}+{m.X}+{m.Y} @{m.Dpi:0}dpi auto={AutoScale.For(m):0.00}{(m.Primary ? " primary" : "")}"));
         if (sig != _monitorSignature)
         {
-            Log.Info($"monitors: {sig}");
+            PlacementLog.Info($"monitors: {sig}");
             _monitorSignature = sig;
             _placementDirty = true;
         }
@@ -829,7 +902,7 @@ public sealed unsafe class App : IDisposable
             if (!_packWaitLogged && stamp - _packWaitSinceQpc > 5 * Stopwatch.Frequency)
             {
                 _packWaitLogged = true;
-                Log.Warn("auto-arrange: still no laid-out size from "
+                PlacementLog.Warn("auto-arrange: still no laid-out size from "
                     + string.Join(", ", packed.Where(w => w.SizeStale).Select(w => w.Config.Id))
                     + " — no widget has been moved and the arrange stays pending");
             }
@@ -862,7 +935,7 @@ public sealed unsafe class App : IDisposable
             var win = packed.First(w => w.Config.Id == place.Id);
             win.SetPackedPosition(place.X, place.Y);
         }
-        Log.Info($"auto-arrange: packed {items.Count} widget(s) onto {target.Device} "
+        PlacementLog.Info($"auto-arrange: packed {items.Count} widget(s) onto {target.Device} "
             + $"({target.W}x{target.H} @{target.Dpi:0}dpi): "
             + string.Join(", ", placements.Select(p =>
             {
@@ -907,9 +980,9 @@ public sealed unsafe class App : IDisposable
                         w.Y = p.Y;
                     }
             });
-            Log.Info($"arrange: wrote {placed.Count} position(s) to widgets.json and cleared the flag");
+            PlacementLog.Info($"arrange: wrote {placed.Count} position(s) to widgets.json and cleared the flag");
         }
-        catch (Exception ex) { Log.Error("arrange: saving the packed layout", ex); }
+        catch (Exception ex) { PlacementLog.Error("arrange: saving the packed layout", ex); }
     }
 
     public void ResetPanelMax(string panelType)
@@ -953,7 +1026,9 @@ public sealed unsafe class App : IDisposable
     /// </summary>
     private void GenerateFirstRunLayout()
     {
+        SessionLog.SetPhase("first run: waiting for the collector's hardware registry");
         bool online = WaitForCollector(5);
+        SessionLog.SetPhase("first run: writing the generated layout");
         var widgets = DefaultLayout.Generate(n => Metrics.Value(n), n => Metrics.Text(n), online);
 
         ConfigStore.Widgets.Widgets.Clear();
@@ -1010,6 +1085,9 @@ public sealed unsafe class App : IDisposable
     /// </summary>
     public void Quit()
     {
+        // No SessionLog.RecordExternalStop here on purpose: this asks over the control pipe rather
+        // than killing anything, so the collector reaches its own shutdown path and records its
+        // own clean exit. The watchdog's schtasks /End is the case that needs the marker.
         if (Halo.Metrics.ControlPipe.Send(Halo.Metrics.ControlPipe.Quit))
             Log.Info("quit: asked the collector to shut down");
         _quit = true;
