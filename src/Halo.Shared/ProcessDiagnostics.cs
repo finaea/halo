@@ -6,11 +6,28 @@ namespace Halo.Shared;
 /// <summary>
 /// The two things every Halo process must do on the way up: install crash handlers, and write down
 /// enough about the machine that a stranger's log is readable without asking them questions.
+/// <para>Named <c>ProcessDiagnostics</c> and not <c>Diagnostics</c> on purpose: a class called
+/// <c>Diagnostics</c> in <c>Halo.Shared</c> is ambiguous with the <c>System.Diagnostics</c>
+/// namespace in any file that uses both, and this codebase uses <c>System.Diagnostics</c>
+/// everywhere. The short name forced a fully-qualified reference at every call site.</para>
 /// </summary>
-public static class Diagnostics
+public static class ProcessDiagnostics
 {
     private static readonly ComponentLog Log2 = Log.For("lifecycle");
     private static bool _installed;
+
+    /// <summary>
+    /// Optional last-gasp notification, run after the crash has been written and flushed. Opt-in
+    /// per process, because the right answer differs: the widgets are a user-facing app with no
+    /// other channel — a user whose overlay vanished sees no window, no tray icon and no error, and
+    /// clicks the shortcut again because "nothing happened" and "crashed" look identical from
+    /// outside — while the collector is a background service that must never put a modal dialog on
+    /// an idle desktop, and Halo.Settings already has its own WPF handler.
+    /// <para>Set it before <see cref="InstallCrashHandlers"/>. It runs inside the unhandled-exception
+    /// handler with the runtime already tearing down, so it is invoked last and its own failure is
+    /// swallowed: the log is already safe by then, and nothing here may cost us that.</para>
+    /// </summary>
+    public static Action<string>? OnFatal { get; set; }
 
     /// <summary>
     /// Route every escape hatch the runtime offers into the log, synchronously.
@@ -47,6 +64,16 @@ public static class Diagnostics
                 Log.Durable(LogLevel.Info, Log.Health, "logger");
                 if (e.IsTerminating) SessionLog.SetPhase($"crashed in {phase}");
                 Log.Flush(1000);
+
+                // Only now, with the evidence on disk, tell the user. A dialog that throws or
+                // blocks must not be able to cost us the log record.
+                if (e.IsTerminating && OnFatal is { } notify)
+                {
+                    string what = e.ExceptionObject is Exception ex2
+                        ? $"{ex2.GetType().Name}: {ex2.Message}"
+                        : e.ExceptionObject?.ToString() ?? "unknown error";
+                    try { notify($"{what}\n\nPhase: {phase}\nLog: {Log.CurrentPath}"); } catch { }
+                }
             }
             catch { /* there is nowhere left to report a failure to report */ }
         };
