@@ -235,24 +235,33 @@ public static class Log
 
         string line = Format(level, component, msg);
         if (AlsoConsole) Console.WriteLine(line);
-        Interlocked.Increment(ref _accepted);
+        // After the path check, not before: accepting a record there is no file for would leave a
+        // debt nothing can ever discharge, and Flush would time out forever waiting for it.
         if (_path.Length == 0) return;
+        Interlocked.Increment(ref _accepted);
         lock (WriteGate)
         {
             // Same gate and same stream as the pump, so a synchronous record can never overtake
             // one the pump already holds.
-            if (WriteLocked(line + Environment.NewLine))
-                Interlocked.Increment(ref _persisted);
+            Discharge(WriteLocked(line + Environment.NewLine));
             if (pending > 0)
             {
                 Interlocked.Increment(ref _accepted);
                 string note = Format(LogLevel.Warn, "logger",
                     $"{pending} queued record(s) were still unwritten when the record above was "
                     + "forced out — they follow it out of order, or were lost with the process");
-                if (WriteLocked(note + Environment.NewLine))
-                    Interlocked.Increment(ref _persisted);
+                Discharge(WriteLocked(note + Environment.NewLine));
             }
         }
+    }
+
+    /// <summary>Settle one accepted record: persisted, or explicitly counted as lost. Never
+    /// silently neither — an accepted record that is neither makes <see cref="Flush"/> wait for
+    /// something that is never coming.</summary>
+    private static void Discharge(bool written)
+    {
+        if (written) Interlocked.Increment(ref _persisted);
+        else Interlocked.Increment(ref _droppedWriteFailed);
     }
 
     /// <summary>Wait for the queue to catch up, up to <paramref name="timeoutMs"/>. Returns how
@@ -270,9 +279,25 @@ public static class Log
         return Math.Max(0, Outstanding(target));
     }
 
+    /// <summary>
+    /// Records accepted up to <paramref name="target"/> that the logger still owes the disk.
+    ///
+    /// <para><b>The accounting rule, because getting it wrong makes <see cref="Flush"/> lie again.</b>
+    /// <c>_accepted</c> counts only records the logger took responsibility for. A record is
+    /// discharged by being persisted, or by being counted in <c>_droppedWriteFailed</c> — the sink
+    /// refused it after we had already accepted it.</para>
+    ///
+    /// <para><c>_droppedQueueFull</c> must NOT appear here. Those records were rejected *before*
+    /// acceptance: the shed path returns without ever incrementing <c>_accepted</c>, and the
+    /// queue-full path decrements it back off. Including them inflated the discharge side against a
+    /// target they never entered, so one shed record let one accepted record go unwritten while
+    /// <c>Flush</c> reported success. Measured by the test suite: <c>Flush</c> returned
+    /// "flushed (6072 persisted, 722 dropped)" with 142 queued records still on the floor, and a
+    /// heavier storm hid 6015. That is the original bug this whole change set exists to kill,
+    /// reintroduced one layer down.</para>
+    /// </summary>
     private static long Outstanding(long target) => target
         - Interlocked.Read(ref _persisted)
-        - Interlocked.Read(ref _droppedQueueFull)
         - Interlocked.Read(ref _droppedWriteFailed);
 
     public static void Durable(LogLevel level, string msg, Exception ex, string component = "-")
@@ -406,6 +431,9 @@ public static class Log
 
     private static bool TryOpen()
     {
+        // Never leak the previous handle. Production opens once per process so this was latent,
+        // but an orphaned handle keeps the old file locked with nothing able to close it.
+        CloseStream();
         try
         {
             // FileShare.Read so the file can be tailed while Halo runs. No other writer is
@@ -507,16 +535,16 @@ public static class Log
     {
         long target = Interlocked.Read(ref _accepted);
         var sw = Stopwatch.StartNew();
-        while (sw.ElapsedMilliseconds < timeoutMs)
+        while (true)
         {
-            long done = Interlocked.Read(ref _persisted)
-                      + Interlocked.Read(ref _droppedQueueFull)
-                      + Interlocked.Read(ref _droppedWriteFailed);
-            if (done >= target)
+            // One shared definition with DrainBefore. They disagreed once; that cost the whole
+            // guarantee, so there is now exactly one place that knows what "settled" means.
+            if (Outstanding(target) <= 0)
                 return new(true, Interlocked.Read(ref _persisted), target, Dropped);
+            if (sw.ElapsedMilliseconds >= timeoutMs)
+                return new(false, Interlocked.Read(ref _persisted), target, Dropped);
             Thread.Sleep(5);
         }
-        return new(false, Interlocked.Read(ref _persisted), target, Dropped);
     }
 
     private static long Dropped =>

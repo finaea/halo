@@ -150,9 +150,10 @@ public sealed class LogFlushTests : LogTestBase
     }
 
     /// <summary>
-    /// KNOWN BUG in <c>src\Halo.Shared\Log.cs</c> — not fixed here, this file's scope is tests only.
+    /// Regression test for a bug this suite found and <c>Log.Outstanding</c> now fixes. Kept in
+    /// full because the arithmetic is the kind that gets "simplified" back into being wrong.
     ///
-    /// <para><c>Flush</c> compares <c>target = _accepted</c> against
+    /// <para><c>Flush</c> compared <c>target = _accepted</c> against
     /// <c>done = _persisted + _droppedQueueFull + _droppedWriteFailed</c> (<c>Log.cs:436-447</c>),
     /// but <c>_droppedQueueFull</c> counts records that were <b>never in</b> <c>_accepted</c>: the
     /// Debug shed path increments it without touching <c>_accepted</c> (<c>Log.cs:239-243</c>), and
@@ -175,12 +176,13 @@ public sealed class LogFlushTests : LogTestBase
     /// file keeps its drop count at zero and why the shedding tests poll the file rather than
     /// trusting <c>Flush</c>.</para>
     ///
-    /// <para>The fix is one line of accounting, not a redesign: drop <c>_droppedQueueFull</c> from
-    /// <c>done</c>, or increment <c>_accepted</c> on the shed path so the two sides pair up.</para>
+    /// <para><b>The fix:</b> <c>_droppedQueueFull</c> no longer appears on the discharge side.
+    /// Those records are rejected *before* acceptance, so they were never a debt to settle. Only
+    /// persistence and <c>_droppedWriteFailed</c> — the sink refusing a record we had already
+    /// accepted — discharge one, and <c>Flush</c> and <c>DrainBefore</c> now share the single
+    /// <c>Outstanding</c> definition instead of each carrying their own copy of the sum.</para>
     /// </summary>
-    [Fact(Skip = "Known bug in Log.Flush: _droppedQueueFull inflates 'done' against a target it "
-        + "never entered, so Flush reports success with records still queued. Owned by src/, not "
-        + "fixed from the test project — see the doc comment.")]
+    [Fact]
     public void Flush_AfterShedding_StillTellsTheTruth()
     {
         Log.ResetForTests(Dir, "flush", LogLevel.Debug);
