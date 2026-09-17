@@ -14,6 +14,8 @@ namespace Halo.Collector;
 /// </summary>
 public sealed class CommandServer : IDisposable
 {
+    private static readonly ComponentLog Log2 = Log.For("control");
+
     public const string PipeName = Halo.Metrics.ControlPipe.PipeName;
     private readonly CancellationTokenSource _cts = new();
     private readonly Action<string> _handler;
@@ -46,14 +48,14 @@ public sealed class CommandServer : IDisposable
                 {
                     line = line.Trim();
                     if (line.Length == 0) continue;
-                    Log.Info($"command: {line}");
-                    try { _handler(line); } catch (Exception ex) { Log.Error("command handler", ex); }
+                    Log2.Info($"command: {line}");
+                    try { _handler(line); } catch (Exception ex) { Log2.Error("command handler", ex); }
                 }
             }
             catch (Exception ex)
             {
                 if (_cts.IsCancellationRequested) return;
-                Log.Error("command pipe", ex);
+                Log2.Error("command pipe", ex);
                 Thread.Sleep(1000);
             }
         }

@@ -55,7 +55,29 @@ public sealed class LhmProvider : ISensorProvider
     /// Close. Matches ProviderHost.Dispose's per-runner join budget.</summary>
     private static readonly TimeSpan ShutdownGateTimeout = TimeSpan.FromSeconds(2);
 
-    public LhmProvider(Part part) => _part = part;
+    /// <summary>
+    /// Durable begin/done pairs around every LHM call made inside <see cref="Lhm"/>. The crash
+    /// this exists for is uncatchable — freeing the OpCode page under another thread is an
+    /// 0xC0000005 with no managed handler and no stack — so the only way to attribute it is a
+    /// record that is already on disk before the call is made.
+    ///
+    /// <para>Read the pairs as evidence, not narration: a file whose last LHM line is a
+    /// <c>begin</c> names the exact call the process died inside; one that ends on the matching
+    /// <c>done</c> proves that call returned and the fault is somewhere after it. A <c>begin</c>
+    /// alone only ever proves the call was attempted.</para>
+    ///
+    /// <para>Debug level, so this costs one comparison in a normal session
+    /// (<see cref="Log.Durable"/> returns immediately when the level is higher). The hot
+    /// <see cref="Poll"/> loop additionally hoists that check out of the loop so it does not even
+    /// build the message strings.</para>
+    /// </summary>
+    private readonly ComponentLog _log;
+
+    public LhmProvider(Part part)
+    {
+        _part = part;
+        _log = Log.For(Name);   // Name derives from _part, so this has to follow the assignment
+    }
 
     public string Name => $"lhm-{_part.ToString().ToLowerInvariant()}";
 
@@ -118,7 +140,12 @@ public sealed class LhmProvider : ISensorProvider
         Lhm.EnterWriteLock();
         try
         {
-            _computer?.Close();
+            if (_computer != null)
+            {
+                _log.Durable(LogLevel.Debug, "init: Computer.Close begin");
+                _computer.Close();
+                _log.Durable(LogLevel.Debug, "init: Computer.Close done");
+            }
             _computer = new Computer
             {
                 IsCpuEnabled = _part == Part.Cpu,
@@ -126,11 +153,15 @@ public sealed class LhmProvider : ISensorProvider
                 IsStorageEnabled = _part == Part.Storage,
                 IsGpuEnabled = _part == Part.Gpu,
             };
+            _log.Durable(LogLevel.Debug, "init: Computer.Open begin");
             _computer.Open();
+            _log.Durable(LogLevel.Debug, "init: Computer.Open done");
 
             foreach (var hw in AllHardware())
             {
+                _log.Durable(LogLevel.Debug, $"init: Update begin {hw.HardwareType}:{hw.Name}");
                 hw.Update();
+                _log.Durable(LogLevel.Debug, $"init: Update done {hw.HardwareType}:{hw.Name}");
                 any = true;
             }
         }
@@ -143,7 +174,7 @@ public sealed class LhmProvider : ISensorProvider
             _unavailableReason = NeedsElevation && !Elevation.IsElevated ? ProviderError.Unelevated
                 : NeedsElevation && !PawnIoInstalled() ? ProviderError.NoDriver
                 : ProviderError.NoHardware;
-            Log.Warn($"{Name}: no hardware found ({_unavailableReason})");
+            _log.Warn($"no hardware found ({_unavailableReason})");
             return false;
         }
         _unavailableReason = null;
@@ -182,7 +213,7 @@ public sealed class LhmProvider : ISensorProvider
                 break;
         }
 
-        Log.Info($"{Name}: hardware = {string.Join("; ", AllHardware().Select(h => $"{h.HardwareType}:{h.Name}"))}");
+        _log.Info($"hardware = {string.Join("; ", AllHardware().Select(h => $"{h.HardwareType}:{h.Name}"))}");
         return true;
     }
 
@@ -196,9 +227,18 @@ public sealed class LhmProvider : ISensorProvider
         Lhm.EnterWriteLock();
         try
         {
-            try { _computer.Close(); } catch (Exception ex) { Log.Warn($"{Name}: close before re-open: {ex.Message}"); }
+            _log.Durable(LogLevel.Debug, "reopen: Computer.Close begin");
+            try { _computer.Close(); } catch (Exception ex) { _log.Warn($"close before re-open: {ex.Message}"); }
+            _log.Durable(LogLevel.Debug, "reopen: Computer.Close done");
+            _log.Durable(LogLevel.Debug, "reopen: Computer.Open begin");
             _computer.Open();
-            foreach (var hw in AllHardware()) hw.Update();
+            _log.Durable(LogLevel.Debug, "reopen: Computer.Open done");
+            foreach (var hw in AllHardware())
+            {
+                _log.Durable(LogLevel.Debug, $"reopen: Update begin {hw.HardwareType}:{hw.Name}");
+                hw.Update();
+                _log.Durable(LogLevel.Debug, $"reopen: Update done {hw.HardwareType}:{hw.Name}");
+            }
         }
         finally { Lhm.ExitWriteLock(); }
     }
@@ -222,11 +262,23 @@ public sealed class LhmProvider : ISensorProvider
     public void Poll(MetricSink sink)
     {
         if (_computer == null) return;
+        // Hoisted out of the loop: lhm-cpu polls at 5 Hz (cap 20) over every CPU package, so the
+        // check is per-poll rather than per-call and the interpolated strings are never built at
+        // the default level. This is the only breadcrumb site on a hot path.
+        bool crumbs = Log.Level <= LogLevel.Debug;
         // Update is what dereferences LHM's global rdtsc/cpuid delegates, so it takes the read
         // side. The Poll* methods below only read floats Update already cached, and PollStorage
         // may call ReopenComputer, which needs the write side — so the lock is released first.
         Lhm.EnterReadLock();
-        try { foreach (var hw in AllHardware()) hw.Update(); }
+        try
+        {
+            foreach (var hw in AllHardware())
+            {
+                if (crumbs) _log.Durable(LogLevel.Debug, $"poll: Update begin {hw.HardwareType}:{hw.Name}");
+                hw.Update();
+                if (crumbs) _log.Durable(LogLevel.Debug, $"poll: Update done {hw.HardwareType}:{hw.Name}");
+            }
+        }
         finally { Lhm.ExitReadLock(); }
 
         switch (_part)
@@ -413,7 +465,7 @@ public sealed class LhmProvider : ISensorProvider
         {
             if (_storageLetters.Length > 0)
             {
-                Log.Info($"{Name}: volumes changed ({_storageLetters} -> {live}) — re-opening LHM storage");
+                _log.Info($"volumes changed ({_storageLetters} -> {live}) — re-opening LHM storage");
                 ReopenComputer();
             }
             foreach (char c in volumes)
@@ -431,7 +483,7 @@ public sealed class LhmProvider : ISensorProvider
             _letterToModel = DriveMap.LetterToModel(volumes);
             var missing = volumes.Where(l => !_letterToModel.ContainsKey(l)).ToList();
             if (missing.Count > 0)
-                Log.Warn($"lhm-storage: no disk-model descriptor for volume(s) {string.Join(",", missing)} — temps will read N/A (drive likely reports empty vendor/product strings)");
+                _log.Warn($"no disk-model descriptor for volume(s) {string.Join(",", missing)} — temps will read N/A (drive likely reports empty vendor/product strings)");
         }
 
         var tempByModel = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
@@ -466,7 +518,7 @@ public sealed class LhmProvider : ISensorProvider
                 if (!_unmatchedLogged.Contains(letter))
                 {
                     _unmatchedLogged.Add(letter);
-                    Log.Warn($"lhm-storage: no LHM match for {letter}: descriptor model '{model}'; LHM names: {string.Join(" | ", tempByModel.Keys)}");
+                    _log.Warn($"no LHM match for {letter}: descriptor model '{model}'; LHM names: {string.Join(" | ", tempByModel.Keys)}");
                 }
                 sink.MarkStale(MetricNames.DriveTempC(letter));
             }
@@ -525,7 +577,7 @@ public sealed class LhmProvider : ISensorProvider
                 sink.Register(MetricNames.GpuVendor(idx), MetricType.String, MetricUnit.Text, Name, 0, MetricSemantics.Static);
                 sink.SetString(MetricNames.GpuName(idx), hw.Name);
                 sink.SetString(MetricNames.GpuVendor(idx), VendorOf(hw));
-                Log.Info($"{Name}: gpu.{idx} = {hw.Name} ({VendorOf(hw)}), LHM is the only source");
+                _log.Info($"gpu.{idx} = {hw.Name} ({VendorOf(hw)}), LHM is the only source");
             }
         }
         sink.Set(MetricNames.GpuCount, GpuIndexSpace.Count);
@@ -624,11 +676,22 @@ public sealed class LhmProvider : ISensorProvider
         // Skipping Close leaks an LHM Computer into a process that is exiting anyway.
         if (!Lhm.TryEnterWriteLock(ShutdownGateTimeout))
         {
-            if (_computer != null) Log.Warn($"{Name}: LHM gate still busy after {ShutdownGateTimeout.TotalSeconds:0}s, leaving the Computer open");
+            if (_computer != null) _log.Warn($"LHM gate still busy after {ShutdownGateTimeout.TotalSeconds:0}s, leaving the Computer open");
             _computer = null;
             return;
         }
-        try { _computer?.Close(); }
+        try
+        {
+            if (_computer != null)
+            {
+                // Unpaired by design — the process is exiting, so there is nothing left to break.
+                // Also the only Close with no Open after it, which is why it is worth a crumb: a
+                // collector that dies here dies on the way out, not on the way up.
+                _log.Durable(LogLevel.Debug, "dispose: Computer.Close begin");
+                _computer.Close();
+                _log.Durable(LogLevel.Debug, "dispose: Computer.Close done");
+            }
+        }
         catch { }
         finally { Lhm.ExitWriteLock(); }
         _computer = null;

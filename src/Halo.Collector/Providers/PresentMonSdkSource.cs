@@ -21,6 +21,11 @@ namespace Halo.Collector.Providers;
 /// </summary>
 internal sealed class PresentMonSdkSource : IDisposable
 {
+    private static readonly ComponentLog Log2 = Log.For("pm-sdk");
+    /// <summary>The service child's own output, relayed verbatim - a separate component so it
+    /// is never mistaken for something Halo said.</summary>
+    private static readonly ComponentLog Svc = Log.For("pm-svc");
+
     private const string OwnPipe = @"\\.\pipe\Halo.PMSvc.Control";
     private const uint Capacity = 1024; // frames per pmConsumeFrames call
 
@@ -47,7 +52,7 @@ internal sealed class PresentMonSdkSource : IDisposable
         if (_session == 0 || ms <= 0 || ms == _flushMs) return;
         int st = PmApi.pmSetEtwFlushPeriod(_session, (uint)Math.Clamp(ms, 1, 1000));
         if (st == PmApi.Ok) _flushMs = ms;
-        else Log.Warn($"presentmon sdk: set etw flush {ms} ms: {PmApi.StatusName(st)}");
+        else Log2.Warn($"set etw flush {ms} ms: {PmApi.StatusName(st)}");
     }
 
     /// <summary>Frame-metric ladder: full instrumentation first, degrade if the service rejects.</summary>
@@ -76,7 +81,7 @@ internal sealed class PresentMonSdkSource : IDisposable
         string exe = Path.Combine(sdkDir, "PresentMonService.exe");
         if (!File.Exists(dll))
         {
-            Log.Warn($"presentmon sdk: {dll} not found");
+            Log2.Warn($"{dll} not found");
             return false;
         }
         PmApi.UseDll(dll);
@@ -84,11 +89,11 @@ internal sealed class PresentMonSdkSource : IDisposable
         try
         {
             if (PmApi.pmGetApiVersion(out var v) == PmApi.Ok)
-                Log.Info($"presentmon sdk: api {v.Major}.{v.Minor}.{v.Patch}");
+                Log2.Info($"api {v.Major}.{v.Minor}.{v.Patch}");
         }
         catch (Exception ex)
         {
-            Log.Warn($"presentmon sdk: cannot load middleware: {ex.Message}");
+            Log2.Warn($"cannot load middleware: {ex.Message}");
             return false;
         }
 
@@ -129,13 +134,13 @@ internal sealed class PresentMonSdkSource : IDisposable
         if (etwFlushMs > 0)
         {
             int st = PmApi.pmSetEtwFlushPeriod(_session, (uint)Math.Clamp(etwFlushMs, 1, 1000));
-            if (st != PmApi.Ok) Log.Warn($"presentmon sdk: set etw flush {etwFlushMs} ms: {PmApi.StatusName(st)}");
+            if (st != PmApi.Ok) Log2.Warn($"set etw flush {etwFlushMs} ms: {PmApi.StatusName(st)}");
         }
 
         // we consume frame events only — park the service's hardware-telemetry sampling at its
         // 5 s maximum instead of the default (it was burning service CPU for metrics nobody reads)
         int stTel = PmApi.pmSetTelemetryPollingPeriod(_session, 0, 5000);
-        if (stTel != PmApi.Ok) Log.Warn($"presentmon sdk: set telemetry period: {PmApi.StatusName(stTel)}");
+        if (stTel != PmApi.Ok) Log2.Warn($"set telemetry period: {PmApi.StatusName(stTel)}");
 
         _flushMs = etwFlushMs;
 
@@ -146,7 +151,7 @@ internal sealed class PresentMonSdkSource : IDisposable
             int st = PmApi.pmRegisterFrameQuery(_session, out _query, elements, (ulong)elements.Length, out _blobSize);
             if (st != PmApi.Ok)
             {
-                Log.Warn($"presentmon sdk: frame query ({metrics.Length} metrics): {PmApi.StatusName(st)}");
+                Log2.Warn($"frame query ({metrics.Length} metrics): {PmApi.StatusName(st)}");
                 _query = 0;
                 continue;
             }
@@ -166,11 +171,11 @@ internal sealed class PresentMonSdkSource : IDisposable
                 }
             }
             _buffer = new byte[_blobSize * Capacity];
-            Log.Info($"presentmon sdk: frame query registered ({metrics.Length} metrics, blob {_blobSize} B)");
+            Log2.Info($"frame query registered ({metrics.Length} metrics, blob {_blobSize} B)");
             return true;
         }
 
-        Log.Warn("presentmon sdk: no frame query variant accepted");
+        Log2.Warn("no frame query variant accepted");
         Reset();
         return false;
     }
@@ -182,7 +187,7 @@ internal sealed class PresentMonSdkSource : IDisposable
             try
             {
                 if (!string.Equals(p.MainModule?.FileName, exe, StringComparison.OrdinalIgnoreCase)) continue;
-                Log.Info($"presentmon sdk: killing stray service child {p.Id}");
+                Log2.Info($"killing stray service child {p.Id}");
                 p.Kill(entireProcessTree: true);
                 p.WaitForExit(2000);
             }
@@ -208,21 +213,21 @@ internal sealed class PresentMonSdkSource : IDisposable
             if (_service == null) return false;
             int logBudget = 12; // early startup/usage errors only; never block the pipes
             _service.OutputDataReceived += (_, e) =>
-            { if (e.Data is { Length: > 0 } && Interlocked.Decrement(ref logBudget) >= 0) Log.Info($"pm-svc: {e.Data}"); };
+            { if (e.Data is { Length: > 0 } && Interlocked.Decrement(ref logBudget) >= 0) Svc.Info(e.Data); };
             _service.ErrorDataReceived += (_, e) =>
-            { if (e.Data is { Length: > 0 } && Interlocked.Decrement(ref logBudget) >= 0) Log.Warn($"pm-svc: {e.Data}"); };
+            { if (e.Data is { Length: > 0 } && Interlocked.Decrement(ref logBudget) >= 0) Svc.Warn(e.Data); };
             _service.BeginOutputReadLine();
             _service.BeginErrorReadLine();
             if (_service.WaitForExit(1200))
             {
-                Log.Warn($"presentmon sdk: service exited immediately ({_service.ExitCode})");
+                Log2.Warn($"service exited immediately ({_service.ExitCode})");
                 return false;
             }
             return true;
         }
         catch (Exception ex)
         {
-            Log.Error("presentmon sdk: service spawn", ex);
+            Log2.Error("service spawn", ex);
             return false;
         }
     }
@@ -233,14 +238,14 @@ internal sealed class PresentMonSdkSource : IDisposable
         {
             if (_service is { HasExited: true })
             {
-                Log.Warn($"presentmon sdk: service exited during connect ({_service.ExitCode})");
+                Log2.Warn($"service exited during connect ({_service.ExitCode})");
                 return false;
             }
             if (PmApi.pmOpenSessionWithPipe(out _session, OwnPipe) == PmApi.Ok) return true;
             _session = 0;
             Thread.Sleep(200);
         }
-        Log.Warn("presentmon sdk: timed out connecting to service control pipe");
+        Log2.Warn("timed out connecting to service control pipe");
         return false;
     }
 
@@ -261,7 +266,7 @@ internal sealed class PresentMonSdkSource : IDisposable
         if (newPid == 0) return;
         int st = PmApi.pmStartTrackingProcess(_session, (uint)newPid);
         Tracking = st is PmApi.Ok or 7; // 7 = ALREADY_TRACKING_PROCESS
-        if (!Tracking) Log.Warn($"presentmon sdk: track pid {newPid}: {PmApi.StatusName(st)}");
+        if (!Tracking) Log2.Warn($"track pid {newPid}: {PmApi.StatusName(st)}");
     }
 
     /// <summary>Pull all frames queued for pid since the last call. Called on the poll thread.</summary>
@@ -329,8 +334,8 @@ internal sealed class PresentMonSdkSource : IDisposable
             props.LogFileNameOffset = (uint)(structSize + 2048);
             Marshal.StructureToPtr(props, buf, false);
             int rc = ControlTraceW(0, name, buf, EVENT_TRACE_CONTROL_STOP);
-            if (rc == 0) Log.Info($"presentmon sdk: stopped stale ETW session '{name}'");
-            else if (rc != ERROR_WMI_INSTANCE_NOT_FOUND) Log.Warn($"presentmon sdk: stop ETW session '{name}': error {rc}");
+            if (rc == 0) Log2.Info($"stopped stale ETW session '{name}'");
+            else if (rc != ERROR_WMI_INSTANCE_NOT_FOUND) Log2.Warn($"stop ETW session '{name}': error {rc}");
         }
         finally
         {

@@ -20,6 +20,8 @@ namespace Halo.Collector.Providers;
 /// </summary>
 internal static class GpuIndexSpace
 {
+    private static readonly ComponentLog Log2 = Log.For("gpu-index");
+
     private static readonly object Lock = new();
     private static readonly List<Slot> _slots = new();
     /// <summary>LHM hardware identifier → the index that card was given. LHM's *name* is not
@@ -101,16 +103,16 @@ internal static class GpuIndexSpace
                     if (_slots[i].Nvidia && !claimed.Contains(i)) { freeCount++; onlyFree = i; }
                 if (freeCount == 1)
                 {
-                    Log.Info($"gpu: matching LHM '{lhmName}' to the only free NVML device '{_slots[onlyFree].Name}' by elimination");
+                    Log2.Info($"matching LHM '{lhmName}' to the only free NVML device '{_slots[onlyFree].Name}' by elimination");
                     return Assign(lhmId, onlyFree, matched: true, out matchedNvml);
                 }
 
-                Log.Warn($"gpu: LHM reports NVIDIA '{lhmName}' ({lhmId}) but no free NVML slot matches it " +
+                Log2.Warn($"LHM reports NVIDIA '{lhmName}' ({lhmId}) but no free NVML slot matches it " +
                          "— giving it its own index, so its voltage and fan RPM land there rather than on another card");
             }
 
             _slots.Add(new Slot(Nvidia: false, Key: lhmId, Name: lhmName, NvmlIndex: 0));
-            Log.Info($"gpu: '{lhmName}' claims index {_slots.Count - 1} (no NVML device)");
+            Log2.Info($"'{lhmName}' claims index {_slots.Count - 1} (no NVML device)");
             return Assign(lhmId, _slots.Count - 1, matched: false, out matchedNvml);
         }
     }
@@ -162,6 +164,6 @@ internal static class GpuIndexSpace
         }
 
         if (_slots.Count != before)
-            Log.Info("gpu index space: " + string.Join(", ", _slots.Select((s, i) => $"gpu.{i}={s.Name}")));
+            Log2.Info("index space: " + string.Join(", ", _slots.Select((s, i) => $"gpu.{i}={s.Name}")));
     }
 }
