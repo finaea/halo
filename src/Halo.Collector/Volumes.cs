@@ -8,6 +8,8 @@ namespace Halo.Collector;
 /// </summary>
 internal static class Volumes
 {
+    private static readonly Halo.Shared.ComponentLog Log2 = Halo.Shared.Log.For("volumes");
+
     public static List<char> Local()
     {
         var letters = new List<char>();
@@ -24,7 +26,7 @@ internal static class Volumes
         }
         catch (Exception ex)
         {
-            Halo.Shared.Log.Warn($"volume enumeration failed: {ex.Message}");
+            Log2.Warn($"volume enumeration failed: {ex.Message}");
         }
         letters.Sort();
         return letters;

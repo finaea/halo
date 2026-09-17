@@ -15,6 +15,8 @@ namespace Halo.Collector.Providers;
 /// </summary>
 public sealed class BuiltinProvider(ConfigStore config, bool elevated) : ISensorProvider
 {
+    private static readonly ComponentLog Log2 = Log.For("builtin");
+
     public string Name => "builtin";
     public double MaxRateHz => 4;
     public double DefaultRateHz => CollectorRates.Builtin;
@@ -82,7 +84,7 @@ public sealed class BuiltinProvider(ConfigStore config, bool elevated) : ISensor
         }
         catch (Exception ex)
         {
-            Log.Warn($"PawnIO probe failed: {ex.Message}");
+            Log2.Warn($"PawnIO probe failed: {ex.Message}");
             sink.Set(MetricNames.SysPawnIoInstalled, 0);
         }
     }
@@ -181,7 +183,7 @@ public sealed class BuiltinProvider(ConfigStore config, bool elevated) : ISensor
         }
         catch (Exception ex)
         {
-            Log.Warn($"external IP fetch failed: {ex.Message}");
+            Log2.Warn($"external IP fetch failed: {ex.Message}");
             _externalIp = "N/A";
         }
         sink.SetString(MetricNames.NetIpExternal, _externalIp);

@@ -15,6 +15,8 @@ namespace Halo.Collector.Providers;
 /// </summary>
 internal static class CpuTopology
 {
+    private static readonly ComponentLog Log2 = Log.For("cpu-topology");
+
     /// <param name="Class">0 = performance, 1 = efficiency. Non-hybrid parts report 0 for all.</param>
     /// <param name="PhysicalCore">Index of the owning physical core; SMT siblings share it.</param>
     internal readonly record struct Logical(int Index, int Group, int Class, int PhysicalCore);
@@ -92,7 +94,7 @@ internal static class CpuTopology
         }
         catch (Exception ex)
         {
-            Log.Warn($"cpu topology: {ex.Message} — falling back to {Environment.ProcessorCount} flat logical CPUs");
+            Log2.Warn($"{ex.Message} — falling back to {Environment.ProcessorCount} flat logical CPUs");
             result.Clear();
             LogicalCount = Environment.ProcessorCount;
         }
@@ -137,7 +139,7 @@ internal static class CpuTopology
         var buf = new byte[len];
         if (!GetLogicalProcessorInformationEx(relationship, buf, ref len))
         {
-            Log.Warn($"GetLogicalProcessorInformationEx({relationship}) failed: {Marshal.GetLastWin32Error()}");
+            Log2.Warn($"GetLogicalProcessorInformationEx({relationship}) failed: {Marshal.GetLastWin32Error()}");
             return null;
         }
         return buf;

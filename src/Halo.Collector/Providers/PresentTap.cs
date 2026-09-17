@@ -20,6 +20,8 @@ namespace Halo.Collector.Providers;
 /// </summary>
 internal sealed class PresentTap : IDisposable
 {
+    private static readonly ComponentLog Log2 = Log.For("present-tap");
+
     private static readonly Guid DxgiProvider = new("CA11C036-0102-4A2D-A6AD-F03CFED5D3C9"); // Microsoft-Windows-DXGI
     private static readonly Guid D3D9Provider = new("783ACA0A-790E-4D7F-8451-AA850511C6B9"); // Microsoft-Windows-Direct3D9
     private const int DxgiPresentStart = 42;
@@ -67,7 +69,7 @@ internal sealed class PresentTap : IDisposable
             _etwThread = new Thread(() =>
             {
                 try { _session.Source.Process(); }
-                catch (Exception ex) { if (!_stopping) Log.Error("present-tap ETW process", ex); }
+                catch (Exception ex) { if (!_stopping) Log2.Error("ETW process", ex); }
             })
             { IsBackground = true, Name = "halo-tap-etw" };
             _etwThread.Start();
@@ -77,12 +79,12 @@ internal sealed class PresentTap : IDisposable
             _flushThread = new Thread(FlushLoop) { IsBackground = true, Name = "halo-tap-flush" };
             _flushThread.Start();
 
-            Log.Info($"present-tap: session up (DXGI + D3D9, flush {_activeFlushMs} ms)");
+            Log2.Info($"session up (DXGI + D3D9, flush {_activeFlushMs} ms)");
             return true;
         }
         catch (Exception ex)
         {
-            Log.Error("present-tap start", ex);
+            Log2.Error("start", ex);
             Dispose();
             return false;
         }
@@ -100,7 +102,7 @@ internal sealed class PresentTap : IDisposable
                 catch { if (!_stopping) throw; }
             }
         }
-        catch (Exception ex) { if (!_stopping) Log.Error("present-tap flush", ex); }
+        catch (Exception ex) { if (!_stopping) Log2.Error("flush", ex); }
         finally { _ = timeEndPeriod(1); }
     }
 
@@ -127,12 +129,12 @@ internal sealed class PresentTap : IDisposable
                 _flushPeriodMs = _activeFlushMs;
             }
             _idle = idle;
-            Log.Info(idle ? "present-tap: idle (providers muted, flush 250 ms)"
-                          : $"present-tap: active (flush {_activeFlushMs} ms)");
+            Log2.Info(idle ? "idle (providers muted, flush 250 ms)"
+                          : $"active (flush {_activeFlushMs} ms)");
         }
         catch (Exception ex)
         {
-            Log.Warn($"present-tap: idle transition failed: {ex.Message}");
+            Log2.Warn($"idle transition failed: {ex.Message}");
         }
     }
 

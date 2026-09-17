@@ -28,6 +28,8 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
     /// so holding a snapshot means never seeing an edit (assessment §4.3).</summary>
     private CollectorSettings Settings => config.Settings.Collector;
 
+    private static readonly ComponentLog Log2 = Log.For("presentmon");
+
     public string Name => "presentmon";
     public double MaxRateHz => 120;    // frame drain + stats publish; lows cached at 2 Hz inside FrameStats
     public double DefaultRateHz => CollectorRates.PresentMon; // frames reach the ring in ≤25 ms batches; stats publish per poll
@@ -139,14 +141,14 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
         // meaning something undocumented.
         string transport = Settings.PresentMonTransport.Trim().ToLowerInvariant();
         if (transport is not ("auto" or "sdk"))
-            Log.Warn($"collector.presentMonTransport '{transport}' is not a value Halo knows — using \"auto\"");
+            Log2.Warn($"collector.presentMonTransport '{transport}' is not a value Halo knows — using \"auto\"");
         _unavailableReason = null;
 
         var sdk = new PresentMonSdkSource();
         if (sdk.Start(Paths.PresentMonDir, elevated, Settings.PresentMonEtwFlushMs))
         {
             _sdk = sdk;
-            Log.Info($"presentmon transport: sdk ({sdk.Detail})");
+            Log2.Info($"transport: sdk ({sdk.Detail})");
             StartTap(sink, elevated);
             return true;
         }
@@ -298,13 +300,13 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
         {
             _sdk?.SetFlushPeriod(100);
             _tap?.SetIdle(true);
-            Log.Info("fps pipeline idle: no frames for 10 s — service flush 100 ms, tap muted");
+            Log2.Info("fps pipeline idle: no frames for 10 s — service flush 100 ms, tap muted");
         }
         else
         {
             _sdk?.SetFlushPeriod(Settings.PresentMonEtwFlushMs);
             _tap?.SetIdle(false);
-            Log.Info("fps pipeline active: full flush cadence restored");
+            Log2.Info("fps pipeline active: full flush cadence restored");
         }
     }
 
@@ -369,7 +371,7 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
             _targetName = name;
             _nextNgxScan = DateTime.MinValue; // rescan DLSS on app switch
             _nextSlowPublishQpc = 0;          // republish name/refresh immediately
-            Log.Info($"presentmon target: {(pid == 0 ? "none" : $"{name} ({pid})")}");
+            Log2.Info($"target: {(pid == 0 ? "none" : $"{name} ({pid})")}");
         }
 
         long qnow = Stopwatch.GetTimestamp();
@@ -431,7 +433,7 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
         }
         catch (Exception ex)
         {
-            Log.Warn($"ngx scan pid {pid}: {ex.Message}"); // 32-bit/protected process etc.
+            Log2.Warn($"ngx scan pid {pid}: {ex.Message}"); // 32-bit/protected process etc.
         }
         sink.Set(MetricNames.DlssSrPresent, sr ? 1 : 0);
         sink.Set(MetricNames.DlssFgPresent, fg ? 1 : 0);

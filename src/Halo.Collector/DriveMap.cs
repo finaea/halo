@@ -10,6 +10,8 @@ namespace Halo.Collector;
 /// </summary>
 public static class DriveMap
 {
+    private static readonly ComponentLog Log2 = Log.For("drive-map");
+
     /// <summary>letter (upper) → disk model string, e.g. 'C' → "Samsung SSD 990 PRO 2TB".</summary>
     public static Dictionary<char, string> LetterToModel(IEnumerable<char> letters)
     {
@@ -31,7 +33,7 @@ public static class DriveMap
             }
             catch (Exception ex)
             {
-                Log.Warn($"drive map {c}: {ex.Message}");
+                Log2.Warn($"{c}: {ex.Message}");
             }
         }
         return result;
