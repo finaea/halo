@@ -67,11 +67,17 @@ public partial class GeneralPage : UserControl, ISettingsPage, IDisposable
         AutostartStatusText.Text = enable ? "Waiting for administrator permission…" : "Removing scheduled tasks…";
         try
         {
-            int? exitCode = await AutostartManager.RunElevatedAsync(enable);
-            if (exitCode is null)
+            ElevatedOutcome outcome = await AutostartManager.RunElevatedAsync(enable);
+            if (outcome.ExitCode is null)
                 ShowInfo("Action cancelled", "Windows left the autostart tasks unchanged.", InfoBarSeverity.Informational);
-            else if (exitCode != 0)
-                ShowInfo("Autostart change failed", $"Halo.Settings exited with code {exitCode}.", InfoBarSeverity.Error);
+            else if (outcome.ExitCode != 0)
+                // Outcome.Detail is what the elevated child wrote to its own log: its stderr cannot
+                // be piped back through "runas", so an exit code was all this dialog used to have.
+                ShowInfo("Autostart change failed",
+                    outcome.Detail.Length > 0
+                        ? $"Halo.Settings exited with code {outcome.ExitCode}. {outcome.Detail}"
+                        : $"Halo.Settings exited with code {outcome.ExitCode}.",
+                    InfoBarSeverity.Error);
         }
         finally
         {
