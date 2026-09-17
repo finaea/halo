@@ -216,7 +216,15 @@ public static class Log
         // it — measured 2026-09-17, and exactly backwards for the case this API exists to serve.
         // Bounded, because the record matters more than the order: if the pump is wedged, write
         // anyway and say what was left behind.
-        long pending = DrainBefore(DurableDrainMs);
+        //
+        // Only Warn and Error wait. Debug/Info durable records are breadcrumbs, and some sit on hot
+        // paths holding a lock — LhmProvider crumbs every hw.Update() at 5 Hz inside LHM's read
+        // gate. A Debug session always has a backlog, so draining there would block each crumb for
+        // up to DurableDrainMs while holding that gate, stall polling, and trip the freshness
+        // watchdog: turning on verbose logging would break the thing being diagnosed. Breadcrumbs
+        // are ordered against each other anyway (same lock), which is what "which native call did
+        // we die in" actually needs; it is the crash record that must not precede its own causes.
+        long pending = level >= LogLevel.Warn ? DrainBefore(DurableDrainMs) : 0;
 
         string line = Format(level, component, msg);
         if (AlsoConsole) Console.WriteLine(line);
