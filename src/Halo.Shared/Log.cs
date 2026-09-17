@@ -324,15 +324,22 @@ public static class Log
             LogLevel.Warn => "WRN",
             _ => "ERR",
         };
-        string head = $"{stamp} {tag} {SessionId} {component,-12}";
-        if (msg.IndexOf('\n') < 0) return $"{head}  {msg}";
+        // The trailing space is load-bearing. `{component,-12}` pads but never truncates, so a
+        // component longer than the column — `unregister-autostart` is 20 — ran straight into the
+        // continuation marker with no separator, giving `unregister-autostart+ at Foo()`. Any
+        // reader splitting on whitespace then recovers the marker as part of the component and the
+        // stack frame as a record of its own. Found 2026-09-17 by the elevated-verb read-back,
+        // which surfaced every frame of a trace as a separate error in the UI; those two verbs are
+        // exactly the components that log exceptions. One guaranteed space, at any name length.
+        string head = $"{stamp} {tag} {SessionId} {component,-12} ";
+        if (msg.IndexOf('\n') < 0) return $"{head} {msg}";
 
         var sb = new StringBuilder();
         string[] parts = msg.Replace("\r\n", "\n").Split('\n');
         for (int i = 0; i < parts.Length; i++)
         {
             if (i > 0) sb.Append(Environment.NewLine);
-            sb.Append(head).Append(i == 0 ? "  " : "+ ").Append(parts[i].TrimEnd());
+            sb.Append(head).Append(i == 0 ? " " : "+ ").Append(parts[i].TrimEnd());
         }
         return sb.ToString();
     }

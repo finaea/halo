@@ -279,10 +279,13 @@ if ($Installer) {
     Step 'Compiling installer'
     $iscc = Resolve-Iscc
     if (-not $iscc) {
-        Write-Host "ABORT: ISCC.exe (Inno Setup 6) not found." -ForegroundColor Red
+        # 6.4.0, not plain 6: halo.iss uses ExecAndCaptureOutput and CopyFile, both of which
+        # arrived in 6.4.0, and it #errors out on anything older. Naming the floor here means a
+        # missing-Inno abort and a too-old-Inno abort ask for the same thing.
+        Write-Host "ABORT: ISCC.exe (Inno Setup 6.4.0 or newer) not found." -ForegroundColor Red
         Write-Host "  Per-user install, no admin needed:" -ForegroundColor Red
-        Write-Host "    download innosetup-6.x.x.exe from https://jrsoftware.org/isdl.php" -ForegroundColor Red
-        Write-Host "    innosetup-6.x.x.exe /VERYSILENT /CURRENTUSER /NORESTART" -ForegroundColor Red
+        Write-Host "    download innosetup-6.4.0.exe or newer from https://jrsoftware.org/isdl.php" -ForegroundColor Red
+        Write-Host "    innosetup-6.4.0.exe /VERYSILENT /CURRENTUSER /NORESTART" -ForegroundColor Red
         exit 1
     }
     Note "iscc: $iscc"

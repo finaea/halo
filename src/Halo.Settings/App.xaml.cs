@@ -24,11 +24,11 @@ public partial class App : Application
         // of the same verb in separate files, and the component column says which is which inside
         // one file — so a second process name would buy nothing and split the evidence.
         string[] args = ElevatedVerb.Strip(e.Args, out string? logsDir);
-        Diagnostics.InstallCrashHandlers();
+        ProcessDiagnostics.InstallCrashHandlers();
         if (logsDir is { Length: > 0 }) Log.Init(logsDir, "settings");
         else Log.Init("settings");
         SessionLog.Begin("settings");
-        Diagnostics.LogEnvironment("settings");
+        ProcessDiagnostics.LogEnvironment("settings");
         if (logsDir is { Length: > 0 })
             Log.For("lifecycle").Info($"logs directory handed over by the launching process: {logsDir}");
         InstallState.LogIfPresent();

@@ -186,14 +186,15 @@ internal static class ElevatedVerb
     /// component padded, so splitting on runs of spaces recovers the four fields and leaves the
     /// message intact.
     /// <para>A wrapped stack-trace line carries the same envelope and a <c>+</c> where the message
-    /// would start. Those belong in the file, not in a status line — and the <c>+</c> has to be
-    /// looked for in <b>two</b> places, which is not obvious and was wrong first time round:
-    /// <c>register-autostart</c> and <c>unregister-autostart</c> are longer than the 12-character
-    /// component column, so nothing pads them, the marker abuts the component with no space
-    /// between, and the split hands it back on the end of the component field instead of the start
-    /// of the message. Those two components are exactly the ones that log exceptions, so checking
-    /// only the message let every frame of a stack trace through as its own "error" — measured
-    /// 2026-09-17 against the real format.</para>
+    /// would start. Those belong in the file, not in a status line.</para>
+    /// <para>The <c>parts[3]</c> check is now belt-and-braces and documents a fixed defect rather
+    /// than a live one. <c>{component,-12}</c> pads but does not truncate, so
+    /// <c>unregister-autostart</c> (20 chars) used to run straight into the marker with no
+    /// separator — <c>unregister-autostart+ at …</c> — and the split returned it on the end of the
+    /// component instead of the start of the message. Those two verbs are exactly the components
+    /// that log exceptions, so checking only the message let every stack frame through as its own
+    /// "error" in the UI. Found here 2026-09-17; <c>Log.Format</c> now emits one guaranteed space
+    /// after the component at any name length, so either check alone would do.</para>
     /// </summary>
     private static bool TryParse(string line, out string level, out string message)
     {
