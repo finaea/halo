@@ -1,8 +1,11 @@
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using Halo.Settings.Services;
 using Halo.Settings.ViewModels;
+using Halo.Shared;
 
 namespace Halo.Settings.Pages;
 
@@ -29,6 +32,7 @@ public partial class SystemCheckPage : UserControl, ISettingsPage, IDisposable
 
     public void OnEnter()
     {
+        _viewModel.RefreshLoggingFromCurrent();
         _timer.Start();
         _ = _viewModel.RefreshAsync();
     }
@@ -45,6 +49,12 @@ public partial class SystemCheckPage : UserControl, ISettingsPage, IDisposable
     private async void RepairAutostart_Click(object sender, RoutedEventArgs e) => await _viewModel.RepairAutostartAsync();
     private async void Rescan_Click(object sender, RoutedEventArgs e) => await _viewModel.RescanAsync();
     private async void ArrangeWidgets_Click(object sender, RoutedEventArgs e) => await _viewModel.ArrangeWidgetsAsync();
+
+    private void OpenLogsFolder_Click(object sender, RoutedEventArgs e)
+        => OpenFolder(Paths.LogsDir, "logs folder", createIfMissing: true);
+
+    private void OpenInstallFolder_Click(object sender, RoutedEventArgs e)
+        => OpenFolder(Paths.AppRoot, "install folder", createIfMissing: false);
 
     private void CopyReport_Click(object sender, RoutedEventArgs e)
     {
@@ -85,6 +95,24 @@ public partial class SystemCheckPage : UserControl, ISettingsPage, IDisposable
             _firstRunCompleted = true;
         else
             _viewModel.ActionStatus = $"Could not finish first-run setup: {error}";
+    }
+
+    private void OpenFolder(string path, string displayName, bool createIfMissing)
+    {
+        try
+        {
+            if (createIfMissing) Directory.CreateDirectory(path);
+            if (!Directory.Exists(path))
+            {
+                _viewModel.ActionStatus = $"The {displayName} does not exist yet.";
+                return;
+            }
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            _viewModel.ActionStatus = $"Could not open the {displayName}: {ex.Message}";
+        }
     }
 
     public void Dispose()

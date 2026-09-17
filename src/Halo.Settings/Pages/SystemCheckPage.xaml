@@ -82,6 +82,34 @@
 
         <Border Style="{StaticResource SettingsCard}">
           <StackPanel>
+            <TextBlock Text="Logging" Style="{StaticResource SectionHeading}" />
+            <TextBlock Text="Use these logs to diagnose Halo while it runs. They do not diagnose failed installs; the installer always writes its own log."
+                       Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,0,0,8" />
+            <WrapPanel Margin="0,0,0,4">
+              <Button Content="Open logs folder" Padding="12,6" Margin="0,0,8,8" Click="OpenLogsFolder_Click" />
+              <Button Content="Open install folder" Padding="12,6" Margin="0,0,0,8" Click="OpenInstallFolder_Click" />
+            </WrapPanel>
+            <Separator />
+            <Grid Style="{StaticResource SettingsRow}">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+              <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="Verbose logging" />
+                <TextBlock Text="Debug records start within seconds on running Halo processes; no restart needed."
+                           Style="{StaticResource Hint}" TextWrapping="Wrap" />
+              </StackPanel>
+              <ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding VerboseLogging, Mode=TwoWay}"
+                               IsEnabled="{Binding IsVerboseLoggingEnabled}" OnContent="Debug" OffContent="Info"
+                               AutomationProperties.Name="Verbose logging" />
+            </Grid>
+            <TextBlock Text="Log files rotate and the folder has a size limit, so it is safe to leave verbose logging on."
+                       Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,4,0,0" />
+            <TextBlock Text="{Binding LogLevelEnvironmentMessage}" Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,4,0,0"
+                       Visibility="{Binding IsLogLevelPinnedByEnvironment, Converter={StaticResource BoolToVisibility}}" />
+          </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCard}">
+          <StackPanel>
             <TextBlock Text="Detected hardware" Style="{StaticResource SectionHeading}" />
             <ItemsControl ItemsSource="{Binding Hardware}">
               <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>

@@ -148,6 +148,8 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
     private bool _canInstallPawnIo;
     private bool _canRepairAutostart;
     private bool _canRescan;
+    private bool _verboseLogging;
+    private bool _applyingLogLevel;
     private string _pawnIoButtonText = "Install PawnIO…  ⛨";
     private string _pawnIoButtonToolTip = "Installs the optional PawnIO driver with administrator permission.";
     private string _autostartButtonText = "Repair autostart…  ⛨";
@@ -171,6 +173,20 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
     public bool CanInstallPawnIo { get => _canInstallPawnIo; private set => Set(ref _canInstallPawnIo, value); }
     public bool CanRepairAutostart { get => _canRepairAutostart; private set => Set(ref _canRepairAutostart, value); }
     public bool CanRescan { get => _canRescan; private set => Set(ref _canRescan, value); }
+    public bool VerboseLogging
+    {
+        get => _verboseLogging;
+        set
+        {
+            if (!Set(ref _verboseLogging, value) || _applyingLogLevel) return;
+            string level = value ? "debug" : "info";
+            _config.QueueSettings("diagnostics.logLevel", settings => settings.Diagnostics.LogLevel = level, flushImmediately: true);
+            Log.SetLevel(value ? LogLevel.Debug : LogLevel.Info);
+        }
+    }
+    public bool IsLogLevelPinnedByEnvironment => Log.LevelPinnedByEnv;
+    public bool IsVerboseLoggingEnabled => !IsLogLevelPinnedByEnvironment;
+    public string LogLevelEnvironmentMessage => "HALO_LOG_LEVEL is controlling the active log level. This setting will not take effect until that environment variable is removed.";
     public string PawnIoButtonText { get => _pawnIoButtonText; private set => Set(ref _pawnIoButtonText, value); }
     public string PawnIoButtonToolTip { get => _pawnIoButtonToolTip; private set => Set(ref _pawnIoButtonToolTip, value); }
     public string AutostartButtonText { get => _autostartButtonText; private set => Set(ref _autostartButtonText, value); }
@@ -199,13 +215,46 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
         _config = config;
         _isFirstRun = firstRun;
         _hasExistingLayout = File.Exists(Path.Combine(_config.ConfigDir, "widgets.json"));
+        _verboseLogging = IsLogLevelPinnedByEnvironment
+            ? Log.Level == LogLevel.Debug
+            : IsLogLevelDebug(_config.Settings.Diagnostics.LogLevel);
         foreach (string key in new[] { "collector", "pawnio", "autostart", "readiness" })
         {
             var card = new CheckCardViewModel(key);
             _cards[key] = card;
             SummaryCards.Add(card);
         }
+        _config.ExternalChanged += Config_ExternalChanged;
     }
+
+    public void RefreshLoggingFromCurrent()
+        => ApplyLogLevelFromStore(_config.DirtyPaths(ConfigFileKind.Settings));
+
+    private void Config_ExternalChanged(object? sender, ConfigChangedEventArgs e)
+    {
+        if (e.File == ConfigFileKind.Settings) ApplyLogLevelFromStore(e.DirtyPaths);
+    }
+
+    private void ApplyLogLevelFromStore(IReadOnlySet<string> dirty)
+    {
+        if (Conflicts("diagnostics.logLevel", dirty)) return;
+        _applyingLogLevel = true;
+        try
+        {
+            VerboseLogging = IsLogLevelPinnedByEnvironment
+                ? Log.Level == LogLevel.Debug
+                : IsLogLevelDebug(_config.Settings.Diagnostics.LogLevel);
+            if (!IsLogLevelPinnedByEnvironment) Log.SetLevel(VerboseLogging ? LogLevel.Debug : LogLevel.Info);
+        }
+        finally { _applyingLogLevel = false; }
+    }
+
+    private static bool IsLogLevelDebug(string? level)
+        => string.Equals(level, "debug", StringComparison.OrdinalIgnoreCase);
+
+    private static bool Conflicts(string path, IReadOnlySet<string> dirty)
+        => dirty.Any(candidate => candidate == "$" || candidate == path ||
+            candidate.StartsWith(path + ".", StringComparison.Ordinal) || path.StartsWith(candidate + ".", StringComparison.Ordinal));
 
     public async Task RefreshAsync()
     {
@@ -657,5 +706,9 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
         },
     };
 
-    public void Dispose() => _session.Dispose();
+    public void Dispose()
+    {
+        _config.ExternalChanged -= Config_ExternalChanged;
+        _session.Dispose();
+    }
 }
