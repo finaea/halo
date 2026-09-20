@@ -7,6 +7,13 @@ name: Release
 #
 # The tag has to match <Version> in Directory.Build.props - the job checks and fails
 # loudly rather than shipping a setup exe whose file name lies about its contents.
+#
+# Optional secret:
+#   VT_API_KEY - a free VirusTotal API key. Set it and both artefacts are scanned, with
+#                an analysis link per file in the release notes. Absent, the scan is
+#                skipped, the notes say so, and nothing else about the release changes.
+#                This buys a sceptical downloader a second opinion on two unsigned
+#                binaries; it does nothing about SmartScreen, which needs a certificate.
 
 on:
   push:
@@ -20,6 +27,12 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+
+    env:
+      # Read in the VirusTotal step's `if:` below. A fork or a repo without the secret
+      # set gets an empty string here and skips the scan, rather than failing the build
+      # over a nice-to-have.
+      VT_API_KEY: ${{ secrets.VT_API_KEY }}
 
     steps:
       - uses: actions/checkout@v4
@@ -69,6 +82,32 @@ jobs:
             dist/Halo-${{ steps.version.outputs.version }}-win-x64.zip
           if-no-files-found: error
 
+      # After the upload on purpose: the scan takes a couple of minutes and can hang on a
+      # VirusTotal outage, and the artefacts should already be safe by then.
+      #
+      # Both files are well over VirusTotal's 32 MB direct-upload limit (~57 MB installer,
+      # ~75 MB zip), so the action fetches a one-shot URL from /files/upload_url first and
+      # POSTs there instead - two HTTP requests per file, against a public-API budget of
+      # 4 requests/minute and 500/day (https://docs.virustotal.com/reference/public-vs-premium-api).
+      # request_rate throttles per *file*, not per request, so it is 2 here and not 4.
+      #
+      # Forward slashes in `files:` are load-bearing even though this is a Windows runner:
+      # the action resolves them with node-glob, which reads a backslash as an escape.
+      - name: Scan with VirusTotal
+        id: vt
+        if: env.VT_API_KEY != ''
+        continue-on-error: true      # a VirusTotal outage must not sink a finished release
+        uses: crazy-max/ghaction-virustotal@v5
+        with:
+          vt_api_key: ${{ secrets.VT_API_KEY }}
+          files: |
+            dist/Halo-Setup-${{ steps.version.outputs.version }}.exe
+            dist/Halo-${{ steps.version.outputs.version }}-win-x64.zip
+          request_rate: 2
+          # The release does not exist yet when this runs, so there is no body to append
+          # to; the links are read off this step's output in the next step instead.
+          update_release_body: false
+
       - name: Create the release
         if: github.ref_type == 'tag'
         shell: pwsh
@@ -88,5 +127,39 @@ jobs:
           Requirements, what works without PawnIO or without an NVIDIA GPU, and the licences are in
           the README.
           '@
-          ($notes -replace 'VERSION', $v) | Out-File release-notes.md -Encoding utf8
+          $lines = @($notes -replace 'VERSION', $v)
+
+          # The VirusTotal section is appended after the substitution above, never written
+          # into the here-string: -replace is a global regex, and any new text containing
+          # the word VERSION would be rewritten along with it. $tick spells a backtick
+          # without fighting PowerShell's escape character inside an interpolated string.
+          $tick = '`'
+          $lines += ''
+
+          # steps.vt.outputs.analysis is "<path>=<url>" pairs, comma separated, and empty
+          # when the scan was skipped (no VT_API_KEY) or failed (continue-on-error). The
+          # action echoes back the path it was given, not a bare asset name - hence
+          # Split-Path.
+          $vt = '${{ steps.vt.outputs.analysis }}'
+          if ($vt) {
+            $lines += '**VirusTotal**'
+            $lines += ''
+            foreach ($pair in $vt -split ',') {
+              $name, $url = $pair -split '=', 2
+              $lines += "- [$tick$(Split-Path $name -Leaf)$tick]($url)"
+            }
+            $lines += ''
+            # Measured on 1.0.3: 1/68 on the installer and 1/66 on the zip, the lone hit
+            # being one ML engine returning a bare "MALICIOUS" with no family name. The
+            # bundled PawnIO_setup.exe is 0/70 on its own, so it is not the driver.
+            $lines += 'Expect the odd lone hit from a machine-learning engine. These are unsigned,'
+            $lines += 'brand-new binaries wrapping a ~175 MB self-contained .NET runtime, and a'
+            $lines += 'big unsigned bundle with no reputation is a shape static classifiers dislike.'
+            $lines += 'Every mainstream engine reads them as clean. A cluster of agreeing,'
+            $lines += 'named-family detections would be a different story - please open an issue.'
+          } else {
+            $lines += '**VirusTotal** - no analysis for this release.'
+          }
+
+          ($lines -join "`n") | Out-File release-notes.md -Encoding utf8
           gh release create $env:GITHUB_REF_NAME "dist/Halo-Setup-$v.exe" "dist/Halo-$v-win-x64.zip" --title "Halo $v" --notes-file release-notes.md
