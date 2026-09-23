@@ -1,6 +1,6 @@
 # Halo — what installing adds, and what ships inside the app
 
-This page answers two questions separately:
+This doc answers two questions separately:
 
 1. **What does installing Halo add to the machine?** Section 1. The list is short, and nothing is
    added without a row in it.

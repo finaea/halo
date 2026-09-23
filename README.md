@@ -8,10 +8,7 @@ Windows 10 1809+ · Windows 11 · 64-bit · notification area
 
 </div>
 
-Halo shows CPU, GPU, RAM, drives, fans, power, network, PC latency and a real-time FPS and
-frametime counter as widgets that sit on the desktop. It was built to replace a stack of
-**Rainmeter + Rainformer + HWiNFO + MSI Afterburner + RTSS + the NVIDIA App** with one
-self-contained app that does not inject anything into games.
+A native Windows 11 desktop widget suite that renders a live hardware dashboard directly on the desktop — CPU, GPU, RAM, drives, fans, power, network, latency, and a real-time FPS/frametime counter. Built to replace Rainmeter + Rainformer + HWiNFO + MSI Afterburner + RTSS + the NVIDIA App with one self-contained, low-overhead app, that does not inject anything into games.
 
 <div align="center">
 <img src="preview.png" alt="Halo widgets on the desktop">
@@ -21,20 +18,17 @@ self-contained app that does not inject anything into games.
 
 - **Shows the whole machine at a glance** — Temperatures, loads, clocks, memory, fan speeds, power
   draw, drive activity and network throughput, each in its own widget.
-- **Counts frames the way the display sees them** — The FPS counter reads frame timings through
+- **Responsive FPS counter on 60hz** — The FPS counter reads frame timings through
   Intel PresentMon and ETW, so it can show both what the game submitted and what the monitor
   actually displayed, including 1% and 0.1% lows and frame generation.
-- **Shows PC latency and DLSS** — For games that include NVIDIA Reflex, Halo shows the PC latency
+- **Shows game latency and DLSS** — For games that include NVIDIA Reflex, Halo shows the PC latency
   breakdown, along with which DLSS features are active.
-- **Keeps every widget independent** — Each widget can be dragged to any monitor, snapped to screen
+- **Customizable Widgets** — Each widget can be dragged to any monitor, snapped to screen
   and widget edges, set to stay on the desktop or above other windows, made click-through, or made
-  partly transparent.
-- **Stays honest about missing data** — A reading that cannot be taken shows `N/A` instead of an
-  old or made-up number. A stopped fan still shows a real 0 rpm.
-- **Runs lightly** — On the 20-thread machine Halo was built on, it uses under half a percent of
+  partly transparent etc.
+- **Minimal & Lightweight** — On the 20-thread machine Halo was built on, it uses under half a percent of
   total CPU on an idle desktop and about 2% while an uncapped game runs
   ([measurements](docs/perf-usage-breakdown.md)).
-- **Stays on the machine** — There is no telemetry, analytics, crash reporting or update check.
 
 ## Widgets
 
@@ -97,19 +91,7 @@ logs in a `data` folder beside the programs. To start it, run `Halo.Collector.ex
 administrator, then `Halo.Widgets.exe`. The portable copy adds nothing to Windows unless
 **Turn on autostart…** is used in System check.
 
-### Starting Halo by hand
-
-Without **Start with Windows**, Halo does not start by itself. The **Halo** shortcut in the Start
-menu (and on the desktop, if that option was chosen) starts everything: the widgets appear first,
-then Windows asks for permission to run the sensor reader as administrator. Approving it turns on
-CPU temperatures, fans, drive temperatures and the FPS counter. Declining leaves everything else
-working, with those rows showing `N/A`.
-
-Opening the **Halo** shortcut while Halo is already running is safe and does not start a second
-copy. The **Halo Widgets** and **Halo Settings** shortcuts each open one part on its own, without a
-prompt.
-
-### What goes where
+### Default Storage Location
 
 | Item | Location |
 | --- | --- |
@@ -122,7 +104,7 @@ Uninstalling from **Settings → Apps** removes the program and the scheduled ta
 to delete the saved settings and layouts. Everything Halo adds to a machine, and how to remove it,
 is listed in [docs/install-footprint.md](docs/install-footprint.md).
 
-## Controls
+## Configurations
 
 **Right-clicking a widget** opens its menu:
 
@@ -173,10 +155,6 @@ the reason for each data source, such as `unelevated`, `no-driver` or `no-hw`.
 
 ## Troubleshooting
 
-**Settings → System check is the best first step.** It lists every data source as OK, degraded or
-unavailable, explains why in plain words, and offers buttons for the two fixes that can be made
-from there: installing PawnIO and repairing autostart.
-
 **CPU temperature, fan speeds or drive temperatures show `N/A`.**
 These readings, along with CPU clock speed and power, need the PawnIO driver, which is either
 missing or waiting for a restart. System check offers **Install PawnIO…** when it is missing, and
@@ -200,24 +178,11 @@ Halo starts at sign-in only when **Start with Windows** was chosen. System check
 two startup tasks exist, and **Turn on autostart…** or **Repair autostart…** creates them again. The
 **Halo** shortcut always starts everything by hand.
 
-**The widgets disappeared, with nothing else obviously wrong.**
-This usually means Windows Explorer restarted and took the desktop with it. Halo notices within
-about two seconds and rebuilds the widgets.
-
-**Widgets are on the wrong monitor, or in the wrong place.**
-A widget can be dragged to where it belongs, and the new position is saved as soon as it is
-dropped. When a monitor is unplugged, its widgets move to the primary monitor for the time being,
-and return when the monitor is plugged back in. The saved layout is not changed in the meantime.
-
 **The FPS counter shows `N/A` while a game is running.**
 Only one program at a time can capture frame timings on Windows. Closing any other capture tool,
 such as another copy of Halo, CapFrameX, FrameView or HWiNFO's frame counter, usually fixes it. If
 it does not, System check will show whether the collector is missing the administrator rights that
 frame capture needs.
-
-**Halo on a laptop.**
-Halo keeps running on battery. The startup tasks are set up so Windows does not stop them when the
-laptop is unplugged.
 
 **"Windows protected your PC" appears when running the installer.**
 This is SmartScreen reacting to an app it has not seen often, not a virus warning. Halo is not code
