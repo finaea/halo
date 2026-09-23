@@ -8,7 +8,7 @@ Windows 10 1809+ · Windows 11 · 64-bit · notification area
 
 </div>
 
-A native Windows 11 desktop widget suite that renders a live hardware dashboard directly on the desktop — CPU, GPU, RAM, drives, fans, power, network, latency, and a real-time FPS/frametime counter. Built to replace Rainmeter + Rainformer + HWiNFO + MSI Afterburner + RTSS + the NVIDIA App with one self-contained, low-overhead app, that does not inject anything into games.
+A native Windows 11 desktop widget suite that renders a live hardware dashboard directly on the desktop — CPU, GPU, RAM, drives, fans, power, network, latency, and a real-time FPS/frametime counter. Built to replace **Rainmeter + Rainformer + HWiNFO + MSI Afterburner + RTSS + the NVIDIA App** with one self-contained, low-overhead app, that does not inject anything into games.
 
 <div align="center">
 <img src="preview.png" alt="Halo widgets on the desktop">
