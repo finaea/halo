@@ -4,6 +4,12 @@ Native Windows 11 desktop widget suite replacing the Rainmeter + Rainformer + HW
 Afterburner + RTSS + NVIDIA App stack. Architecture overview: [architecture.md](docs/architecture.md).
 Docs live in `docs/`; personal/machine-specific notes in `docs/private/` (git-ignored).
 
+**Writing style for anything a user reads** (README, `docs/`, `NOTICE.md`, release notes in
+`.github/workflows/release.yml`): third person, never "you"/"your"; plain everyday words, with
+technical names (PawnIO, ETW, PresentMon, UAC) kept so the mechanism stays visible; softly
+phrased rather than blunt; British spelling as elsewhere (colour, licence). The model is the
+MacTime and MonitorScreenSaver READMEs. Code comments are exempt and stay technical.
+
 ## Build & run
 
 ```powershell
@@ -75,7 +81,8 @@ the smoketests, and would delete the "degrades gracefully unelevated" property.
   Publishes to shared memory `Local\Halo.Metrics.v2` via `MetricsWriter` (lock-free: atomic
   8-byte value slots, seqlock strings, append-only frame ring, provider health table). Session
   maxima = `.max` metrics via `MetricSink`. Control channel: named pipe `Halo.Control.v2`
-  (`reset-max`, `reset-net`, `rescan`, `reload-config`, `ping`); `rescan` re-runs `Initialize` on
+  (`reset-max`, `reset-net`, `rescan`, `reload-config`, `ping`, `quit` — the only stop that runs
+  the shutdown path; the tray's Exit sends it); `rescan` re-runs `Initialize` on
   every provider whose `RescanReinitialises` is true (the ones that enumerate hardware) and drops
   repeats inside 10 s. `LhmProvider.Part.Cpu` opts out on purpose — see the LHM gotcha below.
 - **Halo.Widgets**: one WS_EX_NOREDIRECTIONBITMAP HWND per widget, DirectComposition +
@@ -122,7 +129,7 @@ the smoketests, and would delete the "degrades gracefully unelevated" property.
   Graph series use `NaSample` → `NaN`, which holds the previous bar rather than drawing a cliff to
   zero. The test for which a metric gets is **"is this a reading, or a fact about the machine?"** —
   readings go N/A, counts and booleans keep their zero. Fan RPM is the case to remember: a stopped
-  fan genuinely reports 0, so only an *unreadable* sensor is N/A (`LhmProvider.cs:325-326`).
+  fan genuinely reports 0, so only an *unreadable* sensor is N/A (`LhmProvider.cs:377-378`).
 - **Frame rates come from summed intervals, not a count over a span.** Each frame carries its own
   present-to-present interval, so k frames carry k intervals and mean-frametime → rate is exact;
   under two samples there is no interval at all and the answer is 0/N/A, not the old `Math.Max(0.1,
@@ -137,7 +144,7 @@ the smoketests, and would delete the "degrades gracefully unelevated" property.
   temp files are per-process-unique. The in-process `Lock` alone was never enough — two
   read-modify-write cycles interleaved and one process's change vanished. A config file that is
   present but does not parse is **not** treated as absent: last good copy kept, reason logged,
-  writes to it refused rather than clobbering a hand edit (`ConfigStore.cs:139-155`).
+  writes to it refused rather than clobbering a hand edit (`ConfigStore.Load` → `NoteUnreadable`).
 - **Logging is evidence, so it is allowed to cost something.** `Halo.Shared\Log.cs` writes
   **one file per process instance** (`logs\<proc>-<yyyyMMdd-HHmmss>-<pid>.log`) — a shared per-day
   file could not survive more than one writer, and five collectors once interleaved into one file

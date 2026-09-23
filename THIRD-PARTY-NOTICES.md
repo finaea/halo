@@ -3,10 +3,10 @@
 Everything Halo ships or installs that somebody else wrote. Halo's own code is PolyForm
 Noncommercial 1.0.0 (`LICENSE`); the visual design is CC BY-NC 3.0 (`NOTICE.md`).
 
-Licences below were read off the shipped artefacts, not from memory: the `<license>` element of
-each package's `.nuspec` in the project-local NuGet cache (`tools/nuget-cache`), the licence file
-inside the package, or the upstream repository. Versions are the resolved ones from
-`dotnet list package --include-transitive` as of 2026-09-13.
+The licences below were read from the shipped files themselves: the `<license>` element of each
+package's `.nuspec` in the project-local NuGet cache (`tools/nuget-cache`), the licence file inside
+the package, or the upstream repository. Versions are the ones `dotnet list package
+--include-transitive` resolved on 2026-09-13.
 
 ## Summary
 
@@ -33,15 +33,15 @@ inside the package, or the upstream repository. Versions are the resolved ones f
 | [Elegant Icon Font](https://www.elegantthemes.com/blog/resources/elegant-icon-font) | - | GPL-2.0 / MIT dual - **MIT taken** | `assets\fonts\ElegantIcons.ttf` |
 | Rainformer 3.1 HWiNFO Edition (visual design) | - | CC BY-NC 3.0 | the theme and panel geometry - see [NOTICE.md](NOTICE.md) |
 
-Removed from the repo in the run-up to release, because Halo had no right to redistribute them
-or no use for them:
+Removed from the repository before the first public release, because Halo either had no right to
+redistribute them or no use for them:
 
 | Removed | Why |
 | --- | --- |
-| `assets\fonts\SegMDL2.ttf` (Segoe MDL2 Assets) | Microsoft proprietary, [not redistributable](https://learn.microsoft.com/en-us/typography/font-list/segoe-mdl2-assets). It ships with every Windows 10/11 install anyway - use the system font family "Segoe MDL2 Assets" if a glyph is ever needed. |
+| `assets\fonts\SegMDL2.ttf` (Segoe MDL2 Assets) | Microsoft proprietary, [not redistributable](https://learn.microsoft.com/en-us/typography/font-list/segoe-mdl2-assets). It comes with every Windows 10 and 11 installation anyway, so the system font family "Segoe MDL2 Assets" can be used if a glyph is ever needed. |
 | `assets\fonts\MaterialIcons.ttf` | Nothing referenced it by name. It was only being loaded because `Dx.LoadFonts` globs `*.ttf`. |
 
-## The ones with real obligations
+## Components with specific obligations
 
 ### PawnIO 2.2.0 - GPL-2.0-or-later
 
@@ -56,7 +56,7 @@ before staging it:
 - Installer source: https://github.com/namazso/PawnIO.Setup
 
 Halo never links against PawnIO. LibreHardwareMonitor talks to the installed driver through its
-device IO control interface, which is exactly the case the PawnIO authors carved out:
+device IO control interface, which is exactly the case the PawnIO authors made an exception for:
 
 > In addition, as a special exception, the copyright holders of PawnIO give you permission to
 > combine PawnIO program with free software programs or libraries that are released under the
@@ -83,15 +83,14 @@ https://github.com/namazso/PawnIO - that link is the offer required by GPL-2.0 s
 for the binary Halo ships.
 
 Uninstalling Halo **leaves PawnIO installed**. It is a shared driver: FanControl,
-LibreHardwareMonitor and HWiNFO all use the same one, and pulling it out from under them would
-be rude.
+LibreHardwareMonitor and HWiNFO all use the same one, and removing it would break them.
 
 ### MPL-2.0 components (LibreHardwareMonitorLib and friends)
 
 Shipped as **unmodified** binaries from their official NuGet packages. MPL-2.0 section 3.2 is
 satisfied by this notice plus the source links in the table above; the licence text is at
-https://www.mozilla.org/en-US/MPL/2.0/. If you modify any of these files, MPL-2.0 requires you to
-make your modified source available under the same licence.
+https://www.mozilla.org/en-US/MPL/2.0/. Anyone who modifies these files is required by MPL-2.0 to
+make the modified source available under the same licence.
 
 ### Apache-2.0 (HidSharp)
 

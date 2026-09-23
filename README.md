@@ -1,299 +1,362 @@
-# Halo — Hardware Analytics & Live Overlay
+<div align="center">
 
-A native Windows 11 desktop widget suite that renders a live hardware dashboard directly on the
-desktop — CPU, GPU, RAM, drives, fans, power, network, latency, and a real-time FPS/frametime
-counter. Built to replace **Rainmeter + Rainformer + HWiNFO + MSI Afterburner + RTSS + the NVIDIA
-App** with one self-contained, low-overhead app.
+# Halo
 
-![Halo widget suite](preview.png)
+**Hardware Analytics & Live Overlay — a live hardware dashboard drawn directly on the Windows desktop.**
 
-Eleven widget types, all independent windows that can be dragged anywhere
-(`src/Halo.Shared/Panels/PanelCatalog.cs:100-328`):
+Windows 10 1809+ · Windows 11 · 64-bit · notification area
 
-| | |
+</div>
+
+Halo shows CPU, GPU, RAM, drives, fans, power, network, PC latency and a real-time FPS and
+frametime counter as widgets that sit on the desktop. It was built to replace a stack of
+**Rainmeter + Rainformer + HWiNFO + MSI Afterburner + RTSS + the NVIDIA App** with one
+self-contained app that does not inject anything into games.
+
+<div align="center">
+<img src="preview.png" alt="Halo widgets on the desktop">
+</div>
+
+## What Halo does
+
+- **Shows the whole machine at a glance** — Temperatures, loads, clocks, memory, fan speeds, power
+  draw, drive activity and network throughput, each in its own widget.
+- **Counts frames the way the display sees them** — The FPS counter reads frame timings through
+  Intel PresentMon and ETW, so it can show both what the game submitted and what the monitor
+  actually displayed, including 1% and 0.1% lows and frame generation.
+- **Shows PC latency and DLSS** — For games that include NVIDIA Reflex, Halo shows the PC latency
+  breakdown, along with which DLSS features are active.
+- **Keeps every widget independent** — Each widget can be dragged to any monitor, snapped to screen
+  and widget edges, set to stay on the desktop or above other windows, made click-through, or made
+  partly transparent.
+- **Stays honest about missing data** — A reading that cannot be taken shows `N/A` instead of an
+  old or made-up number. A stopped fan still shows a real 0 rpm.
+- **Runs lightly** — On the 20-thread machine Halo was built on, it uses under half a percent of
+  total CPU on an idle desktop and about 2% while an uncapped game runs
+  ([measurements](docs/perf-usage-breakdown.md)).
+- **Stays on the machine** — There is no telemetry, analytics, crash reporting or update check.
+
+## Widgets
+
+Eleven widget types are available, and any of them can be added more than once:
+
+| Widget | Shows |
 | --- | --- |
-| **CPU / RAM** | package temp, per-core load, clocks, RAM usage, overlay graph |
-| **GPU** | temp, load, VRAM, fan, core and memory clocks, overlay graph |
-| **FPS counter** | presented & displayed lanes, 1% / 0.1% lows, frametime mean + worst, live graph |
-| **Latency / DLSS** | PC latency breakdown, DLSS and frame-gen state |
-| **Drives** | per-volume temp / used / total, read & write history graphs |
-| **Power · Fans · Network · Top processes (CPU / RAM) · Clock** | draw, RPMs, throughput, per-process CPU and RAM |
+| **CPU / RAM** | Package temperature, per-core load, clock speed, RAM usage and a history graph |
+| **GPU** | Temperature, load, VRAM, fan, core and memory clocks, and a history graph |
+| **FPS counter** | Presented or displayed frame rate, 1% and 0.1% lows, average and worst frametime, and a live frame graph |
+| **Latency / DLSS** | PC latency and its queue, render and display parts, click and input latency, and DLSS model and frame generation state |
+| **Drives** | Temperature, used and total space, and read and write graphs for each drive |
+| **Power** | CPU and GPU power draw and voltage |
+| **Fans** | The speed of every fan the motherboard reports, with a nickname for each channel |
+| **Network** | Download and upload speed, peak speed, total downloaded, and internal and external IP addresses |
+| **Top processes — CPU** and **— RAM** | The busiest processes by CPU or by memory |
+| **Clock** | Time, date and system uptime |
 
-Everything is per-widget configurable: which rows show, colours, warn thresholds, graph history,
-refresh rate, monitor, z-order, click-through, opacity.
+Rows, labels, colours, warning thresholds, graph history, refresh rate, monitor, z-order,
+click-through and opacity can all be set per widget.
 
 ## Requirements
 
-| | Needed for | Without it |
+| Requirement | Needed for | Without it |
 | --- | --- | --- |
-| **Windows 10 1809 (build 17763) or newer, 64-bit** | everything | the installer refuses to run (`installer/halo.iss` `MinVersion`) |
-| **Admin, once, at install** | the collector runs as a scheduled task at highest privileges | — |
-| **PawnIO** (offered by the installer when none is installed yet, ticked by default) | CPU temp / package power / Vcore, fan RPM, drive temps | those rows read `N/A`; everything else works |
-| **NVIDIA GPU + driver** | full GPU panel via NVML, DLSS detection, Reflex/PCL latency | AMD and Intel GPUs fall back to what LibreHardwareMonitor exposes; latency and DLSS read `N/A` |
-| **Nothing else** | — | no .NET install, no Visual C++ redist, no HWiNFO, no Rainmeter. The download is self-contained. |
+| **Windows 10 1809 or later, or Windows 11, 64-bit** | Everything | The installer does not run |
+| **Administrator approval once, at install** | Letting the sensor reader start at sign-in without a prompt | — |
+| **PawnIO driver** (offered by the installer) | CPU temperature, clock speed, power and voltage, fan speeds, drive temperatures | Those rows show `N/A`; everything else works |
+| **NVIDIA GPU and driver** | The full GPU widget, DLSS detection and Reflex latency | AMD and Intel GPUs show what LibreHardwareMonitor can read; latency and DLSS show `N/A` |
 
-Disk: ~57 MB to download, ~173 MB installed (one shared .NET runtime for all three processes).
-
-**Elevation model, in two sentences.** The collector runs elevated because ring-0 sensor reads and
-ETW frame capture need it; the widgets and the settings app run as a normal user process at medium
-integrity. They talk through a shared-memory section whose DACL grants read to everyone at medium
-integrity, so nothing a user clicks on is elevated.
+Nothing else needs to be installed. The download includes its own .NET runtime, so there is no
+separate .NET, Visual C++ runtime, HWiNFO or Rainmeter to install. The installer is about 56 MB and
+takes about 175 MB once installed.
 
 ## Install
 
-1. Grab `Halo-Setup-<version>.exe` from the [Releases page](https://github.com/finaea/halo/releases).
-2. Run it. **One UAC prompt**, no second one.
-3. Up to two components, both ticked by default:
-   - **PawnIO driver for CPU temps, fans, drive temps** — a signed third-party kernel driver
-     ([namazso/PawnIO](https://github.com/namazso/PawnIO), GPL-2.0-or-later). LibreHardwareMonitor
-     0.9.6 has no other way to read those sensors. If it says a restart is needed, those rows stay
-     `N/A` until the machine is restarted; nothing else is affected. It can be unticked, and turned
-     on later from System check. If a PawnIO is already on the machine (FanControl, HWiNFO and
-     LibreHardwareMonitor install the same driver), this component isn't shown and the existing
-     driver is used as is, whatever its version.
-   - **Start with Windows** — registers two scheduled tasks (`\Halo\Collector` at highest
-     privileges, `\Halo\Widgets` at normal) so nothing prompts for UAC at logon.
-   There's also a **Create a desktop shortcut** checkbox.
-4. Widgets appear, and **Settings opens on the System check page**: what the hardware actually
-   exposes, which providers are OK / degraded / unavailable and why, and buttons to fix the
-   fixable. First run also offers to generate a starting layout for the monitors it finds.
+### Installer
+
+1. Download `Halo-Setup-<version>.exe` from [Releases](https://github.com/finaea/halo/releases/latest).
+2. Open the downloaded file and approve the single UAC prompt.
+3. SmartScreen may appear because Halo is not code signed. **More info → Run anyway** allows the
+   installer to open.
+4. Choose the optional parts. Both are selected by default:
+   - **PawnIO driver for CPU temps, fans, drive temps** — A signed third-party kernel driver
+     ([namazso/PawnIO](https://github.com/namazso/PawnIO)) that LibreHardwareMonitor uses to read
+     those sensors. If the installer says a restart is needed, those rows show `N/A` until Windows
+     restarts. This option does not appear when PawnIO is already installed, for example by
+     FanControl, HWiNFO or LibreHardwareMonitor, and the existing driver is used instead.
+   - **Start with Windows** — Starts Halo at every sign-in without asking for administrator
+     approval again.
+   - A **Create a desktop shortcut** checkbox is also available.
+5. When setup finishes, the widgets appear and Settings opens on **System check**. It shows what
+   the hardware reports, which data sources are working, and offers to arrange a starting layout
+   on the monitors it finds.
+
+### Portable
+
+`Halo-<version>-win-x64.zip` from the same release unzips to a folder that keeps its settings and
+logs in a `data` folder beside the programs. To start it, run `Halo.Collector.exe` as
+administrator, then `Halo.Widgets.exe`. The portable copy adds nothing to Windows unless
+**Turn on autostart…** is used in System check.
 
 ### Starting Halo by hand
 
-Without **Start with Windows**, Halo does not start itself. The **Halo** shortcut — Start menu, and
-the desktop if that box was ticked — is the one to click: the overlay comes up, then Windows asks
-to let the collector run as administrator. Approving it is what enables CPU temps, fans, drive
-temps and the FPS pipeline; declining leaves everything else working, with those rows reading
-`N/A`.
+Without **Start with Windows**, Halo does not start by itself. The **Halo** shortcut in the Start
+menu (and on the desktop, if that option was chosen) starts everything: the widgets appear first,
+then Windows asks for permission to run the sensor reader as administrator. Approving it turns on
+CPU temperatures, fans, drive temperatures and the FPS counter. Declining leaves everything else
+working, with those rows showing `N/A`.
 
-Clicking it again while Halo is already up is safe. The widgets are single-instance, and the
-collector is started only when the section says none is running
-(`src/Halo.Widgets/CollectorLauncher.cs:80-88`). `Halo Widgets` and `Halo Settings` still start one
-process each with no prompt, and `Halo.Collector.exe` on its own is still unelevated — `--dump`,
-`--migrate-config` and the smoketests never ask for anything.
+Opening the **Halo** shortcut while Halo is already running is safe and does not start a second
+copy. The **Halo Widgets** and **Halo Settings** shortcuts each open one part on its own, without a
+prompt.
 
-There is a portable build too. `Halo-<version>-win-x64.zip` from the same release unzips to a
-folder that keeps its config and logs in `.\data` next to the exes (that's what the
-`portable.marker` file inside does). Run `Halo.Collector.exe` as admin, then `Halo.Widgets.exe`.
+### What goes where
 
-### Where things go
-
-| | |
+| Item | Location |
 | --- | --- |
 | Program | `C:\Program Files\Halo` |
-| Config + logs | `%LOCALAPPDATA%\Halo` (or `<app folder>\data` in portable mode) |
-| Autostart | scheduled tasks `\Halo\Collector` and `\Halo\Widgets` |
-| PawnIO | `C:\Program Files\PawnIO` — **left behind on uninstall**, it's a shared driver |
+| Settings, layouts and logs | `%LOCALAPPDATA%\Halo` (or the `data` folder in the portable copy) |
+| Start with Windows | Two scheduled tasks, `\Halo\Collector` and `\Halo\Widgets` |
+| PawnIO | `C:\Program Files\PawnIO` — **kept on uninstall**, because other apps share it |
 
-Full footprint, what rides inside the app folder, and what uninstall removes:
-[docs/install-footprint.md](docs/install-footprint.md).
+Uninstalling from **Settings → Apps** removes the program and the scheduled tasks, and asks whether
+to delete the saved settings and layouts. Everything Halo adds to a machine, and how to remove it,
+is listed in [docs/install-footprint.md](docs/install-footprint.md).
 
-## What works without the optional pieces
+## Controls
 
-**Without PawnIO** — reads `N/A`: `cpu.package.temp.c`, `cpu.package.power.w`, `cpu.vcore.v`, every
-`fan.<n>.rpm`, every `drive.<x>.temp.c`. Still fine: all CPU load and clock rows (those come from
-the OS, not the driver), RAM, GPU, network, drive space and read/write rates, FPS, latency, top
-processes, clock.
+**Right-clicking a widget** opens its menu:
 
-**Without an NVIDIA GPU** — AMD and Intel cards are enumerated through LibreHardwareMonitor, so the
-temp / load / clock / VRAM rows it exposes still work. NVML-only extras (some power and clock
-detail), DLSS state and Reflex PC latency read `N/A`. Multi-GPU is handled either way: read
-`gpu.count` and pick the card per widget.
+| Item | Effect |
+| --- | --- |
+| **Lock position** | Stops this widget from being dragged |
+| **Z-order** | **On desktop**, **Normal**, or **Always on top** |
+| **Opacity** | Makes the widget partly transparent |
+| **Click through** | Lets mouse clicks pass to whatever is underneath |
+| **Keep on screen** | Keeps the widget inside its monitor |
+| **Sum same-name processes** | Top-process widgets only: combines processes that share a name |
+| **Refresh** | Redraws the widget |
+| **Reset session max (this panel)** | Clears the peak values this widget shows |
+| **Settings…** | Opens Settings |
+| **Lock all widgets** | Stops every widget from being dragged |
+| **Exit Halo** | Closes the widgets and the sensor reader |
 
-**Without admin** (running the exe by hand instead of through the task) — LibreHardwareMonitor's
-CPU / SuperIO / storage parts and both ETW pipelines (PresentMon frames, Reflex markers) are gone,
-so temps, fans, drive temps, FPS and latency read `N/A`. System check names the reason per provider
-(`unelevated`, `no-driver`, `no-hw`, `no-nvml`, `no-sdk`, `failed`).
+The **notification-area icon** shows whether the sensor reader is running, and offers **Lock all
+widgets**, **Refresh all**, **Settings…** and **Exit Halo**.
 
-## Build from source
+**Settings** has four pages:
 
-```powershell
-winget install Microsoft.DotNet.SDK.10     # .NET 10 SDK; global.json pins it
-git clone https://github.com/finaea/halo && cd halo
-tools\build.ps1                            # -> dist\app (publish + assets + PresentMon + PawnIO)
-tools\install-dev.ps1                      # registers the two tasks against dist\app, one UAC prompt
-```
+| Page | What it covers |
+| --- | --- |
+| **General** | Start with Windows, snapping, locking, theme presets (Rainformer, Light, High contrast), scale, font, corner radius, panel colours, and exporting or importing a whole layout |
+| **System check** | Detected hardware, the state of every data source and the reason for any `N/A`, installing PawnIO, repairing autostart, rescanning hardware, arranging widgets, and logging |
+| **Widgets** | Adding, duplicating and removing widgets, and each widget's rows, graphs, refresh rate, appearance and placement |
+| **About** | Versions, the project page, third-party notices and the design credit |
 
-`tools\build.ps1 -Installer` also compiles the setup exe — that needs
-[Inno Setup 6](https://jrsoftware.org/isdl.php), which installs per-user without admin:
-`innosetup-6.x.x.exe /VERYSILENT /CURRENTUSER /NORESTART`. Add `-Zip` for the portable archive,
-`-Clean` to wipe `dist\app` first.
+Every change applies to the widgets immediately. A widget's position is saved as soon as it is
+dropped, including which monitor it is on.
 
-The first build restores NuGet into the project-local cache `tools\nuget-cache` (needs internet
-once), and downloads `PawnIO_setup.exe` from its official GitHub release, verifying a pinned
-SHA-256 before it ships it — the hash and URL are in
-[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+## What works without the optional parts
 
-Day-to-day loop: `tools\redeploy-halo.ps1` (stop widgets → stop collector task → build → start
-both, in the only order that works). `tools\uninstall-dev.ps1` removes the tasks.
+**Without PawnIO** — CPU package temperature, CPU clock speed, CPU package power, CPU voltage
+(Vcore), fan speeds and drive temperatures show `N/A`. CPU load, RAM, GPU, network, drive space and
+activity, FPS, latency, top processes and the clock widget all keep working, because they come from
+Windows or the GPU driver rather than from PawnIO.
 
-```
-src/Halo.Collector   sensor providers, shared-memory writer, frame pipeline
-src/Halo.Widgets     rendering engine, panel definitions, window management
-src/Halo.Settings    WPF settings app (WPF-UI), System check, first run
-src/Halo.Shared      paths, config models, panel manifest, logging
-src/Halo.Metrics     the public client package: layout, reader, writer, control pipe
-config/reference     the v2 config layout for reference (the real config lives in %LOCALAPPDATA%)
-tools/extracted      faithful JSON transcriptions of the original Rainmeter skins (spec source)
-```
+**Without an NVIDIA GPU** — AMD and Intel graphics cards are read through LibreHardwareMonitor,
+so the temperature, load, clock and VRAM rows it reports still work. DLSS state and Reflex latency
+show `N/A`. This path has not yet been tested on real AMD or Intel hardware. Machines with more
+than one GPU are supported: each GPU widget can be pointed at a different card.
 
-How the three processes fit together, and why the boundary sits where it does:
-[docs/architecture.md](docs/architecture.md).
-
-## For widget developers
-
-Halo's metrics are a public, documented interface. Any process running as the same user can read
-them — no Halo code required, and no admin.
-
-- **[docs/metrics-protocol.md](docs/metrics-protocol.md)** — the contract: section
-  `Local\Halo.Metrics.v2`, byte-exact struct layouts, the five reader rules, the control pipe, and
-  a ready-to-paste ~60-line Python reader.
-- **[docs/current-metrics-inventory.md](docs/current-metrics-inventory.md)** — what every metric
-  name means and how fresh it is.
-- **`src/Halo.Metrics`** — a dependency-free, AOT-friendly .NET client. `CollectorSession`
-  implements all five reader rules already.
-- **`Halo.Collector.exe --dump`** for a human-readable snapshot, `--dump --json` for the documented
-  machine shape.
-
-Indexed families (`gpu.<i>.*`, `cpu.core.<i>.*`, `fan.<n>.*`, `drive.<x>.*`) are discovered at
-runtime — read `gpu.count` / `cpu.logical.count` / `fan.count` and never assume one of anything.
-Every metric also publishes the real cadence it changes at, so a consumer knows when polling faster
-buys nothing.
+**Without administrator rights** — When the sensor reader is started without administrator
+approval, CPU temperatures, fans, drive temperatures, FPS and latency show `N/A`. System check names
+the reason for each data source, such as `unelevated`, `no-driver` or `no-hw`.
 
 ## Troubleshooting
 
-**Settings → System check is the first stop for most of these.** It lists every data source with
-OK / degraded / unavailable, says *why* in plain words, and has buttons for the two things that are
-fixable from there: installing PawnIO and repairing autostart.
+**Settings → System check is the best first step.** It lists every data source as OK, degraded or
+unavailable, explains why in plain words, and offers buttons for the two fixes that can be made
+from there: installing PawnIO and repairing autostart.
 
-**Temperatures, fan speeds or drive temperatures show "N/A".**
-Those particular readings need a small helper driver called PawnIO, and it is either not installed
-or installed but not loaded yet. Open Settings → System check. If it offers an **Install PawnIO**
-button, use it. If it says a restart is needed, restart — the driver cannot load until then.
-Everything else keeps working in the meantime.
+**CPU temperature, fan speeds or drive temperatures show `N/A`.**
+These readings, along with CPU clock speed and power, need the PawnIO driver, which is either
+missing or waiting for a restart. System check offers **Install PawnIO…** when it is missing, and
+says when a restart is needed. Everything else keeps working in the meantime. Windows does not allow ordinary software to read CPU
+temperature, motherboard fan headers or drive SMART data directly, which is why a driver is
+needed. PawnIO is shared with FanControl, HWiNFO and LibreHardwareMonitor, so a machine that
+already runs one of those already has it.
 
-> Windows will not let ordinary software read CPU package temperature, motherboard fan headers or
-> SMART data directly, so LibreHardwareMonitor 0.9.6 reads them through PawnIO's signed kernel
-> driver. It is shared: FanControl, HWiNFO and LibreHardwareMonitor install the same one, so a
-> machine that already runs any of those has it.
+**Everything shows `N/A`, and no UAC prompt appeared.**
+Halo was most likely started from **Halo Widgets** rather than **Halo**. **Halo Widgets** opens the
+widgets on their own and never starts the sensor reader. Opening the **Halo** shortcut instead, or
+running `Halo.Collector.exe` as administrator, fixes it.
 
-**Everything reads N/A, and no UAC prompt ever appeared.**
-That usually means Halo was started from the `Halo Widgets` entry rather than **Halo**. The plain
-entry is the overlay on its own — it never starts the collector. Start **Halo** instead, or run
-`Halo.Collector.exe` as administrator by hand.
+**The numbers stopped moving, and each widget shows a small red dot in its title.**
+The red dot means the sensor reader (the collector) has stopped. With **Start with Windows** on,
+Halo restarts it by itself within a few seconds. Without it, opening the **Halo** shortcut again
+starts a new one.
 
-**The numbers froze, or every panel shows a "stale" badge.**
-The background process that reads the sensors (the collector) has stopped. If autostart is on, Halo
-restarts it by itself within a few seconds. If it isn't, clicking the **Halo** shortcut again
-starts one — that is what the badges are waiting for. The log is at
-`%LOCALAPPDATA%\Halo\logs\collector-*.log`.
+**The widgets did not come back after a restart.**
+Halo starts at sign-in only when **Start with Windows** was chosen. System check shows whether the
+two startup tasks exist, and **Turn on autostart…** or **Repair autostart…** creates them again. The
+**Halo** shortcut always starts everything by hand.
 
-> The widget process treats the collector as stale after 5 s without a heartbeat and asks the
-> `\Halo\Collector` scheduled task to start it, backing off 1 s, 5 s, 30 s. With no task registered
-> it logs one line and leaves the badges up rather than raising a UAC dialog on an idle desktop,
-> and re-probes for the task every 60 s in case autostart gets switched on. A collector that is
-> alive but wedged is `/End`ed before the restart, because the task ignores a second instance
-> (`src/Halo.Widgets/App.cs:550-606`).
-
-**The widgets didn't come back after a restart.**
-Halo starts itself at logon only if the "Start with Windows" option was ticked during install.
-Settings → System check says whether the two startup entries are there, and **Repair autostart**
-re-creates them. Either way, the **Halo** shortcut starts everything by hand.
-
-> The entries are scheduled tasks, `\Halo\Collector` (highest privileges) and `\Halo\Widgets`
-> (normal), not registry Run values — that is what lets the elevated half start at logon with no
-> UAC prompt. Full detail in [docs/install-footprint.md](docs/install-footprint.md).
-
-**The widgets vanished, with nothing else obviously wrong.**
-This normally means Windows Explorer restarted and took the desktop with it. Halo notices within
-about 2 seconds and rebuilds the widgets. If they don't come back, the log at
-`%LOCALAPPDATA%\Halo\logs\widgets-*.log` says why.
-
-> The widgets are child windows of the desktop host (`Progman` / `WorkerW`), and Win32 destroys a
-> window's children with it. A guard re-validates the host every 2 s and rebuilds onto whatever
-> host exists then, even before the shell has finished coming back
-> (`src/Halo.Widgets/App.cs:423-456`).
+**The widgets disappeared, with nothing else obviously wrong.**
+This usually means Windows Explorer restarted and took the desktop with it. Halo notices within
+about two seconds and rebuilds the widgets.
 
 **Widgets are on the wrong monitor, or in the wrong place.**
-Just drag one where it belongs — the position saves the moment it is dropped, including which
-monitor it landed on. If a monitor is unplugged, the widgets that lived on it are packed onto the
-primary one temporarily; plugging it back in puts them home, and the saved layout is never
-overwritten in the meantime.
+A widget can be dragged to where it belongs, and the new position is saved as soon as it is
+dropped. When a monitor is unplugged, its widgets move to the primary monitor for the time being,
+and return when the monitor is plugged back in. The saved layout is not changed in the meantime.
 
-**The FPS counter reads "N/A" while a game is running.**
-Only one program on the machine can capture frame timings at a time. If another capture tool
-(another copy of Halo, CapFrameX, FrameView, HWiNFO's frame counter) is running, close it. If that
-isn't it, System check will say the collector is not running with administrator rights, which frame
-capture needs.
+**The FPS counter shows `N/A` while a game is running.**
+Only one program at a time can capture frame timings on Windows. Closing any other capture tool,
+such as another copy of Halo, CapFrameX, FrameView or HWiNFO's frame counter, usually fixes it. If
+it does not, System check will show whether the collector is missing the administrator rights that
+frame capture needs.
 
-> "One at a time" is a Windows ETW limitation on the PresentMon session, not a Halo choice. A second
-> collector on the same machine reads N/A for fps and nothing else — expected, not a bug.
-
-**Halo is running on a laptop — does it stop on battery?**
-No. It keeps collecting and rendering unplugged.
-
-> Both tasks are registered with `DisallowStartIfOnBatteries` and `StopIfGoingOnBatteries` off
-> (`src/Halo.Settings/Services/AutostartManager.cs:220-221`). `schtasks` defaults to stopping on
-> battery, which is why Halo registers through the Task Scheduler API instead.
+**Halo on a laptop.**
+Halo keeps running on battery. The startup tasks are set up so Windows does not stop them when the
+laptop is unplugged.
 
 **"Windows protected your PC" appears when running the installer.**
-That is SmartScreen reacting to an app it has not seen before, not a virus warning. Halo is not
-code-signed — a certificate costs money that v1 doesn't have. Click **More info → Run anyway**.
-Anyone who would rather not take that on faith can build from source instead; the hash of the build
-is the hash of what runs.
+This is SmartScreen reacting to an app it has not seen often, not a virus warning. Halo is not code
+signed, because a certificate is not something the project can pay for at the moment. **More info
+→ Run anyway** allows it to open. Building from source is an alternative for anyone who prefers
+not to trust a download.
 
-**Windows Defender deleted or quarantined a file.**
-It happens to unsigned software: Defender's machine-learning heuristic occasionally flags something
-harmless. Check what it took with `Get-MpThreatDetection` in PowerShell, restore the file, and
-report it to Microsoft as a false positive. Halo's installer deliberately does **not** add a
-Defender exclusion — punching a hole in antivirus is the machine owner's decision, not the
-installer's.
-
-> Recorded instance, 2026-07-19: `Halo.Collector.csproj` — a plain MSBuild XML file, not a binary —
-> quarantined as `Trojan:Win32/Bearfoos.A!ml`.
+**Windows Defender removed or quarantined a file.**
+Defender's machine-learning checks occasionally flag unsigned software by mistake. Running
+`Get-MpThreatDetection` in PowerShell shows what was taken; the file can then be restored and
+reported to Microsoft as a false positive. Halo does not add a Defender exclusion on its own,
+because making an exception in antivirus should be the machine owner's decision.
 
 **A hand-edited `widgets.json` made the widgets disappear.**
-It shouldn't, any more. A config file that is present but does not parse is ignored, the last good
-copy is kept, and `%LOCALAPPDATA%\Halo\logs\widgets-*.log` names the file and the reason. Fix the
-JSON and the widgets come back on the next save.
+Halo keeps the last working copy when a settings file cannot be read, and the widgets log names the
+file and the problem. Once the file is fixed, the widgets return. Until then, Halo does not save
+over the broken file, so a hand edit in progress is never lost.
 
-> Halo also refuses to overwrite a file it could not read, so a widget dragged in the meantime
-> won't stick until the JSON is valid again — overwriting would throw away whatever was being
-> hand-edited (`src/Halo.Shared/Config/ConfigStore.cs:139-155`).
+**Settings changes do not reach the sensor reader on a standard (non-administrator) account.**
+This happens when UAC asks for a different administrator account's password instead of just a
+confirmation. The sensor reader then runs as that other account and reads that account's settings
+folder. The portable copy, or **Start with Windows**, avoids this. More detail is in
+[docs/install-footprint.md](docs/install-footprint.md#known-limitation-the-halo-shortcut-on-a-standard-user-account).
 
-**Settings changes don't reach the collector, on a standard-user account.**
-This happens when UAC asked for an administrator's password rather than just consent. The collector
-is then running as *that* account and reads a different `%LOCALAPPDATA%\Halo` from the one Settings
-writes. Use portable mode, or tick "Start with Windows" — the scheduled task always runs as the
-logged-in user.
+### Logs
 
-> Full explanation, including why the metrics still arrive while the settings diverge:
-> [docs/install-footprint.md](docs/install-footprint.md#known-limitation-the-halo-shortcut-on-a-standard-user-account).
+Each Halo process writes its own log file to `%LOCALAPPDATA%\Halo\logs`, named after the process,
+the time it started and its process ID — for example `collector-20260917-093012-4812.log`. The
+installer writes its log to the same folder. System check has **Open logs folder** and a **Verbose
+logging** switch, which takes effect within seconds without a restart. Logs rotate and the folder
+has a size limit, so verbose logging is safe to leave on.
 
 ## Privacy
 
-No telemetry. Nothing is uploaded, no analytics, no crash reporting, no update check.
+Halo has no telemetry. Nothing is uploaded, and there is no analytics, crash reporting or update
+check.
 
-The only outbound network request Halo can make is an external-IP lookup against
-`https://api.ipify.org` for the Network widget's public-IP row. It is **off by default** on a fresh
-install and is a single switch in Settings → General (`collector.externalIp.enabled`). Everything
-else — ETW sessions, the PresentMon service, the shared-memory section, the control pipe — stays on
-the machine.
+The only outbound request Halo can make is an external IP lookup against `https://api.ipify.org`
+for the Network widget's external IP row. It is **off by default**, and can be turned on under
+**Settings → Widgets → a Network widget → Network data → External IP**. Everything else, including
+frame capture, the sensor data and the connection between Halo's processes, stays on the machine.
 
-## Credits and licences
+## For widget developers
 
-The visual design is derived from the **Rainformer 3.1 HWiNFO Edition** Rainmeter skin by
-**Pul53dr1v3r**, used under [CC BY-NC 3.0](https://creativecommons.org/licenses/by-nc/3.0/). That
-licence is **non-commercial**: use, fork and share it freely, don't sell it. Details and what
-exactly is derived: [NOTICE.md](NOTICE.md).
+Halo publishes everything it measures through a documented shared-memory interface that any
+program running as the same user can read, without administrator rights and without any Halo
+code.
 
-Halo's own code is [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)
-([LICENSE](LICENSE)): it may be used, modified, forked and shared for any noncommercial purpose.
-Commercial use is not covered; a GitHub issue can be opened to discuss a commercial licence.
+- **[docs/metrics-protocol.md](docs/metrics-protocol.md)** — The layout, the rules a reader
+  follows, the control pipe, and a ready-to-use Python reader of about 60 lines.
+- **[docs/current-metrics-inventory.md](docs/current-metrics-inventory.md)** — What every metric
+  means, where it comes from and how often it changes.
+- **`src/Halo.Metrics`** — A .NET client library with no dependencies. `CollectorSession`
+  already follows every reader rule.
+- **`Halo.Collector.exe --dump`** prints a readable snapshot of every metric, and `--dump --json`
+  prints the same in the documented JSON shape.
 
-It stands on [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)
+## Building from source
+
+Building Halo requires Windows 10 or 11 (64-bit) and the .NET 10 SDK. No administrator rights are
+needed to build.
+
+1. Install the .NET 10 SDK. `global.json` pins the exact version.
+
+   ```powershell
+   winget install Microsoft.DotNet.SDK.10
+   ```
+
+2. Clone the repository and enter its folder:
+
+   ```powershell
+   git clone https://github.com/finaea/halo.git
+   cd halo
+   ```
+
+3. Build the release layout into `dist\app`:
+
+   ```powershell
+   tools\build.ps1
+   ```
+
+   The first build needs an internet connection once: it restores NuGet packages into the
+   project-local `tools\nuget-cache`, and downloads `PawnIO_setup.exe` from its official release,
+   checking it against a pinned SHA-256 (listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)).
+
+4. Register the two startup tasks against `dist\app` (one UAC prompt):
+
+   ```powershell
+   tools\install-dev.ps1
+   ```
+
+`tools\redeploy-halo.ps1` stops Halo, rebuilds and starts it again in the right order, and
+`tools\uninstall-dev.ps1` removes the startup tasks. `dotnet test Halo.sln` runs the test suite,
+which needs no special hardware.
+
+### Packaging
+
+`tools\build.ps1 -Installer` also builds the setup program, which needs
+[Inno Setup 6.4 or later](https://jrsoftware.org/isdl.php). Inno Setup can be installed for the
+current user without administrator rights:
+`innosetup-6.x.x.exe /VERYSILENT /CURRENTUSER /NORESTART`. `-Zip` adds the portable archive, and
+`-Clean` empties `dist\app` first.
+
+### Project layout
+
+```
+src/Halo.Collector   sensor providers, shared-memory writer, frame capture
+src/Halo.Widgets     rendering, widget definitions, window management, tray icon
+src/Halo.Settings    the Settings app, System check, first-run setup
+src/Halo.Shared      paths, settings models, widget catalogue, logging
+src/Halo.Metrics     the public client library: layout, reader, writer, control pipe
+tests/Halo.Tests     unit tests for the parts that need no hardware
+config/reference     an example of the settings files (Halo never reads this folder)
+tools/extracted      the original Rainmeter skins, transcribed to JSON as the design reference
+```
+
+More detail is available in:
+
+- [docs/architecture.md](docs/architecture.md) — how the three processes fit together and why
+- [docs/install-footprint.md](docs/install-footprint.md) — what installing Halo adds, and what ships inside the app folder
+- [docs/metrics-protocol.md](docs/metrics-protocol.md) — the shared-memory interface
+- [docs/current-metrics-inventory.md](docs/current-metrics-inventory.md) — the catalogue of metrics
+- [docs/perf-usage-breakdown.md](docs/perf-usage-breakdown.md) — measured CPU, GPU and memory use
+
+## License
+
+[PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) — see [LICENSE](LICENSE).
+
+The source may be used, modified, forked and shared for noncommercial purposes, including personal
+projects, study, research, charities, schools and public institutions. Commercial use is not
+covered; a GitHub issue can be opened to discuss a commercial licence.
+
+The visual design is based on the **Rainformer 3.1 HWiNFO Edition** Rainmeter skin by
+**Pul53dr1v3r**, used under [CC BY-NC 3.0](https://creativecommons.org/licenses/by-nc/3.0/), which
+is also noncommercial. [NOTICE.md](NOTICE.md) explains exactly what is based on it.
+
+Halo builds on [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)
 (MPL-2.0), [Intel PresentMon](https://github.com/GameTechDev/PresentMon) (MIT),
-[PawnIO](https://github.com/namazso/PawnIO) (GPL-2.0-or-later, bundled as a separate program),
+[PawnIO](https://github.com/namazso/PawnIO) (GPL-2.0-or-later, included as a separate program),
 [Vortice.Windows](https://github.com/amerkoleci/Vortice.Windows) (MIT),
-[WPF-UI](https://github.com/lepoco/wpfui) (MIT) and a few more. Every one of them, with its licence
-and what obligation that creates: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+[WPF-UI](https://github.com/lepoco/wpfui) (MIT) and a few more. These keep their own licences, and
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) lists each one with what it requires.

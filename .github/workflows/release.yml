@@ -85,8 +85,8 @@ jobs:
       # After the upload on purpose: the scan takes a couple of minutes and can hang on a
       # VirusTotal outage, and the artefacts should already be safe by then.
       #
-      # Both files are well over VirusTotal's 32 MB direct-upload limit (~57 MB installer,
-      # ~75 MB zip), so the action fetches a one-shot URL from /files/upload_url first and
+      # Both files are well over VirusTotal's 32 MB direct-upload limit (~56 MB installer,
+      # ~77 MB zip, measured on 1.0.3), so the action fetches a one-shot URL from /files/upload_url first and
       # POSTs there instead - two HTTP requests per file, against a public-API budget of
       # 4 requests/minute and 500/day (https://docs.virustotal.com/reference/public-vs-premium-api).
       # request_rate throttles per *file*, not per request, so it is 2 here and not 4.
@@ -117,15 +117,26 @@ jobs:
           $v = '${{ steps.version.outputs.version }}'
           # Single-quoted here-string: nothing in here is escaped or interpolated, so the
           # markdown backticks survive. VERSION is substituted afterwards.
+          # Plain ASCII only ('-' and '->', never an em dash or an arrow glyph): the runner writes
+          # this block to a script file, and non-ASCII text there is an encoding risk for no gain.
           $notes = @'
           Halo VERSION
 
-          - `Halo-Setup-VERSION.exe` - installer. One UAC prompt; offers the PawnIO driver and autostart.
-          - `Halo-VERSION-win-x64.zip` - portable. Unzip and run; config and logs stay in `.\data`.
+          ## Downloads
 
-          Both are **unsigned**, so SmartScreen warns on first run (More info -> Run anyway).
-          Requirements, what works without PawnIO or without an NVIDIA GPU, and the licences are in
-          the README.
+          - `Halo-Setup-VERSION.exe` - the installer. It asks for one UAC approval, and offers the PawnIO driver and Start with Windows.
+          - `Halo-VERSION-win-x64.zip` - the portable copy. It runs from any folder and keeps its settings and logs in a `data` folder beside the programs.
+
+          ## Install
+
+          1. Download `Halo-Setup-VERSION.exe` and open it.
+          2. SmartScreen may appear because Halo is not code signed. **More info -> Run anyway** allows it to open.
+          3. Keep **PawnIO** selected for CPU temperatures, fan speeds and drive temperatures, and **Start with Windows** to have Halo start at every sign-in.
+          4. When setup finishes, Settings opens on **System check**, which shows what the hardware reports and offers a starting layout.
+
+          To use the portable copy instead, unzip it, run `Halo.Collector.exe` as administrator, then run `Halo.Widgets.exe`.
+
+          Requirements, what works without PawnIO or an NVIDIA GPU, and the licence are described in the [README](${{ github.server_url }}/${{ github.repository }}#readme).
           '@
           $lines = @($notes -replace 'VERSION', $v)
 
@@ -142,7 +153,7 @@ jobs:
           # Split-Path.
           $vt = '${{ steps.vt.outputs.analysis }}'
           if ($vt) {
-            $lines += '**VirusTotal**'
+            $lines += '## VirusTotal'
             $lines += ''
             foreach ($pair in $vt -split ',') {
               $name, $url = $pair -split '=', 2
@@ -152,13 +163,13 @@ jobs:
             # Measured on 1.0.3: 1/68 on the installer and 1/66 on the zip, the lone hit
             # being one ML engine returning a bare "MALICIOUS" with no family name. The
             # bundled PawnIO_setup.exe is 0/70 on its own, so it is not the driver.
-            $lines += 'Expect the odd lone hit from a machine-learning engine. These are unsigned,'
-            $lines += 'brand-new binaries wrapping a ~175 MB self-contained .NET runtime, and a'
-            $lines += 'big unsigned bundle with no reputation is a shape static classifiers dislike.'
-            $lines += 'Every mainstream engine reads them as clean. A cluster of agreeing,'
-            $lines += 'named-family detections would be a different story - please open an issue.'
+            $lines += 'A single unnamed detection from one machine-learning engine is expected. These'
+            $lines += 'are new, unsigned programs that include a ~175 MB .NET runtime, and automated'
+            $lines += 'scanners are often suspicious of that combination. The major engines report'
+            $lines += 'both files as clean. Several engines agreeing on a named threat would be a'
+            $lines += 'different matter, and a GitHub issue about it would be appreciated.'
           } else {
-            $lines += '**VirusTotal** - no analysis for this release.'
+            $lines += '**VirusTotal** - no analysis is available for this release.'
           }
 
           ($lines -join "`n") | Out-File release-notes.md -Encoding utf8

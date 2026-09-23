@@ -1,23 +1,27 @@
 # Halo metrics protocol v2
 
 Everything the Halo collector measures is published into one shared-memory section that any
-process on the machine can read — no Halo code required, no permission beyond being logged in as
-the same user. This document is the contract. It is written from the implementation in
+process on the machine can read. No Halo code is required, and no permission beyond being signed in
+as the same user. This document is the contract. It is written from the implementation in
 [`src/Halo.Metrics`](../src/Halo.Metrics); if the two ever disagree, the code is right and this
-file is a bug.
+document needs fixing.
 
-**The catalogue of metrics** (what each name means, where the number comes from, how fresh it is)
-lives in [current-metrics-inventory.md](current-metrics-inventory.md). This file is the layout.
+**The catalogue of metrics** — what each name means, where the number comes from and how fresh it
+is — is in [current-metrics-inventory.md](current-metrics-inventory.md). This document covers the
+layout.
 
 ## Quick start
 
-Three ways to consume it, easiest first:
+There are three ways to read it, easiest first:
 
-| Way | For |
+| Way | Suited to |
 | --- | --- |
-| `Halo.Collector.exe --dump --json` | scripts, one-shot reads, debugging |
-| `Halo.Metrics.dll` (.NET, no dependencies) | .NET widgets and tools — `CollectorSession` implements every rule below |
-| Map the section directly | any language; ~60 lines, see the Python example at the end |
+| `Halo.Collector.exe --dump --json` | Scripts, one-off reads, debugging |
+| `Halo.Metrics.dll` (.NET, no dependencies) | .NET widgets and tools — `CollectorSession` follows every rule below |
+| Mapping the section directly | Any language; about 60 lines, as in the Python example at the end |
+
+`Halo.Metrics.dll` is part of Halo and is covered by the same
+[PolyForm Noncommercial 1.0.0](../LICENSE) licence as the rest of the code.
 
 ## Names
 
@@ -28,16 +32,17 @@ Three ways to consume it, easiest first:
 | Control pipe | `\\.\pipe\Halo.Control.v2` |
 
 All three are versioned together. A major-version change means a new section name, so a v1
-consumer can never accidentally read a v2 section (or wake on its event).
+reader can never read a v2 section by mistake, or wake on its event.
 
 The section's DACL grants `GENERIC_READ` to Everyone with a medium mandatory label, which is what
-lets a normal-integrity process read a section created by the elevated collector.
+allows a normal-integrity process to read a section created by the elevated collector.
 
 ## Layout
 
-Little-endian, x64. **Every offset and capacity below is also written into the header — read them
-from there, never from these numbers.** That is the whole point of the header: a minor version may
-move or grow regions, and a reader that trusts the header keeps working.
+Little-endian, x64. **Every offset and capacity below is also written into the header, and a
+reader should take them from there rather than from these numbers.** That is the purpose of the
+header: a minor version may move or grow regions, and a reader that follows the header keeps
+working.
 
 ```
 +0        Header            256 B
@@ -101,17 +106,18 @@ move or grow regions, and a reader that trusts the header keeps working.
 | 92–127 | — | reserved |  |
 
 `nominalRateHz` is not always the provider's poll rate: `fps.app.name` is refreshed once a second
-inside a 40 Hz drain, `net.ip.external` every few minutes. It is there to bound a consumer's own
-refresh rate — polling a 1 Hz metric at 10 Hz just burns CPU. **`nominalRateHz == 0` means the metric has no
-cadence at all**: it is written once when the hardware is discovered (semantics 6, `static`) and
-again only if that hardware is re-enumerated — re-reading it is pointless, and its age is expected
-to grow without bound. Everything the collector re-reads on each poll carries a non-zero rate.
+inside a 40 Hz poll, and `net.ip.external` every few minutes. It exists so a reader can limit its
+own refresh rate — polling a 1 Hz metric at 10 Hz only wastes CPU. **`nominalRateHz == 0` means the
+metric has no cadence at all**: it is written once when the hardware is discovered (semantics 6,
+`static`) and again only if that hardware is enumerated again. Reading it repeatedly gains nothing,
+and its age is expected to keep growing. Everything the collector reads on each poll has a non-zero
+rate.
 
-`effectiveRateHz` is that same number scaled by how well the provider is actually keeping up: the
+`effectiveRateHz` is the same number scaled by how well the provider is actually keeping up. The
 collector measures each provider's real poll rate over a rolling window (long enough for at least
 five polls) and republishes `nominal × measured ÷ configured` for every metric that provider owns.
-A healthy provider reads effective ≈ nominal; one whose sweep overruns its period reads lower, and
-that is the honest signal a consumer should trust over the constant.
+A healthy provider shows effective ≈ nominal; one whose poll takes longer than its period shows a
+lower number, and that is the more accurate signal for a reader to rely on.
 
 ### Value entry (16 B)
 
@@ -121,7 +127,7 @@ that is the honest signal a consumer should trust over the constant.
 | 8 | i64 | `timestampQpc` — **0 means N/A** |
 
 The writer stores the value first and the timestamp second with a release store, so a reader that
-loads the timestamp first (acquire) and then the value can never see a torn pair on x64.
+loads the timestamp first (acquire) and then the value can never see a half-written pair on x64.
 
 ### String entry (72 B)
 
@@ -131,14 +137,14 @@ loads the timestamp first (acquire) and then the value can never see a torn pair
 | 4 | u32 | `len` — bytes in use |
 | 8 | byte[64] | UTF-8 |
 
-Seqlock: read `seq`, bail if odd, copy, re-read `seq`, retry if it changed.
+Seqlock: read `seq`, stop if it is odd, copy, read `seq` again, and retry if it changed.
 
 A string metric **also has a value entry**, and that entry's `timestampQpc` is what says whether the
-string is live — it is the only thing the collector's staleness marker touches. So rule 3 applies
-here exactly as it does to a double: **check the timestamp before trusting the payload**, or a
-metric the collector has marked N/A (the public IP after the user turns external-IP lookup off, a
-removed drive's label, the last game's name after it exits) keeps reading back as a current value.
-The sample reader below gets this right; Halo's own C# reader did not until 2026-09-14.
+string is current — it is the only thing the collector's staleness marker changes. So rule 3 applies
+here exactly as it does to a double: **the timestamp has to be checked before the text is used**.
+Otherwise a metric the collector has marked N/A — the external IP after its lookup is turned off, a
+removed drive's label, the last game's name after it closes — keeps reading back as a current
+value. The sample reader below handles this correctly.
 
 ### Provider entry (64 B)
 
@@ -171,10 +177,10 @@ Frame flags: `1` displayed · `2` dropped · `4` application frame · `8` genera
 `16` repeated · `32` provisional (seen at present time by the low-latency tap; its fate is never
 revised, so never mix provisional and resolved entries in one graph).
 
-Entries are written, then `frameCursor` is published. Read `[lastSeenCursor, frameCursor)`; a reader
-that fell behind by more than the capacity has lost the oldest frames and should start from
-`frameCursor - capacity`. The entries themselves carry no lock, so a slow copy can be overtaken
-mid-read — see reader rule 5.
+Entries are written, then `frameCursor` is published. A reader takes `[lastSeenCursor,
+frameCursor)`. A reader that has fallen behind by more than the capacity has lost the oldest frames
+and should start from `frameCursor - capacity`. The entries themselves have no lock, so the writer
+can overtake a slow copy part-way through — see reader rule 5.
 
 ## Enums
 
@@ -188,7 +194,7 @@ semantics: 0 latest        instantaneous read at poll time
            1 intervalAvg   mean over the gap between two polls (Δcounter ÷ Δt)
            2 rollingWindow sliding window; see windowMs
            3 cumulative    since session start (or since a reset command)
-           4 runningMax    session extremum, latched until reset-max
+           4 runningMax    highest value this session, held until reset-max
            5 calc          arithmetic over other metrics
            6 static        written once at discovery (names, counts, capabilities)
 
@@ -200,30 +206,32 @@ flags:     1 has-max-companion (a "<name>.max" metric exists)
 
 ## The five reader rules
 
-1. **Check magic and major version.** A different major means a different layout. Refuse; do not
-   guess.
+1. **Check the magic number and major version.** A different major version means a different
+   layout. The reader should refuse rather than guess.
 2. **Watch `collectorStartQpc`.** A restarted collector reuses the same section name and rebuilds
-   the registry from scratch, so every cached name→index mapping becomes wrong — and wrong here
-   means silently reading a different metric. When the value changes, drop the cache and
-   re-resolve. (Ignoring this caused a real corruption bug on 2026-07-19.)
-3. **`timestampQpc == 0` is N/A**, and that is different from old: a metric with a timestamp has a
-   real value, which may simply be stale. Age is
-   `(QueryPerformanceCounter() - timestampQpc) / qpcFrequency`; how stale is too stale is the
-   consumer's call.
-4. **Strings need the seqlock retry** above.
-5. **Re-check `frameCursor` after copying frames.** The ring has no per-entry lock: bounding the
-   read to the capacity *before* the copy is not enough, because the writer can lap the reader
-   during it. Snapshot `frameCursor` again afterwards and discard everything below
-   `frameCursor₂ - capacity` — those slots now hold newer frames, not the ones that were asked for.
-   Without this a reader that stalls mid-copy (or just reads a full ring at 40 Hz+) hands its caller
-   a silently reordered timeline.
+   the registry from the beginning, so every cached name→index mapping becomes wrong — and wrong
+   here means quietly reading a different metric. When the value changes, the reader drops its
+   cache and looks every name up again. (Ignoring this caused a real data mix-up on 2026-07-19.)
+3. **`timestampQpc == 0` means N/A**, which is different from old: a metric with a timestamp has a
+   real value, which may simply be stale. Its age is
+   `(QueryPerformanceCounter() - timestampQpc) / qpcFrequency`; how old is too old is up to the
+   reader.
+4. **Strings need the seqlock retry** described above.
+5. **Check `frameCursor` again after copying frames.** The ring has no per-entry lock, so limiting
+   the read to the capacity *before* the copy is not enough: the writer can go all the way round
+   the ring during it. The reader takes `frameCursor` again afterwards and discards everything
+   below `frameCursor₂ - capacity`, because those slots now hold newer frames rather than the ones
+   it asked for. Without this, a reader that pauses mid-copy (or simply reads a full ring at 40 Hz
+   or more) passes its caller a timeline that is quietly out of order.
 
-Plus one for liveness: the collector is gone if `heartbeatQpc` has not moved for several seconds
-*and* `collectorPid` no longer exists. Heartbeat alone can lag on a busy machine.
+One more rule covers liveness: the collector is gone if `heartbeatQpc` has not moved for several
+seconds *and* `collectorPid` no longer exists. The heartbeat alone can fall behind on a busy
+machine.
 
 ## Control pipe
 
-`\\.\pipe\Halo.Control.v2`, one-way, newline-delimited UTF-8, fire and forget. Write a line, close.
+`\\.\pipe\Halo.Control.v2` is one-way, newline-separated UTF-8, with no reply. A client writes a
+line and closes the handle.
 
 | Command | Effect |
 | --- | --- |
@@ -234,12 +242,12 @@ Plus one for liveness: the collector is gone if `heartbeatQpc` has not moved for
 | `ping` | no-op liveness check |
 | `quit` | shut the collector down cleanly |
 
-Unknown lines are logged and ignored, so adding commands is backwards-compatible.
+Unknown lines are logged and ignored, so adding commands never breaks an older client.
 
-`quit` is the only way to stop the collector that runs its shutdown path. Terminating the process
-instead leaves providers undisposed, and a stranded PresentMon ETW session denies the next collector
-its frame data. The Halo tray sends it on exit; a third-party tool that starts a collector should do
-the same.
+`quit` is the only way to stop the collector that runs its shutdown path. Ending the process
+instead skips that cleanup, and a PresentMon ETW session left behind keeps the next collector from
+getting frame data. Halo's **Exit Halo** menu item sends `quit`; a third-party tool that starts a
+collector should do the same.
 
 ## Diagnostics
 
@@ -253,7 +261,7 @@ The JSON shape:
 ```jsonc
 {
   "header":  { "versionMajor": 2, "versionMinor": 0, "section": "Local\\Halo.Metrics.v2",
-               "collectorVersion": "1.0.0", "collectorPid": 1234, "heartbeatAgeS": 0.13,
+               "collectorVersion": "1.0.3", "collectorPid": 1234, "heartbeatAgeS": 0.13,
                "qpcFrequency": 10000000, "metricCount": 246, "totalSize": 364800 },
   "providers": [ { "index": 0, "name": "builtin", "state": "ok", "needsElevation": false,
                    "rateHz": 1, "lastPollMs": 1.98, "lastError": "" } ],
@@ -264,12 +272,12 @@ The JSON shape:
 }
 ```
 
-String metrics carry `"text"` instead of `"value"`. A metric that has never been written (or is
-marked N/A) has `"value": null, "stale": true`.
+String metrics carry `"text"` instead of `"value"`. A metric that has never been written, or is
+marked N/A, has `"value": null, "stale": true`.
 
 ## Reading it from Python
 
-No dependencies, ~60 lines. Lists every metric with its value and age.
+No dependencies and about 60 lines. It lists every metric with its value and age.
 
 ```python
 import ctypes, mmap, struct, time
@@ -334,10 +342,10 @@ for i in range(count):
 
 ## Compatibility promise
 
-- **Same major version = same rules.** Regions may move and capacities may grow; the header says
-  where everything is. New metrics, new providers, new enum values may appear at any time — a
-  reader should ignore what it does not recognise.
-- **A breaking change gets a new major version and a new section name**, so old consumers see
-  "collector not running" instead of garbage.
+- **The same major version means the same rules.** Regions may move and capacities may grow; the
+  header says where everything is. New metrics, providers and enum values may appear at any time,
+  and a reader should ignore anything it does not recognise.
+- **A breaking change gets a new major version and a new section name**, so older readers see
+  "collector not running" instead of meaningless data.
 - Metric *names* are not part of the layout contract, but renaming one is treated as a breaking
-  change for consumers and will be called out in the release notes.
+  change for readers and will be announced in the release notes.
