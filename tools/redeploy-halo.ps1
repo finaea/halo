@@ -6,8 +6,9 @@
 .DESCRIPTION
     Halo runs as three cooperating processes and getting them to pick up a fresh build by
     hand is fiddly, because:
-      * The tray "Exit Halo" stops Halo.Widgets ONLY - the collector keeps running as the
-        \Halo\Collector scheduled task and keeps the dist\app binaries locked.
+      * The tray "Exit Halo" stops Halo.Widgets and asks the collector to quit over the control
+        pipe - but that is fire-and-forget, and a collector that has not exited yet still holds
+        the dist\app binaries locked.
       * Halo.Widgets has a watchdog that re-launches the collector task within ~1-5 s of it
         going stale, so stopping the collector while widgets is still up just resurrects it.
       * The bundled PresentMon service is a CHILD of the collector but does not die with it,

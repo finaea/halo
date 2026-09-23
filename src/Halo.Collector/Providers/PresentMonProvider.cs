@@ -80,9 +80,9 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
     private MetricSink? _sink;
     private DateTime _nextNgxScan = DateTime.MinValue;
     private int _ngxScannedPid;
-    private long _nextSlowPublishQpc; // 1 Hz cadence for app name/pid/refresh (constants between target changes)
-    private long _idleSinceQpc;       // 0 while a target is tracked
-    private bool _fpsIdleMode;        // relaxed flush + muted tap after 10 s without a target
+    private long _nextSlowPublishQpc; // 1 Hz cadence for app name/refresh (constants between target changes)
+    private long _idleSinceQpc;       // 0 once the current target has produced frames
+    private bool _fpsIdleMode;        // relaxed flush + muted tap after 10 s without frames
 
     public bool Initialize(MetricSink sink)
     {
@@ -124,7 +124,7 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
             MetricSemantics.RollingWindow, windowMs: (int)(InputLatencyWindowS * 1000));
         sink.Register(MetricNames.LatencyAllInputMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz,
             MetricSemantics.RollingWindow, windowMs: (int)(InputLatencyWindowS * 1000));
-        // latency.pcl.ms is owned by PclStatsProvider (true marker-based). PresentMon only
+        // latency.pc.ms is owned by PclStatsProvider (true marker-based). PresentMon only
         // contributes the present->displayed (P2D) span it uniquely measures.
         sink.Register(MetricNames.FpsDisplayLatencyMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz);
         sink.Register(MetricNames.DlssModel, MetricType.String, MetricUnit.Text, Name, 0.5);
@@ -253,7 +253,7 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
         else
         {
             // "no 3D app" idle state (plan §7): stale the fps metrics + our own latency
-            // contributions (NOT latency.pcl.ms — PclStatsProvider owns that independently)
+            // contributions (NOT latency.pc.ms — PclStatsProvider owns that independently)
             sink.MarkAllStale("fps.");
             sink.MarkStale(MetricNames.LatencyClickMs);
             sink.MarkStale(MetricNames.LatencyAllInputMs);
@@ -310,7 +310,7 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
         }
     }
 
-    /// <summary>sdk transport: pull queued frames into stats/ring (console pump pushes instead).</summary>
+    /// <summary>sdk transport: pull queued frames into stats/ring.</summary>
     private void DrainSdkFrames()
     {
         int pid = _targetPid;

@@ -68,10 +68,10 @@ public sealed class LogRotationTests : LogTestBase
     ///
     /// <para><b>How the sweep is reached.</b> <c>Sweep</c> is private and <c>Log.Init</c> is its
     /// only caller. The process name contains a <c>|</c> deliberately: the sweep runs before the
-    /// destination is opened (<c>Log.cs:128</c> vs <c>:137</c>), so an unopenable filename
+    /// destination is opened (<c>Log.cs:138</c> vs <c>:147</c>), so an unopenable filename
     /// exercises the sweep and then makes <c>Init</c> return at its "file logging is off" branch.
     /// That matters because a successful <c>Init</c> starts a <b>second</b> pump thread
-    /// unconditionally (<c>Log.cs:144-145</c>) which would live for the rest of the test process
+    /// unconditionally (<c>Log.cs:154-155</c>) which would live for the rest of the test process
     /// and interleave batches with the first, breaking every ordering assertion in this suite. It
     /// also gets the degradation path asserted for free.</para>
     ///
@@ -95,7 +95,7 @@ public sealed class LogRotationTests : LogTestBase
         string recent = Seed(sweepDir, "widgets-20260917-101500-3333.log", TimeSpan.FromHours(-2));
 
         // Stand in for another instance still writing: the logger opens its own file exactly like
-        // this (Log.cs:391), and FileShare.Read does not include Delete, so the sweep cannot
+        // this (Log.cs:441), and FileShare.Read does not include Delete, so the sweep cannot
         // remove it.
         using (new FileStream(lockedAncient, FileMode.Append, FileAccess.Write, FileShare.Read))
         {

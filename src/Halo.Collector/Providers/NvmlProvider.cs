@@ -8,7 +8,8 @@ namespace Halo.Collector.Providers;
 /// <summary>
 /// GPU fast path via NVML (nvml.dll ships with the driver; ~0.2–1 ms per call, cap 20 Hz).
 /// Covers temp/usage/VRAM/fan%/clocks/power for <b>every</b> NVIDIA device on the machine.
-/// GPU voltage + fan RPM come from the LHM GPU part (NVAPI) — NVML has no public voltage API.
+/// GPU voltage comes from the LHM GPU part (NVAPI) — NVML has no public voltage API. Fan RPM is
+/// read here only on drivers that export nvmlDeviceGetFanSpeedRPM; the LHM GPU part feeds it too.
 /// Vendor swap = replace this module (plan §13).
 ///
 /// Metrics are published per device index (<c>gpu.0.temp.c</c>, …) with <c>gpu.count</c> saying
@@ -45,7 +46,7 @@ public sealed class NvmlProvider : ISensorProvider
         /// Waking from S3 makes NVML answer with garbage while the driver reinitializes — it
         /// returns NVML_SUCCESS and a nonsense reading (observed 2026-08-30 21:27:13, one second
         /// into a resume: 371,940 W on a card whose own limit is 310 W). MetricSink latches any
-        /// sample as the session max forever, so one of those poisons gpu.power.w.max until a
+        /// sample as the session max forever, so one of those poisons gpu.&lt;i&gt;.power.w.max until a
         /// manual reset. The card reports its own limit, so the bound scales to any GPU.
         /// </summary>
         public ulong PowerCeilingMw;
@@ -62,8 +63,8 @@ public sealed class NvmlProvider : ISensorProvider
     internal readonly record struct NvDevice(uint NvmlIndex, string BusId, string Name);
 
     /// <summary>
-    /// Enumerate every NVIDIA device, ordered by PCI bus id. Called once by
-    /// <see cref="GpuIndexSpace"/>; safe when nvml.dll is absent (returns an empty list).
+    /// Enumerate every NVIDIA device, ordered by PCI bus id. Called by <see cref="GpuIndexSpace"/>
+    /// (once, and again on a rescan); safe when nvml.dll is absent (returns an empty list).
     /// Bus-id order rather than NVML's own index order, so the numbering does not move when the
     /// driver reorders devices between boots.
     /// </summary>
@@ -281,8 +282,8 @@ public sealed class NvmlProvider : ISensorProvider
         => _fanRpmExport ??= NativeLibrary.TryLoad("nvml.dll", out nint lib) &&
                              NativeLibrary.TryGetExport(lib, "nvmlDeviceGetFanSpeedRPM", out _);
 
-    /// <summary>"domain:bus:device.function" from the NVML PCI record — the same shape nvidia-smi
-    /// prints, and what makes the index order reproducible.</summary>
+    /// <summary>"domain:bus:device" from the NVML PCI record — what makes the index order
+    /// reproducible.</summary>
     private static string PciBusId(ref nvmlPciInfo pci)
         => $"{pci.domain:x4}:{pci.bus:x2}:{pci.device:x2}";
 

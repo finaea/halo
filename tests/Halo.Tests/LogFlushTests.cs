@@ -154,15 +154,15 @@ public sealed class LogFlushTests : LogTestBase
     /// full because the arithmetic is the kind that gets "simplified" back into being wrong.
     ///
     /// <para><c>Flush</c> compared <c>target = _accepted</c> against
-    /// <c>done = _persisted + _droppedQueueFull + _droppedWriteFailed</c> (<c>Log.cs:436-447</c>),
+    /// <c>done = _persisted + _droppedQueueFull + _droppedWriteFailed</c>,
     /// but <c>_droppedQueueFull</c> counts records that were <b>never in</b> <c>_accepted</c>: the
-    /// Debug shed path increments it without touching <c>_accepted</c> (<c>Log.cs:239-243</c>), and
+    /// Debug shed path increments it without touching <c>_accepted</c> (<c>Log.cs:319-323</c>), and
     /// the queue-full path increments it and then decrements <c>_accepted</c> back down
-    /// (<c>Log.cs:246-248</c>). So every shed record inflates <c>done</c> by one against a target it
+    /// (<c>Log.cs:326-328</c>). So every shed record inflates <c>done</c> by one against a target it
     /// never contributed to, and <c>Flush</c> returns <c>Reached == true</c> with up to that many
     /// records still sitting in the queue — the exact failure this feature was built to kill,
-    /// reintroduced through the drop accounting. <c>DrainBefore</c> shares the arithmetic
-    /// (<c>Log.cs:262-266</c>), so <c>Durable</c>'s ordering guarantee dissolves after a shed too.</para>
+    /// reintroduced through the drop accounting. <c>DrainBefore</c> carried its own copy of the
+    /// same sum, so <c>Durable</c>'s ordering guarantee dissolved after a shed too.</para>
     ///
     /// <para><b>Measured 2026-09-17 by running this very test with the Skip removed:</b>
     /// <c>Flush(20000)</c> returned "flushed (6072 persisted, 722 dropped)" while Health still read
@@ -173,8 +173,8 @@ public sealed class LogFlushTests : LogTestBase
     /// the size of the lie scales with how much was shed.</para>
     ///
     /// <para>Only reachable once something has been shed, which is why every other test in this
-    /// file keeps its drop count at zero and why the shedding tests poll the file rather than
-    /// trusting <c>Flush</c>.</para>
+    /// file keeps its drop count at zero and why the shedding tests were written to poll the file
+    /// rather than trust <c>Flush</c>.</para>
     ///
     /// <para><b>The fix:</b> <c>_droppedQueueFull</c> no longer appears on the discharge side.
     /// Those records are rejected *before* acceptance, so they were never a debt to settle. Only
@@ -204,7 +204,7 @@ public sealed class LogFlushTests : LogTestBase
 
         Assert.True(result.Reached, $"{result} · {Log.Health}");
 
-        // This is the assertion that fails: Reached must mean nothing is left outstanding.
+        // This is the assertion that failed before the fix: Reached must mean nothing is left outstanding.
         Assert.True(stillQueued == 0,
             $"Flush returned {result} after {flushMs} ms, but {stillQueued} of the {queuedBefore} "
             + $"queued records are still unwritten. {Log.Health}");

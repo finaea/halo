@@ -46,8 +46,9 @@ public sealed unsafe class WidgetWindow : IDisposable
     /// exists, otherwise the fallback the packer placed it on.</summary>
     public MonitorInfo HostMonitor { get; private set; } = MonitorInfo.None;
 
-    /// <summary>True while the configured monitor is missing. The position and scale used are
-    /// then in memory only; widgets.json still holds the real layout (hardware plan H6).</summary>
+    /// <summary>True while the configured monitor is missing, or while an arrange is pending — the
+    /// packer places it. Outside an arrange the position and scale used are in memory only;
+    /// widgets.json still holds the real layout (hardware plan H6).</summary>
     public bool Displaced { get; private set; }
 
     private int? _packedX, _packedY;
@@ -273,7 +274,7 @@ public sealed unsafe class WidgetWindow : IDisposable
     /// <summary>
     /// Final screen position for the current config. KeepOnScreen clamps within the monitor
     /// that best contains the target rect — not the configured monitor, which for legacy
-    /// configs (monitor="") is always the first one and would drag cross-monitor widgets
+    /// configs (monitor="") resolves to the primary and would drag cross-monitor widgets
     /// back to it. The position guard must use this same math or it fights the clamp.
     /// </summary>
     public (int X, int Y) TargetScreenPos()
@@ -583,8 +584,8 @@ public sealed unsafe class WidgetWindow : IDisposable
     /// Adopt a changed config without rebuilding the window (settings plan §Live-apply). Anything
     /// that only changes values — rate, graph history/height/style, colours, labels, warn points,
     /// scale, placement, opacity, z-mode, click-through, title — lands here; only a type change,
-    /// a structural option or a metric show/graph toggle costs a rebuild, and then App replaces
-    /// this window instead of calling this.
+    /// a structural option, a metric show/graph toggle or a width/showTitle/fontFamily change
+    /// costs a rebuild, and then App replaces this window instead of calling this.
     /// </summary>
     public void ApplyInPlace(WidgetInstance next, AppSettings settings, MonitorInfo monitor, bool displaced,
         Theme resolved, double maxRateHz)

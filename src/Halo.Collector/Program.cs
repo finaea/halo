@@ -45,10 +45,11 @@ if (args.Contains("--migrate-config"))
     }
 }
 
-// --pm-smoketest [pid]: verify the PresentMon SDK transport end-to-end (needs admin unless a
-// PresentMon service is already running). Tracks the given pid (default: dwm, which presents
-// every vblank) and prints consumed frame counts + data freshness for 5 s. Safe to run while
-// a collector instance is up — it attaches to the same service.
+// --pm-smoketest [pid]: verify the PresentMon SDK transport end-to-end (attach only: needs a
+// PresentMon service already running, an installed one or a collector's child — it never spawns
+// one). Tracks the given pid (default: dwm, which presents every vblank) and prints consumed
+// frame counts + data freshness for 5 s. Safe to run while a collector instance is up — it
+// attaches to the same service.
 if (args.Contains("--pm-smoketest"))
 {
     Log.Init("pm-smoketest", alsoConsole: true);
@@ -122,7 +123,7 @@ if (!isNew)
 // Crash handlers first: this is a WinExe, so the runtime's default "print the unhandled
 // exception to stderr" writes to a console that does not exist. Without these a fault anywhere
 // below leaves no trace at all — which is exactly what happened on 2026-09-17.
-// Qualified: bare `Diagnostics` binds to the System.Diagnostics namespace here, not to the class.
+// ProcessDiagnostics, not Diagnostics: a bare `Diagnostics` binds to the System.Diagnostics namespace here.
 ProcessDiagnostics.InstallCrashHandlers();
 Log.Init("collector", alsoConsole: args.Contains("--console"));
 // Opens this instance's session record AND classifies every previous one, so a start that
@@ -183,7 +184,7 @@ writer.MarkReady();
 // server stops listening before the event it signals goes away.
 using var stop = new ManualResetEventSlim(false);
 
-// Which of the four stop triggers actually fired. All four used to funnel into one
+// Which of the three stop triggers actually fired. All three used to funnel into one
 // "collector shutting down" line, so a log could not tell a deliberate `quit` from a
 // Stop-Process — and on 2026-09-17 five starts in one day left no way to ask.
 string stopReason = "";

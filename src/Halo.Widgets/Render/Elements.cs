@@ -375,7 +375,7 @@ public sealed class GraphEl : Element
 
         if (FrameSample != null)
         {
-            // frames arrive in small timestamped batches (≤17 ms resolved lane, per-flush tap
+            // frames arrive in small timestamped batches (≤25 ms resolved lane, per-flush tap
             // lane) and are drawn the tick they land — the 1.25 s pacing queue that smoothed
             // the old console transport's 1 s stdout bursts is gone with the transport
             foreach (ref readonly var f in ctx.Metrics.NewFrames)

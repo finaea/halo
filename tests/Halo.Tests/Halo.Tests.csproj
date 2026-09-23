@@ -3,9 +3,10 @@
      reach dist\app: that script names the three shipping exes one by one. `dotnet build Halo.sln`
      and `dotnet test Halo.sln` both pick it up because it is in the solution.
 
-     Scope: the pure, I/O-free parts of Halo that can be exercised without a collector, a section
-     or a GPU. Anything that needs live hardware or the PresentMon ETW session stays a hand check
-     (the collector's pm-smoketest / tap-smoketest switches). -->
+     Scope: the parts of Halo that can be exercised without a running collector or a GPU —
+     frame-stat arithmetic, section layout (on private section names), provider freshness, config
+     load/write and the logger. Anything that needs live hardware or the PresentMon ETW session
+     stays a hand check (the collector's pm-smoketest / tap-smoketest switches). -->
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
@@ -53,8 +54,8 @@
        this output folder (measured 2026-09-17), so the marker moves the data folder to
        bin\...\data and each worktree's tests get an isolated one.
 
-       Nothing else in the suite reads Paths, and the only other consumers of IsPortable are the
-       three exes' entry points, which the tests never run. -->
+       Beyond SessionLog, the suite reaches IsPortable only through Log.Init, which picks the file
+       cap and sweep window by it; the other readers are code the tests never run. -->
   <ItemGroup>
     <Content Include="portable.marker" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

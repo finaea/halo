@@ -163,8 +163,8 @@ public class FrameStatsTests
     /// <summary>
     /// A frame can be flagged <c>Displayed</c> while carrying <c>DisplayedFtMs == 0</c>: the flag
     /// is set from <i>either</i> display-side value
-    /// (<c>PresentMonSdkSource.cs:287</c> — <c>dispLat &gt; 0 || dispFt &gt; 0</c>) while the value
-    /// comes from <c>dispFt</c> alone (<c>:297</c>, NaN → 0). So `dispN1` really can count fewer
+    /// (<c>PresentMonSdkSource.cs:292</c> — <c>dispLat &gt; 0 || dispFt &gt; 0</c>) while the value
+    /// comes from <c>dispFt</c> alone (<c>:302</c>, NaN → 0). So `dispN1` really can count fewer
     /// frames than are flagged displayed.
     ///
     /// That loss must not move the rate, and this is the property that makes the mean-of-intervals

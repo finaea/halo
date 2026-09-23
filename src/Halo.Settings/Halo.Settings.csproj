@@ -10,9 +10,10 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
     <ApplicationIcon>..\..\assets\halo.ico</ApplicationIcon>
-    <!-- asInvoker + PerMonitorV2 + Win10/11 supportedOS, like the other two exes. Without a
-         manifest this process would silently get UAC file virtualization instead of a clean
-         failure when it writes somewhere it may not. -->
+    <!-- asInvoker + PerMonitorV2 + Win10/11 supportedOS, like Halo.Widgets (the collector has
+         no window, so its manifest skips PerMonitorV2). Without a manifest this process would
+         silently get UAC file virtualization instead of a clean failure when it writes somewhere
+         it may not. -->
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>

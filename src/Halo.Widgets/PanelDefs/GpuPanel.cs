@@ -9,8 +9,8 @@ namespace Halo.Widgets.PanelDefs;
 /// (temp/usage/VRAM%/fan%).
 ///
 /// Bound to one device by the "gpuIndex" option: two cards = two widgets, no code change
-/// (hardware plan H2). Rows whose metric never arrives hide themselves, which is how a card
-/// exposing only a subset (AMD/Intel through LHM) still renders cleanly.
+/// (hardware plan H2). The temp row hides itself when its metric never registers; the other rows
+/// read N/A, which is how a card exposing only a subset (AMD/Intel through LHM) still renders.
 /// </summary>
 public static class GpuPanel
 {

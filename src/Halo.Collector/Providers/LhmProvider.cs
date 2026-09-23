@@ -220,7 +220,7 @@ public sealed class LhmProvider : ISensorProvider
     /// <summary>Close and re-open the LHM Computer so its hardware tree is enumerated again.
     /// Runs on this provider's own poll thread, so nothing else is touching _computer — but it
     /// does touch LHM's global state, hence the write side of the gate. Callers must not hold the
-    /// read lock (the gate is non-recursive): PollStorage releases it before calling this.</summary>
+    /// read lock (the gate is non-recursive): Poll releases it before PollStorage can call this.</summary>
     private void ReopenComputer()
     {
         if (_computer == null) return;
@@ -532,7 +532,7 @@ public sealed class LhmProvider : ISensorProvider
     /// <summary>LHM hardware identifier → halo gpu index.</summary>
     private readonly Dictionary<string, int> _gpuIndex = new();
     /// <summary>Identifiers of LHM GPUs that NVML already publishes; for those this part only
-    /// adds the two sensors NVML has no API for.</summary>
+    /// adds voltage (no NVML API) and fan RPM (NVML reads it on newer drivers only).</summary>
     private readonly HashSet<string> _gpuOwnedByNvml = new();
     /// <summary>Metric names this part has registered, so sensors can register on first sight
     /// (a GPU that never reports power simply has no <c>gpu.i.power.w</c> and the widget row
@@ -552,8 +552,9 @@ public sealed class LhmProvider : ISensorProvider
 
     /// <summary>
     /// Claim an index per GPU LHM can see. NVIDIA cards match the NVML device already publishing
-    /// that index and only gain voltage + fan RPM (NVML exposes neither); AMD and Intel cards get
-    /// a fresh index and LHM becomes the only source for the whole <c>gpu.&lt;i&gt;.*</c> family.
+    /// that index and only gain voltage + fan RPM (NVML has no voltage API, and its fan RPM is
+    /// newer-driver-only); AMD and Intel cards get a fresh index and LHM becomes the only source
+    /// for the whole <c>gpu.&lt;i&gt;.*</c> family.
     /// </summary>
     private void InitGpu(MetricSink sink)
     {
@@ -568,7 +569,7 @@ public sealed class LhmProvider : ISensorProvider
             _gpuIndex[id] = idx;
             if (matched) _gpuOwnedByNvml.Add(id);
 
-            // Voltage and fan RPM (the two NVML has no API for) register on the first real
+            // Voltage and fan RPM (the two NVML may not provide) register on the first real
             // reading in PollGpu — a passively-cooled card then has no gpu.<i>.fan.rpm at all and
             // the widget row hides itself instead of showing a permanent N/A.
             if (!matched)
@@ -630,7 +631,7 @@ public sealed class LhmProvider : ISensorProvider
             string id = hw.Identifier.ToString();
             if (!_gpuIndex.TryGetValue(id, out int idx)) continue;
 
-            // Every vendor: the two NVML has no API for.
+            // Every vendor: the two NVML may not provide.
             Publish(sink, MetricNames.GpuVoltageV(idx), MetricUnit.Volts, Pick(hw, SensorType.Voltage, orAny: true, "GPU Core", "Core"), withMax: true);
             Publish(sink, MetricNames.GpuFanRpm(idx), MetricUnit.Rpm, Pick(hw, SensorType.Fan, orAny: true));
 

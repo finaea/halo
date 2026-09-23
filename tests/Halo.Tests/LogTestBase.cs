@@ -117,12 +117,12 @@ public abstract class LogTestBase : IDisposable
     /// Close a <c>FileStream</c> the logger dropped on the floor, so the file it holds can be
     /// deleted.
     ///
-    /// <para><c>Log.TryOpen</c> assigns <c>_stream</c> without disposing whatever was already there
-    /// (<c>Log.cs:385-392</c>), so a second <c>Log.Init</c> in one process orphans the previous
-    /// handle and the file it points at stays locked until the finalizer runs. Production calls
-    /// <c>Init</c> once per process, so this is latent there and only bites a test that drives
-    /// <c>Init</c> on purpose. Not fixed here — <c>src\</c> is outside this change's scope — so the
-    /// tests that call <c>Init</c> collect the orphan themselves.</para>
+    /// <para><c>Log.TryOpen</c> used to assign <c>_stream</c> without disposing whatever was already
+    /// there, so a second <c>Log.Init</c> in one process orphaned the previous handle and the file it
+    /// pointed at stayed locked until the finalizer ran. Production calls <c>Init</c> once per
+    /// process, so this was latent there and only bit a test that drives <c>Init</c> on purpose.
+    /// <c>TryOpen</c> now closes the previous handle first (<c>Log.cs:434-436</c>); the tests that
+    /// call <c>Init</c> still collect, as belt and braces.</para>
     /// </summary>
     protected static void ReleaseOrphanedStreams()
     {
@@ -200,8 +200,8 @@ public abstract class LogTestBase : IDisposable
         => NonEmptyLines(text).Where(line => line.Contains(Tag, StringComparison.Ordinal)).ToArray();
 
     /// <summary>Poll until <paramref name="marker"/> shows up in one of this test's log files.
-    /// Used where <see cref="Log.Flush"/> cannot be trusted to have waited — see
-    /// <see cref="LogFlushTests"/> for the reason.</summary>
+    /// Used where the file itself is the evidence: <see cref="Log.Flush"/> could not be trusted
+    /// after a shed until the fix <see cref="LogFlushTests"/> guards.</summary>
     protected bool WaitForOnDisk(string marker, int timeoutMs = 30_000)
     {
         var sw = Stopwatch.StartNew();

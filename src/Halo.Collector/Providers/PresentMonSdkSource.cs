@@ -14,7 +14,7 @@ namespace Halo.Collector.Providers;
 /// arrival-anchored timeline reconstruction is needed.
 ///
 /// Connection ladder: (1) an already-running installed Intel service on the default control
-/// pipe (works unelevated), (2) a Halo-owned service child from a previous collector run,
+/// pipe (works unelevated), (2) diagnostics only: a running collector's Halo-owned service child,
 /// (3) spawn the bundled PresentMonService.exe as a child process. Outside the SCM,
 /// StartServiceCtrlDispatcher fails benignly and the exe runs its real logic in console-debug
 /// mode, so (3) needs no service registration: private pipe/ETW-session names, dies with us.
@@ -287,7 +287,7 @@ internal sealed class PresentMonSdkSource : IDisposable
                 double dispLat = ReadD(b, _offDispLat);
                 int type = _offType >= 0 ? BitConverter.ToInt32(_buffer, b + _offType) : PmApi.FrameNotSet;
 
-                // same semantics as the console-CSV path: displayed when either display-side
+                // same semantics the old console-CSV path had: displayed when either display-side
                 // value is real; generated = any tagged type that isn't app/not-set/repeated
                 bool displayed = (dispLat > 0 && !double.IsNaN(dispLat)) || (dispFt > 0 && !double.IsNaN(dispFt));
                 bool generated = type is not (PmApi.FrameNotSet or PmApi.FrameApplication or PmApi.FrameRepeated);

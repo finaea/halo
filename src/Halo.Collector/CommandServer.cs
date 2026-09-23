@@ -10,7 +10,7 @@ namespace Halo.Collector;
 /// <summary>
 /// Tiny line-based control channel («Halo.Control.v2» named pipe) so non-elevated widgets and
 /// the Settings app can ask the elevated collector for actions: "reset-max &lt;prefix&gt;",
-/// "reset-net", "rescan", "reload-config", "ping". Commands are defined in Halo.Metrics.ControlPipe.
+/// "reset-net", "rescan", "reload-config", "ping", "quit". Commands are defined in Halo.Metrics.ControlPipe.
 /// </summary>
 public sealed class CommandServer : IDisposable
 {

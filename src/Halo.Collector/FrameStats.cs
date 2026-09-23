@@ -4,9 +4,9 @@ namespace Halo.Collector;
 
 /// <summary>
 /// Rolling-window frame statistics (plan §6): avg FPS presented/displayed, true 1%/0.1% lows
-/// over a defined window (default 60 s), worst frametime since last Consume(), frame-gen ratio.
-/// Single-threaded: owned by the PresentMon pump thread; results are published via MetricSink
-/// (whose writes are lock-free).
+/// over a defined window (default 60 s), worst frametime over the newest 1 s, frame-gen ratio.
+/// Not thread-safe: each owner (PresentMonProvider, PresentTap) serialises access under its own
+/// lock; results are published via MetricSink (whose writes are lock-free).
 /// </summary>
 public sealed class FrameStats(double windowSeconds)
 {
@@ -70,9 +70,10 @@ public sealed class FrameStats(double windowSeconds)
     /// <summary>
     /// Window semantics (refined 2026-07-19 on user request):
     ///  - headline FPS / FRAMETIME / WORST: rolling 1 s ANCHORED TO THE NEWEST FRAME's
-    ///    timestamp — PresentMon's stdout arrives in ~1 s bursts, so wall-clock anchoring
-    ///    made most polls see an empty "last second" (WORST flickered 0). WORST = the
-    ///    longest single frame in that second, so a hitch stays readable for a full second.
+    ///    timestamp — the old console transport's stdout arrived in ~1 s bursts, so
+    ///    wall-clock anchoring made most polls see an empty "last second" (WORST flickered 0).
+    ///    WORST = the longest single frame in that second, so a hitch stays readable for a
+    ///    full second.
     ///  - FRAMETIME means (both streams): rolling 100 ms — live-feeling readouts; WORST stays
     ///    the 1 s max so hitches remain readable for a full second.
     ///  - 1% / 0.1% lows and FG ratio: the full rolling window (default 60 s, configurable).
@@ -171,7 +172,7 @@ public sealed class FrameStats(double windowSeconds)
         int n = ftMs.Count;
         if (n < 16) return 0; // not enough data to be meaningful
         int k = Math.Max(1, (int)(n * fraction));
-        // partial selection: k largest
+        // k largest: full sort, then the top k
         ftMs.Sort();
         double sum = 0;
         for (int i = n - k; i < n; i++) sum += ftMs[i];

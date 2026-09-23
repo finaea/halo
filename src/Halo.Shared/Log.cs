@@ -36,11 +36,11 @@ public readonly record struct FlushResult(bool Reached, long Persisted, long Acc
 ///
 /// <para><b>Durability is not severity.</b> <see cref="Durable"/> takes a level, so a routine
 /// startup breadcrumb can be written synchronously without being labelled an error. Queued and
-/// synchronous records share one stream and one lock, so ordering holds.</para>
+/// synchronous records share one stream and one lock; a durable Warn/Error waits for the backlog first.</para>
 ///
 /// <para><b>Debug can never starve the critical lane.</b> Under queue pressure Debug is shed
-/// first; Warn, Error and anything Durable are never dropped for want of queue space. Losses are
-/// counted per level and reported, because a logger that drops silently is worse than no logger.
+/// first; Warn and Error wait up to 250 ms for queue space, and Durable skips the queue. Losses are
+/// counted and reported, because a logger that drops silently is worse than no logger.
 /// </para>
 /// </summary>
 public static class Log
@@ -315,7 +315,7 @@ public static class Log
         if (_path.Length == 0) return;
 
         // Shedding policy: Debug gives way first so a debug storm cannot consume the queue in the
-        // moment before a warning or a crash. Warn/Error wait for space instead of vanishing.
+        // moment before a warning or a crash. Warn/Error wait (up to 250 ms) for space instead of vanishing.
         if (level == LogLevel.Debug && Queue.Count >= DebugShedDepth)
         {
             Interlocked.Increment(ref _droppedQueueFull);

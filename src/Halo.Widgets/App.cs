@@ -115,8 +115,8 @@ public sealed unsafe class App : IDisposable
     {
         SessionLog.SetPhase("creating the tray icon");
         _tray = new TrayIcon(this);
-        // Panels are built from discovered hardware — the core grid's P/E classes, the drive and
-        // fan channel lists, the GPU count. Attach before building or every one of those reads
+        // Panels are built from discovered hardware — the core grid's P/E classes and the drive
+        // and fan channel lists. Attach before building or every one of those reads
         // its fallback and the first layout is wrong until something else forces a rebuild.
         Metrics.Tick();
         _wasAttached = Metrics.Attached;
@@ -300,9 +300,9 @@ public sealed unsafe class App : IDisposable
 
     /// <summary>The collector appended frames to the shared ring: pull frame-graph widgets'
     /// next tick forward so the graph paints now instead of at its (fallback) poll tick.
-    /// Coalesced to ~7 ms so a busy tap lane can't repaint faster than the monitor refreshes.
+    /// Coalesced to ~16 ms so a busy tap lane can't repaint faster than the monitor refreshes.
     /// The boundary must be anchored to NOW and only advanced when a wake is granted:
-    /// advancing it per event lets a >143 Hz event stream (tap presents + drain batches)
+    /// advancing it per event lets a >62 Hz event stream (tap presents + drain batches)
     /// push it further into the future than time advances, until event wakes stop beating
     /// the widgets' fallback timers and the graphs silently degrade to 5 Hz.</summary>
     private void OnFramesReady()
@@ -341,8 +341,8 @@ public sealed unsafe class App : IDisposable
     /// Hot-reload, one widget at a time (settings plan §Live-apply). A reload always produces new
     /// <see cref="WidgetInstance"/> objects, so every window is re-pointed at its new one even
     /// when nothing else changed — a window left holding the old object would render and save
-    /// stale config. Only a type change, a structural option or a metric show/graph toggle costs
-    /// a window rebuild; everything else is applied in place.
+    /// stale config. Only a type change, a structural option, a metric show/graph toggle or a
+    /// width/showTitle/fontFamily change costs a window rebuild; everything else is applied in place.
     /// </summary>
     private void ApplyConfigChange()
     {
@@ -538,7 +538,7 @@ public sealed unsafe class App : IDisposable
     /// Two things change when the registry does. A provider that was not running when a widget
     /// was built can register faster metrics later, so the refresh bound is re-evaluated (R2).
     /// And the collector coming up for the first time is when hardware discovery finally has
-    /// answers — the core grid, volume list, fan channels and GPU count all read it at build
+    /// answers — the core grid, volume list and fan channels all read it at build
     /// time — so that one transition rebuilds the windows.
     /// </summary>
     private void RateBoundGuard()
@@ -859,8 +859,8 @@ public sealed unsafe class App : IDisposable
     public void RequestPlacementRefresh() => _placementDirty = true;
 
     /// <summary>Re-resolve every widget's monitor, DPI and scale, then re-run the packer for the
-    /// ones whose monitor is missing. Cheap and idempotent — called on display change, after a
-    /// drag, and every 5 s from the position guard.</summary>
+    /// displaced ones (monitor missing, or an arrange pending). Cheap and idempotent — called on
+    /// display change, after a drag, and every 5 s from the position guard.</summary>
     public void RefreshPlacement()
     {
         _placementDirty = false;
@@ -874,8 +874,9 @@ public sealed unsafe class App : IDisposable
 
     /// <summary>
     /// Column-pack the widgets that have nowhere of their own to be (hardware plan H6): a missing
-    /// monitor, or every widget on first run. Positions are memory-only unless this is the
-    /// first run, so unplugging a monitor never rewrites the user's layout.
+    /// monitor, or every widget while an arrange is requested (first run, or the Settings app's
+    /// arrange/regenerate). Positions are memory-only unless an arrange was requested, so
+    /// unplugging a monitor never rewrites the user's layout.
     /// </summary>
     private void RunPacker()
     {

@@ -23,7 +23,7 @@ public static class NetworkAdapters
     /// </summary>
     /// <remarks>
     /// Only offers what <c>NetworkProvider.PickNic</c> accepts (Up, and neither Loopback nor
-    /// Tunnel — <c>NetworkProvider.cs:59-61</c>). Offering anything else is worse than useless:
+    /// Tunnel — <c>NetworkProvider.cs:61-62</c>). Offering anything else is worse than useless:
     /// <c>PickNic</c> matches the saved name against that same filter, so a Down or Tunnel
     /// adapter leaves <c>best</c> null and the network widget reports nothing, with no error
     /// anywhere and only an Info-level "network interface: none" in the log. Measured on one

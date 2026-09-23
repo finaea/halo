@@ -103,7 +103,7 @@ Name: "autostart"; Description: "Start with Windows"; Types: full
 ; This is not tidiness. The payload below is copied with "ignoreversion", which overwrites but
 ; never DELETES, and there is nothing else in this script that removes a file during an install -
 ; so upgrading over a build that shipped these leaves both on disk for good. Dx.LoadFonts adds
-; every *.ttf in the folder to the private font collection by glob (src\Halo.Widgets\Dx.cs:58),
+; every *.ttf in the folder to the private font collection by glob (src\Halo.Widgets\Dx.cs:143),
 ; so a leftover font is still LOADED, not merely present: an upgraded install keeps a proprietary
 ; Microsoft font in Halo's own font collection. Verified 2026-09-14 by planting files a newer
 ; version does not ship and upgrading over the top - all of them survived.
@@ -284,9 +284,9 @@ end;
   Stop everything of ours that is running out of the install folder.
 
   Scoped by image path so a Halo built from source somewhere else, or a separately
-  installed Intel PresentMon, is never touched — the same rule tools\uninstall-halo.ps1
-  used (uninstall-halo.ps1:78-98). Inno's Pascal has no process enumeration, so the CIM
-  query runs in in-box PowerShell (5.1 ships with every Windows 10 1809+).
+  installed Intel PresentMon, is never touched — the same rule the old tools\uninstall-halo.ps1
+  used, and tools\uninstall-dev.ps1 still applies to PresentMon. Inno's Pascal has no process
+  enumeration, so the CIM query runs in in-box PowerShell (5.1 ships with every Windows 10 1809+).
 
   Widgets is killed first on purpose: it owns the watchdog that restarts the collector
   task, so killing the collector while widgets is alive just resurrects it.

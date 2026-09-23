@@ -89,7 +89,7 @@ public static class SessionLog
 
     /// <summary>Declare that something is about to stop this process on purpose, so the next start
     /// classifies it <see cref="SessionState.ExpectedTermination"/> instead of inventing a crash.
-    /// The caller that is about to be killed sets this — an upgrade, a watchdog restart.</summary>
+    /// The process being stopped sets this itself (collector ProcessExit); watchdog restarts use RecordExternalStop.</summary>
     public static void SetStopIntent(string reason)
     {
         _stopIntent = reason;

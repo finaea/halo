@@ -9,8 +9,8 @@ namespace Halo.Collector.Providers;
 /// the driver reorders devices between boots. Everything LibreHardwareMonitor finds that NVML
 /// does not — AMD and Intel GPUs — is appended after that block. Both <see cref="NvmlProvider"/>
 /// and the GPU part of <see cref="LhmProvider"/> publish into the same namespace from different
-/// threads, so the mapping has to live outside both; the NVML probe runs once, lazily, behind a
-/// lock, and whichever provider initialises first pays for it.
+/// threads, so the mapping has to live outside both; the NVML probe runs lazily (once, and again
+/// on a rescan) behind a lock, and whichever provider initialises first pays for it.
 ///
 /// <b>Append-only.</b> An index, once handed out, is that GPU's for the life of the process — the
 /// shared-memory registry is append-only too, and a metric name that silently re-pointed would
@@ -55,7 +55,7 @@ internal static class GpuIndexSpace
 
     /// <summary>
     /// Halo index for a GPU LibreHardwareMonitor found. An NVIDIA card is matched to its NVML
-    /// slot by name containment (the same trick <see cref="DriveMap"/> uses for disk models) so
+    /// slot by name containment (the same trick LhmProvider.PollStorage uses for disk models) so
     /// LHM's NVAPI-only sensors land on the index NVML already owns; anything unmatched gets a
     /// fresh index at the end.
     ///

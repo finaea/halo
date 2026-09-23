@@ -4,8 +4,9 @@ using Halo.Shared;
 namespace Halo.Collector;
 
 /// <summary>
-/// Maps volume letters to physical-disk model strings (IOCTL_STORAGE_GET_DEVICE_NUMBER +
-/// IOCTL_STORAGE_QUERY_PROPERTY) so LHM storage hardware (named by model) can be matched
+/// Maps volume letters to physical-disk model strings (IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, or
+/// IOCTL_STORAGE_GET_DEVICE_NUMBER as a fallback, + IOCTL_STORAGE_QUERY_PROPERTY) so LHM storage
+/// hardware (named by model) can be matched
 /// to the drive letters the widgets show. User-mode, no admin needed.
 /// </summary>
 public static class DriveMap

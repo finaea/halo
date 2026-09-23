@@ -32,7 +32,7 @@ public static class ProcessDiagnostics
     /// <summary>
     /// Route every escape hatch the runtime offers into the log, synchronously.
     ///
-    /// <para>Both shipping exes are <c>WinExe</c>, so the runtime's default "print the unhandled
+    /// <para>All three shipping exes are <c>WinExe</c>, so the runtime's default "print the unhandled
     /// exception to stderr" writes to a console that does not exist — which is why a process could
     /// die mid-startup and leave nothing behind at all.</para>
     ///

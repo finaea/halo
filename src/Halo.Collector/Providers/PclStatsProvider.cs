@@ -13,11 +13,12 @@ namespace Halo.Collector.Providers;
 /// game-rendered (pre-frame-gen) rate, with NO NVIDIA App and no game-specific integration
 /// beyond the Reflex the game already ships (open MIT spec: github.com/NVIDIA/PCLStats).
 ///
-/// Protocol: the game only emits markers while a latency tool is "pinging" it — we broadcast
-/// the registered PCLSTATS ping window message on a timer, and enable the PCLStats TraceLogging
-/// provider on our own real-time ETW session. Markers carry a monotonic FrameID; PC latency for
-/// a frame = (its display/present time) − (its SimulationStart time). We publish a rolling
-/// average PCL and the SimulationStart cadence (rendered FPS).
+/// Protocol: we enable the PCLStats TraceLogging provider on our own real-time ETW session, and
+/// that is the whole mechanism — the game self-pings once the provider is enabled, so there is
+/// no ping broadcast. Markers carry a monotonic FrameID; PC latency = queue wait (PCLStatsInput
+/// post → PC_LATENCY_PING consume) + render (consume → PRESENT_END) + display (PresentMon's
+/// present → displayed). We publish rolling averages of queue and render, the three-part sum as
+/// latency.pc.ms, and the SimulationStart cadence (rendered FPS).
 ///
 /// DISCOVERY MODE: until the exact provider/marker constants are confirmed against the live
 /// game, set HaloPclDiscovery=1 in the environment to log every event name + payload fields.
@@ -205,7 +206,7 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
                     break;
 
                 // present closes the frame: render (FS2P) = present − ping-consume; queue (②a)
-                // was stamped above. Widget adds present→display (P2D) for the full LAT.
+                // was stamped above. PublishPcLatency adds present→display (P2D) for the full LAT.
                 case PRESENT_END:
                 case OUT_OF_BAND_PRESENT_END:
                     if (_pingConsumeMs.Remove(frameId, out double consumeMs) && ms > consumeMs)

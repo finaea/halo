@@ -11,7 +11,7 @@ namespace Halo.Widgets.PanelDefs;
 /// Keeps the original skin's bones — centered title band, centered focal FPS number (warn-colored
 /// off the leftover 30/60/90/120 thresholds), "Framerate: N%" row + 1px bar, "1p LOW" row with the
 /// signature backing plate, "FRAMETIME" row, and the 188×25 cyan sparkline (50ms hard cap) — and
-/// adds the plan's extensions: 0.1% low, worst-frametime, PC-latency and DLSS rows, refresh-relative
+/// adds the plan's extensions: 0.1% low, worst-frametime and DLSS rows, refresh-relative
 /// percent, per-frame graph sampling, and an idle "NO 3D APP" state.
 /// </summary>
 public static class FpsPanel
@@ -30,7 +30,7 @@ public static class FpsPanel
         string ftMetric = presented ? MetricNames.FpsFrametimePresentedMs : MetricNames.FpsFrametimeDisplayedMs;
         string ftWorstMetric = presented ? MetricNames.FpsFrametimePresentedWorstMs : MetricNames.FpsFrametimeDisplayedWorstMs;
 
-        // ---- title band: centered title + right-slot status chip ----
+        // ---- title band: centered title ----
         p.TitleElements.Add(new TextEl
         {
             Text = c => c.TitleOr(presented ? "FPS COUNTER (PRESENTED)" : "FPS COUNTER (DISPLAYED)"),

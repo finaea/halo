@@ -5,7 +5,7 @@ namespace Halo.Widgets.PanelDefs;
 
 /// <summary>
 /// Dedicated latency + DLSS telemetry panel (user request 2026-07-19):
-///   PC LAT (marker-based Reflex PCL via PresentMon app-timing) — headline, warn-colored
+///   PC LAT (latency.pc.ms: PCL Stats markers + PresentMon's display segment) — headline, warn-colored
 ///   CLICK / INPUT photon latencies (moved here from the FPS panels)
 ///   DLSS row: DLL version + loaded features (SR/FG/RR)
 ///   MODEL row: Transformer/CNN + override-vs-game-DLL origin

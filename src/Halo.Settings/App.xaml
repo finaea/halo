@@ -79,9 +79,9 @@
            reference that strips the Fluent template and the spin buttons with it. Naming
            DefaultUiNumberBoxStyle looks outward to ui:ControlsDictionary instead.
 
-           The Widgets page carries nine NumberBoxes that still set a hard Width of 72-120. Those
+           The Widgets page carries twelve NumberBoxes that still set a hard Width of 72-120. Those
            are inert only because WPF clamps up: MinWidth beats Width when it is larger. Lower this
-           below 120 and all nine go blank again. -->
+           below 120 and all twelve go blank again. -->
       <Style TargetType="{x:Type ui:NumberBox}" BasedOn="{StaticResource DefaultUiNumberBoxStyle}">
         <Setter Property="MinWidth" Value="132" />
         <Setter Property="Padding" Value="8,8,4,7" />

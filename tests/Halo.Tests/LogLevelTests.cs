@@ -123,8 +123,9 @@ public sealed class LogLevelTests : LogTestBase
         finally
         {
             Environment.SetEnvironmentVariable(Log.LevelEnvVar, previous);
-            // Init orphaned the stream this test's constructor opened; collect it before
-            // ResetForTests tries to delete the file it still holds. See ReleaseOrphanedStreams.
+            // Init used to orphan the stream this test's constructor opened (TryOpen now closes it
+            // first); the collect before ResetForTests deletes the file is belt and braces. See
+            // ReleaseOrphanedStreams.
             ReleaseOrphanedStreams();
             Log.ResetForTests(Dir, "level", LogLevel.Info);
         }
@@ -150,9 +151,9 @@ public sealed class LogSheddingTests : LogTestBase
     /// deterministic rather than a race: once Debug is being shed the depth is pinned at the
     /// threshold, so there is always room for the critical lane.</para>
     ///
-    /// <para><b>Not verified with <c>Log.Flush</c> on purpose.</b> Flush cannot be trusted once
-    /// anything has been shed — see <c>LogFlushTests.Flush_AfterShedding_StillTellsTheTruth</c> —
-    /// so the markers are polled for on disk instead.</para>
+    /// <para><b>Not verified with <c>Log.Flush</c> on purpose.</b> Flush could not be trusted once
+    /// anything had been shed (fixed since; <c>LogFlushTests.Flush_AfterShedding_StillTellsTheTruth</c>
+    /// is the regression guard), so the markers are polled for on disk instead.</para>
     /// </summary>
     [Fact]
     public void ADebugStorm_CannotStarveWarnOrError()

@@ -8,7 +8,7 @@
     <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
     <SolidColorBrush x:Key="HaloDropIndicator" Color="#0067C0" />
     <!-- The NumberBox style that keeps this page's boxes from rendering blank now lives in
-         App.xaml, applied implicitly to every page. The nine hard Width="72..120" attributes below
+         App.xaml, applied implicitly to every page. The twelve hard Width="72..120" attributes below
          survive only because MinWidth clamps up over them; see the comment there before changing
          either. -->
 

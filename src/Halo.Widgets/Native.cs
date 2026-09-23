@@ -93,7 +93,7 @@ internal static unsafe partial class Native
     // The only dialog this process ever shows. Halo.Widgets is a WinExe with no window until the
     // overlay is up, so a startup failure has nowhere to surface: stderr goes to a console that
     // does not exist, and the user sees a shortcut click that did nothing. Settings gets this for
-    // free from WPF's MessageBox (Halo.Settings\App.xaml.cs:29); here it is one import.
+    // free from WPF's MessageBox (Halo.Settings\App.xaml.cs:59); here it is one import.
     [DllImport("user32", CharSet = CharSet.Unicode)]
     public static extern int MessageBoxW(nint hwnd, string text, string caption, uint type);
     public const uint MB_OK = 0x00000000, MB_ICONERROR = 0x00000010,

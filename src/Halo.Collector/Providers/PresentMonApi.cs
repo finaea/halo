@@ -5,8 +5,8 @@ namespace Halo.Collector.Providers;
 /// <summary>
 /// P/Invoke surface for PresentMonAPI2.dll (Intel PresentMon 2 SDK middleware, MIT).
 /// Mirrors tools\presentmon\sdk\PresentMonAPI.h (API version 3.3); only the calls and
-/// metrics Halo uses are bound. The DLL is loaded from tools\presentmon\sdk via a
-/// DllImportResolver (nothing is copied next to the exe; portable-first).
+/// metrics Halo uses are bound. The DLL is loaded from the exe's own presentmon\ folder
+/// (Paths.PresentMonDir; the build copies tools\presentmon\sdk there) via a DllImportResolver.
 /// </summary>
 internal static unsafe class PmApi
 {

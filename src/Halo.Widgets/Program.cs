@@ -6,7 +6,7 @@ using Halo.Widgets;
 // the overlay on its own, against whatever collector happens to be running.
 bool startCollector = args.Contains("--start-collector", StringComparer.OrdinalIgnoreCase);
 
-// Before anything that can throw. Both shipping exes are WinExe, so the runtime's default
+// Before anything that can throw. All three shipping exes are WinExe, so the runtime's default
 // "print the unhandled exception to stderr" writes to a console that does not exist.
 //
 // The widgets opt in to the last-gasp dialog. The try/catch below only covers what unwinds through

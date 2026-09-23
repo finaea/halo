@@ -65,7 +65,7 @@ public sealed record AutostartStatus(ScheduledTaskState Collector, ScheduledTask
     /// </summary>
     public string ActionLabel => Off ? "Turn on autostart…  ⛨" : "Repair autostart…  ⛨";
 
-    /// <summary>One-line form for the log, so a status read at 5 Hz in the UI is one grep away.</summary>
+    /// <summary>One-line form for the log, so a status read every 5 s in the UI is one grep away.</summary>
     public string Trace => $"collector={Label(Collector)} widgets={Label(Widgets)} hkcuRun={HkcuRun}"
         + $" healthy={Healthy} off={Off} needsAttention={NeedsAttention}";
 
@@ -220,8 +220,9 @@ public static class AutostartManager
         }
         catch (Exception ex)
         {
-            // Console.Error serves an interactive caller; the log serves the installer, which runs
-            // this hidden and keeps nothing but the exit code (halo.iss). Both, never one.
+            // Console.Error serves an interactive caller and the installer, which runs this hidden
+            // and captures it into its setup log (halo.iss ExecHaloSettings); the log serves
+            // everybody else. Both, never one.
             Console.Error.WriteLine(Unwrap(ex).Message);
             log.Error($"register failed for {user} — exit 1", Unwrap(ex));
             return 1;

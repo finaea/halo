@@ -238,7 +238,7 @@ public static class ConfigMigrator
             case "drives":
                 if (driveLetters.Count > 0)
                     inst.Options["volumes"] = string.Join(",", driveLetters.Select(d => d.ToUpperInvariant()));
-                // v1 hardcoded "drive E shows Free:" in C# (DrivesPanel.cs:42). Same pixels, now a setting.
+                // v1 hardcoded "drive E shows Free:" in C# (DrivesPanel: freeMode = d == 'E'). Same pixels, now a setting.
                 inst.Options["freeMode"] = "E";
                 break;
 
