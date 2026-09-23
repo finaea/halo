@@ -287,7 +287,9 @@ The visual design is derived from the **Rainformer 3.1 HWiNFO Edition** Rainmete
 licence is **non-commercial**: use, fork and share it freely, don't sell it. Details and what
 exactly is derived: [NOTICE.md](NOTICE.md).
 
-Halo's own code is **MIT** ([LICENSE](LICENSE)).
+Halo's own code is [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)
+([LICENSE](LICENSE)): it may be used, modified, forked and shared for any noncommercial purpose.
+Commercial use is not covered; a GitHub issue can be opened to discuss a commercial licence.
 
 It stands on [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)
 (MPL-2.0), [Intel PresentMon](https://github.com/GameTechDev/PresentMon) (MIT),

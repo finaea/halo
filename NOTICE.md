@@ -16,8 +16,8 @@ native reimplementation — but the *design* is the original author's work and t
 attribution that licence asks for.
 
 **Non-commercial.** CC BY-NC 3.0 forbids commercial use of the licensed work and its
-derivatives. So while Halo's own code is MIT (`LICENSE`), the widget design that ships with it
-is not available for commercial use. Practically: use it, fork it, modify it, share it — do not
+derivatives. Halo's own code is under PolyForm Noncommercial 1.0.0 (`LICENSE`), so neither the
+code nor the widget design that ships with it is available for commercial use. Practically: use it, fork it, modify it, share it — do not
 sell it, bundle it into something you sell, or ship it as part of a commercial product. If you
 want Halo in a commercial setting, replace the theme and panel geometry with your own.
 

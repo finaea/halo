@@ -1,7 +1,7 @@
 # Third-party notices
 
-Everything Halo ships or installs that somebody else wrote. Halo's own code is MIT
-(`LICENSE`); the visual design is CC BY-NC 3.0 (`NOTICE.md`).
+Everything Halo ships or installs that somebody else wrote. Halo's own code is PolyForm
+Noncommercial 1.0.0 (`LICENSE`); the visual design is CC BY-NC 3.0 (`NOTICE.md`).
 
 Licences below were read off the shipped artefacts, not from memory: the `<license>` element of
 each package's `.nuspec` in the project-local NuGet cache (`tools/nuget-cache`), the licence file

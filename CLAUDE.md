@@ -229,6 +229,9 @@ the smoketests, and would delete the "degrades gracefully unelevated" property.
   loaded by the `*.ttf` glob in `Dx.LoadFonts` and used by name for the Drives/Network arrows.
   `SegMDL2.ttf` (Microsoft proprietary) and `MaterialIcons.ttf` (unreferenced) were deleted for the
   public release — see `THIRD-PARTY-NOTICES.md`.
-- Licensing lives in three files at the root: `LICENSE` (MIT, Halo's code), `NOTICE.md` (the
-  Rainformer design is CC BY-NC 3.0 — **non-commercial**), `THIRD-PARTY-NOTICES.md` (a row per
-  shipped component, plus the GPL-2.0 text for PawnIO). Anything new that ships needs a row.
+- Licensing lives in three files at the root: `LICENSE` (PolyForm Noncommercial 1.0.0, Halo's
+  code — the same licence as MacTime and MonitorScreenSaver), `NOTICE.md` (the Rainformer design
+  is CC BY-NC 3.0 — also **non-commercial**), `THIRD-PARTY-NOTICES.md` (a row per shipped
+  component, plus the GPL-2.0 text for PawnIO). Anything new that ships needs a row. `LICENSE` is
+  the verbatim PolyForm text plus its `Required Notice:` line — keep it that way; what it does
+  and does not cover is explained in the README and `NOTICE.md`, not appended to it.
