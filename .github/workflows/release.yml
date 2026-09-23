@@ -117,26 +117,21 @@ jobs:
           $v = '${{ steps.version.outputs.version }}'
           # Single-quoted here-string: nothing in here is escaped or interpolated, so the
           # markdown backticks survive. VERSION is substituted afterwards.
+          # Same layout as the MacTime and MonitorScreenSaver releases: the "## Key changes"
+          # section goes above this by hand on the release page once the release exists, since
+          # nothing here can know what changed.
           # Plain ASCII only ('-' and '->', never an em dash or an arrow glyph): the runner writes
           # this block to a script file, and non-ASCII text there is an encoding risk for no gain.
           $notes = @'
-          Halo VERSION
-
-          ## Downloads
-
-          - `Halo-Setup-VERSION.exe` - the installer. It asks for one UAC approval, and offers the PawnIO driver and Start with Windows.
-          - `Halo-VERSION-win-x64.zip` - the portable copy. It runs from any folder and keeps its settings and logs in a `data` folder beside the programs.
-
           ## Install
 
-          1. Download `Halo-Setup-VERSION.exe` and open it.
-          2. SmartScreen may appear because Halo is not code signed. **More info -> Run anyway** allows it to open.
-          3. Keep **PawnIO** selected for CPU temperatures, fan speeds and drive temperatures, and **Start with Windows** to have Halo start at every sign-in.
-          4. When setup finishes, Settings opens on **System check**, which shows what the hardware reports and offers a starting layout.
+          1. Download `Halo-Setup-VERSION.exe` for the installer, or `Halo-VERSION-win-x64.zip` for the portable version.
+          2. Open the installer and approve the UAC prompt. SmartScreen may appear because Halo is not code signed. **More info -> Run anyway** allows it to open. Windows 11 Smart App Control may block unsigned apps.
+          3. PawnIO and Start with Windows are selected by default. PawnIO is what CPU temperatures, fan speeds and drive temperatures need.
 
-          To use the portable copy instead, unzip it, run `Halo.Collector.exe` as administrator, then run `Halo.Widgets.exe`.
+          Installing over an earlier version upgrades it in place and keeps existing settings and layouts. The portable version keeps its settings and logs in a `data` folder beside the programs, and starts by running `Halo.Collector.exe` as administrator, then `Halo.Widgets.exe`.
 
-          Requirements, what works without PawnIO or an NVIDIA GPU, and the licence are described in the [README](${{ github.server_url }}/${{ github.repository }}#readme).
+          Requires Windows 10 1809 or later, or Windows 11, on x64.
           '@
           $lines = @($notes -replace 'VERSION', $v)
 
