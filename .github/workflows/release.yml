@@ -35,10 +35,12 @@ jobs:
       VT_API_KEY: ${{ secrets.VT_API_KEY }}
 
     steps:
-      - uses: actions/checkout@v4
+      # Majors that run on Node 24 (runs.using in each action.yml); the @v4s ran on Node 20,
+      # which GitHub deprecated and was forcing onto Node 24 with a warning on every run.
+      - uses: actions/checkout@v7
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -74,7 +76,7 @@ jobs:
         run: .\tools\build.ps1 -Clean -Installer -Zip
 
       - name: Upload build artefacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: halo-${{ steps.version.outputs.version }}
           path: |
@@ -133,10 +135,12 @@ jobs:
 
           Requires Windows 10 1809 or later, or Windows 11, on x64.
           '@
-          $lines = @($notes -replace 'VERSION', $v)
+          # -creplace, not -replace: PowerShell's -replace ignores case, so it also rewrote the
+          # plain word "version" above (1.1.0's notes read "for the portable 1.1.0").
+          $lines = @($notes -creplace 'VERSION', $v)
 
           # The VirusTotal section is appended after the substitution above, never written
-          # into the here-string: -replace is a global regex, and any new text containing
+          # into the here-string: -creplace is a global regex, and any new text containing
           # the word VERSION would be rewritten along with it. $tick spells a backtick
           # without fighting PowerShell's escape character inside an interpolated string.
           $tick = '`'
