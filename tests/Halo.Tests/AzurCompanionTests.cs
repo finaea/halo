@@ -140,6 +140,107 @@ public sealed class AzurCompanionTests
         Assert.Equal(0, mood.Unread);
     }
 
+    // ---- the thread never goes quiet ----
+
+    private static (Panel Panel, PanelContext Ctx, SystemMood Mood, long Qpc) Driven(string fixture)
+    {
+        var settings = new AppSettings();
+        settings.Appearance.Skin = AzurArchiveSkinInfo.Id;
+        var widget = new WidgetInstance { Id = "t", Type = "companion" };
+        var widgets = new[] { widget };
+        var metrics = FixtureMetrics.Load(fixture);
+        var mood = new SystemMood(() => widgets, AzurArchiveSkin.Birthdays);
+        var theme = Theme.Resolve(settings.Appearance, widget, 1.7);
+        var ctx = new PanelContext { Metrics = metrics, Mood = mood, Theme = theme, Settings = settings, Widget = widget, Type = PanelCatalog.Find("companion") };
+        var panel = PanelFactory.Create("companion", ctx)!;
+        long step = (long)(PanelRenderer.TickS * System.Diagnostics.Stopwatch.Frequency), start = 1000L * System.Diagnostics.Stopwatch.Frequency;
+        int ticks = metrics.DurationS is { } d ? Math.Max(PanelRenderer.Ticks, (int)Math.Ceiling(d / PanelRenderer.TickS)) : PanelRenderer.Ticks;
+        var now = metrics.Now ?? PanelRenderer.PinnedNow;
+        long qpc = start;
+        for (int k = 0; k < ticks; k++)
+        {
+            qpc = start + k * step;
+            metrics.Advance((double)k / (ticks - 1), qpc);
+            mood.Update(metrics, qpc, now);
+            ctx.Now = now; ctx.NowQpc = qpc; ctx.TickIndex++;
+            panel.Update(ctx);
+        }
+        return (panel, ctx, mood, qpc);
+    }
+
+    [Fact]
+    public void A_thread_whose_last_post_is_long_past_still_shows_its_messages()
+    {
+        var (panel, ctx, mood, qpc) = Driven("mood-crosstalk");
+        using var _ = panel;
+        Assert.NotEmpty(mood.Messages);
+
+        ctx.NowQpc = qpc + (long)(10 * 60 * System.Diagnostics.Stopwatch.Frequency);   // > the old 5 min gate
+        panel.Update(ctx);
+
+        var lines = panel.Elements.OfType<CompanionEl>().Single().ThreadLines;
+        Assert.Equal(mood.Messages.Count, lines.Count);
+        Assert.DoesNotContain(lines, l => l.Text == AzurTalk.IdleLine(mood.State, AzurCompanion.Host(ctx), ""));
+    }
+
+    /// <summary>A companion panel over a mood that has never had <c>Update</c> called, so its thread
+    /// is empty by construction. <see cref="Driven"/> cannot give that: it always posts the day's
+    /// greeting first.</summary>
+    private static (Panel Panel, PanelContext Ctx, SystemMood Mood) EmptyThread()
+    {
+        var settings = new AppSettings();
+        settings.Appearance.Skin = AzurArchiveSkinInfo.Id;
+        var widget = new WidgetInstance { Id = "t", Type = "companion" };
+        var widgets = new[] { widget };
+        var mood = new SystemMood(() => widgets, AzurArchiveSkin.Birthdays);
+        var ctx = new PanelContext
+        {
+            Metrics = FixtureMetrics.Load("idle"), Mood = mood, Theme = Theme.Resolve(settings.Appearance, widget, 1.7),
+            Settings = settings, Widget = widget, Type = PanelCatalog.Find("companion"),
+            Now = PanelRenderer.PinnedNow, NowQpc = 1000L * System.Diagnostics.Stopwatch.Frequency,
+        };
+        var panel = PanelFactory.Create("companion", ctx)!;
+        panel.Update(ctx);
+        return (panel, ctx, mood);
+    }
+
+    [Fact]
+    public void The_idle_line_shows_only_for_an_empty_thread()
+    {
+        var (panel, ctx, mood) = EmptyThread();
+        using var _p = panel;
+        Assert.Empty(mood.Messages);
+        var only = Assert.Single(panel.Elements.OfType<CompanionEl>().Single().ThreadLines);
+        Assert.Equal(AzurTalk.IdleLine(mood.State, AzurCompanion.Host(ctx), AzurChrome.Option(ctx.Theme, "addressAs").Trim()), only.Text);
+
+        var busy = Driven("mood-crosstalk");
+        using var _b = busy.Panel;
+        Assert.NotEmpty(busy.Mood.Messages);
+        Assert.DoesNotContain(busy.Panel.Elements.OfType<CompanionEl>().Single().ThreadLines,
+            l => l.Text == AzurTalk.IdleLine(busy.Mood.State, AzurCompanion.Host(busy.Ctx), ""));
+    }
+
+    [Fact]
+    public void A_host_owned_message_keeps_its_sender_and_text_when_the_host_changes()
+    {
+        var (panel, ctx, mood, _) = Driven("mood-hot");
+        using var _ = panel;
+        var el = panel.Elements.OfType<CompanionEl>().Single();
+        Assert.Equal("arona", AzurCompanion.Host(ctx));   // fixture clock is daytime
+        var before = el.ThreadLines;
+        // precondition: some message would read differently under the other host, or the test proves nothing
+        var seats = AzurTalk.Seats.From(ctx.Settings, mood.Widgets);
+        Assert.Contains(mood.Messages, m => m.Who == null
+            && (AzurTalk.Sender(m, "arona", seats) != AzurTalk.Sender(m, "plana", seats)
+                || AzurTalk.Line(m, "arona", "", seats, false) != AzurTalk.Line(m, "plana", "", seats, false)));
+
+        ctx.Now = ctx.Now.Date.AddHours(20);
+        Assert.Equal("plana", AzurCompanion.Host(ctx));
+        panel.Update(ctx);
+
+        Assert.Equal(before, el.ThreadLines);
+    }
+
     [Theory]
     [InlineData(0, 0, true)]
     [InlineData(3, -2, true)]

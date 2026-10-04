@@ -68,9 +68,6 @@ internal static class AzurCompanion
 /// </summary>
 internal sealed class CompanionEl(AzurCard card) : AzEl(card), IPokeTarget, IScrollTarget
 {
-    /// <summary>The thread falls back to the host's idle line once nothing has been said for this long.</summary>
-    public const double QuietS = 300;
-
     private static readonly float RowH = U(102), TalkHeadH = U(22), TalkBodyH = U(104), TalkBottom = U(12);
 
     /// <summary>One line of the thread; <paramref name="Seq"/> is its message's, 0 for the idle line and
@@ -89,6 +86,10 @@ internal sealed class CompanionEl(AzurCard card) : AzEl(card), IPokeTarget, IScr
     private readonly Fade<Host> _hostLook = new();
     private readonly TalkScroll _scroll = new();
     private readonly List<long> _seqs = new();
+    /// <summary>Each message's sender and line as first shown, by seq: host-owned topics resolve
+    /// against the current host, so without this the whole history would change speaker and wording
+    /// at the 6:00/18:00 handover. Pruned to the messages still in <see cref="SystemMood.Messages"/>.</summary>
+    private readonly Dictionary<long, (string Who, string Line)> _said = new();
 
     private readonly record struct Host(string Who, string Mood, bool Asleep);
 
@@ -135,13 +136,21 @@ internal sealed class CompanionEl(AzurCard card) : AzEl(card), IPokeTarget, IScr
             _items.Add(new(null, "", $"collector stopped · {AzurTalk.Name(_host)} is asleep"));
             return;
         }
-        bool recent = m.Messages.Count > 0 && (c.NowQpc - m.LastPostQpc) < QuietS * System.Diagnostics.Stopwatch.Frequency;
-        if (recent)
-            foreach (var msg in m.Messages)
+        // seqs only grow, so everything below the oldest kept message has left the thread
+        long oldest = m.Messages.Count > 0 ? m.Messages[0].Seq : long.MaxValue;
+        foreach (long s in _said.Keys) if (s < oldest) _said.Remove(s);
+        foreach (var msg in m.Messages)
+        {
+            if (!_said.TryGetValue(msg.Seq, out var said))
             {
                 string who = AzurTalk.Sender(msg, _host, seats);
-                if (AzurTalk.Line(msg, _host, addr, seats, art) is { } line) _items.Add(new(who, AzurTalk.Name(who), line, msg.Seq));
+                // a message no deck has a line for is skipped, and not frozen: it is not shown yet
+                if (AzurTalk.Line(msg, _host, addr, seats, art) is not { } line) continue;
+                _said[msg.Seq] = said = (who, line);
             }
+            _items.Add(new(said.Who, AzurTalk.Name(said.Who), said.Line, msg.Seq));
+        }
+        // the host's idle line only stands in for an empty thread, never for a quiet one
         if (_items.Count == 0) _items.Add(new(_host, AzurTalk.Name(_host), AzurTalk.IdleLine(_state, _host, addr)));
     }
 
@@ -374,6 +383,9 @@ internal sealed class CompanionEl(AzurCard card) : AzEl(card), IPokeTarget, IScr
     /// <summary>The wheel over the MomoTalk zone scrolls the thread, a bubble line per notch.</summary>
     public bool Wheel(PanelContext ctx, double x, double y, int notches)
         => _talk && Hit(_zone, x, y) && _scroll.Wheel(notches, LineH, ctx.NowQpc);
+
+    /// <summary>The thread as last resolved: sender and text per line, for the tests.</summary>
+    internal IReadOnlyList<(string? Who, string Text)> ThreadLines => _items.Select(i => (i.Who, i.Text)).ToList();
 
     /// <summary>The sender of the message drawn at (<paramref name="x"/>, <paramref name="y"/>), or null.</summary>
     internal string? BubbleAt(double x, double y)
