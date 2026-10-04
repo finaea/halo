@@ -117,6 +117,8 @@
                                        Visibility="{Binding IsBoolean, Converter={StaticResource BoolToVisibility}}" />
                       <ComboBox ItemsSource="{Binding Choices}" SelectedItem="{Binding SelectedChoice, Mode=TwoWay}" MinWidth="180"
                                 Visibility="{Binding IsChoice, Converter={StaticResource BoolToVisibility}}" />
+                      <TextBox Text="{Binding TextValue, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" MinWidth="180" AutomationProperties.Name="{Binding Label}"
+                               Visibility="{Binding IsText, Converter={StaticResource BoolToVisibility}}" />
                     </Grid>
                   </Grid>
                 </DataTemplate>

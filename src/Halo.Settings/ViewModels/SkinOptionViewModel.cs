@@ -21,6 +21,7 @@ public sealed class SkinOptionViewModel : ObservableObject
     private double _numberValue;
     private bool _boolValue;
     private ChoiceItem? _selectedChoice;
+    private string _textValue = "";
 
     public string Key => _spec.Key;
     public string Label => _spec.Label;
@@ -28,6 +29,7 @@ public sealed class SkinOptionViewModel : ObservableObject
     public bool IsNumber => _spec.Kind is OptionKind.Int or OptionKind.Double;
     public bool IsBoolean => _spec.Kind == OptionKind.Bool;
     public bool IsChoice => _spec.Kind == OptionKind.Enum;
+    public bool IsText => _spec.Kind == OptionKind.Text;
     public double Minimum { get; }
     public double Maximum { get; }
     public int Decimals => _spec.Kind == OptionKind.Int ? 0 : 1;
@@ -73,6 +75,14 @@ public sealed class SkinOptionViewModel : ObservableObject
         set { if (Set(ref _selectedChoice, value) && value is not null) Changed(); }
     }
 
+    /// <summary>The exact string, empty included — "Empty leaves the name out" is a real choice
+    /// for addressAs, not a missing value.</summary>
+    public string TextValue
+    {
+        get => _textValue;
+        set { if (Set(ref _textValue, value ?? "")) Changed(); }
+    }
+
     public SkinOptionViewModel(OptionSpec spec, Action<string, string?> save, bool canInherit)
     {
         _spec = spec;
@@ -100,7 +110,9 @@ public sealed class SkinOptionViewModel : ObservableObject
         finally { _applying = false; }
     }
 
-    private string Current => IsBoolean ? (BoolValue ? "true" : "false")
+    // Text first: falling through to the number path once stored "0" as the user's name.
+    private string Current => IsText ? TextValue
+        : IsBoolean ? (BoolValue ? "true" : "false")
         : IsChoice ? SelectedChoice?.Value ?? _spec.Default
         : NumberValue.ToString(CultureInfo.InvariantCulture);
 
@@ -121,6 +133,7 @@ public sealed class SkinOptionViewModel : ObservableObject
             NumberValue = double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double d) ? d : Minimum;
             BoolValue = value.Equals("true", StringComparison.OrdinalIgnoreCase);
             SelectedChoice = Choices.FirstOrDefault(c => c.Value.Equals(value, StringComparison.OrdinalIgnoreCase)) ?? Choices.FirstOrDefault();
+            TextValue = value;
         }
         finally { _applying = applying; }
     }

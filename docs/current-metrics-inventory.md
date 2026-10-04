@@ -408,9 +408,9 @@ different file name.
 | Metric | Then | Now | Why |
 |---|---|---|---|
 | `dlss.{sr,rr,fg}.present` | presentmon · 0.5 | ngx · 1 | Also true when an NVIDIA App override has loaded the feature. A game the scan cannot open now reads N/A rather than 0. |
-| `dlss.{sr,rr,fg}.active` | Did not exist | ngx · 1 | 1 while the feature is created and running. N/A when nothing says. |
+| `dlss.{sr,rr,fg}.active` | Did not exist | ngx · 1 | 1 when NVAPI reports the feature as loaded and created; 0 when inactive; N/A when NVAPI provides no active state. |
 | `dlss.{sr,rr,fg}.preset` | Did not exist | ngx · 1 | NVIDIA's preset number (A = 1 … O = 15). Only present while an override applies one. |
-| `dlss.{sr,rr}.mode`, `dlss.fg.mode` | Did not exist | ngx · 1 | Performance mode (3 = Ultra Performance, 5 = DLAA) and frame-generation mode (1 Fixed, 3 Dynamic), on the same terms. |
+| `dlss.{sr,rr}.mode`, `dlss.fg.mode` | Did not exist | ngx · 1 | Performance mode (3 = Ultra Performance, 5 = DLAA) and frame-generation mode (1 = Fixed, 3 = Dynamic). Only present while an override applies the mode. |
 | `dlss.version` | presentmon · `310,3,0,0` | ngx · 0.1 · `310.3.0` | Dotted. Empty under an override, whose DLSS file is not the game's. |
 | `dlss.model` | Transformer/CNN guess | Removed | It was a guess from the version number, and it was wrong under overrides. |
 | `fps.fg.multiplier` | Worked out by the widget | pclstats · calc, derived · 5 | `fps.displayed ÷ render.rate.hz`, falling back to `fps.fgratio`, so every skin shows one number. |

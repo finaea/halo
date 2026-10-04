@@ -344,14 +344,11 @@ machine in use throughout (6–10 % total CPU), so differences of about half a p
 | Azur Archive, motion subtle (default) | 4.12 · 3.78 | **4.0** |
 | Azur Archive, motion full, 30 fps | 4.16 · 5.57 | **4.9** |
 
-Azur Archive costs about one point of a core more than Rainformer, because each card draws more:
-tabs, emblems, two-tone rows, faces and halos. An off-screen benchmark found no single part
-responsible. **Subtle** costs the same as off: transitions start only when something a card draws
-changes. An earlier build started one on every warning step, including the lower steps that change
-nothing on screen — about 150 a minute on this machine, for +2.9 points — and was fixed before this
-measurement. **Full** adds about one point in Halo and three to four in `dwm.exe`, which composes the
-turning halos. An earlier measurement, taken before the per-student halos, found no measurable
-difference between 15, 30 and 60 fps.
+In these runs, Azur Archive used about one percentage point of a core more than Rainformer.
+Its cards draw more elements, including faces and halos. Subtle motion showed no measurable
+increase over off; transitions start only when a visible state changes. Full motion at 30 fps
+added about one percentage point in Halo.Widgets and three to four in `dwm.exe`, which composes
+the turning halos.
 
 ---
 

@@ -172,8 +172,8 @@ are shown as spaces. The lines are otherwise unchanged and are removed with this
 
 ## Halo shapes (`halos/*.json`)
 
-Each student's halo above her card face is our own vector drawing, simplified to read at about
-28 px: a few rings, arcs and polygons in a small JSON file, drawn at runtime in her halo colour.
+Each student's halo above her card face is a vector drawing made for Halo, simplified to read at
+about 28 px: a few rings, arcs and polygons in a small JSON file, drawn at runtime in her halo colour.
 The shapes follow the game's character design, so they live here and go with the folder; without
 them every face gets the generic ring. The file format is described on `HaloShape`
 (`src/Halo.Widgets/Skins/AzurArchive/AzurHalos.cs`).

@@ -130,13 +130,13 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
     ///
     /// Everything keyed on FrameID is dropped on a change: FrameID is monotonic PER PROCESS, so
     /// the previous game's half-finished frames would collide with the new one's and produce
-    /// latency numbers belonging to neither.</summary>
-    public void SetTargetPid(int pid)
+    /// latency numbers belonging to neither. Returns true when the target changed.</summary>
+    public bool SetTargetPid(int pid)
     {
-        if (pid == _targetPid) return;   // volatile read: the unchanged case never takes the lock
+        if (pid == _targetPid) return false;   // volatile read: the unchanged case never takes the lock
         lock (_lock)
         {
-            if (pid == _targetPid) return;
+            if (pid == _targetPid) return false;
             _targetPid = pid;
             _pingConsumeMs.Clear();
             _queueForFrame.Clear();
@@ -146,6 +146,7 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
             _simCountWindow = 0;
             _windowStartMs = -1;   // restart the rendered-rate window with the new game
         }
+        return true;
     }
 
     private void OnAnyEvent(TraceEvent data)
@@ -243,7 +244,12 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
         // The two providers run on their own host threads with no reference to each other, so the
         // target travels through the section the same way latency.pc.ms reads the display segment
         // back (below). A missing or stale pid widens to accept-all rather than going silent.
-        SetTargetPid(sink.TryGet(MetricNames.FpsAppPid, out double pid, maxAgeS: 3) ? (int)pid : 0);
+        // A new target's rendered rate is unknown until its first window closes (≥500 ms). The slot
+        // still holds the old game's rate and would pass a 3 s age check, so fps.fg.multiplier
+        // would divide this game's displayed rate by the last game's rendered one (120 Hz Reflex
+        // game → 60 fps one read 0.5× for ~2 s). Stale it so the multiplier uses its fallback.
+        if (SetTargetPid(sink.TryGet(MetricNames.FpsAppPid, out double pid, maxAgeS: 3) ? (int)pid : 0))
+            sink.MarkStale(MetricNames.RenderRateHz);
 
         double render = 0, queue = 0, renderHz = 0;
         bool haveRender, haveQueue, eventsFresh;
