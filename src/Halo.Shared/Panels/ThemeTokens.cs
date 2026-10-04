@@ -45,6 +45,9 @@ public static class ThemeTokens
         ("devWarn4",        "#FF0000FF", "Staged warning 4"),
         ("devWarn5",        "#CC0000FF", "Staged warning 5 (critical)"),
         ("staleBadge",      "#FF5050DC", "Stale-data badge"),
+        // Rainformer's frame colour (Variables.inc StrokeColor). Its light set draws the frame at
+        // width 0, i.e. not at all, so this value is only seen once a stroke width is set.
+        ("stroke",          "#608ACB64", "Card outline"),
     ];
 
     /// <summary>Default colour for a token, or null when the token is unknown.</summary>

@@ -28,9 +28,11 @@ public static class ConfigMigrator
         {
             using var doc = JsonDocument.Parse(File.ReadAllText(path));
             if (doc.RootElement.ValueKind != JsonValueKind.Object) return false;
+            // < 2, not < current: v2 and later are upgraded in memory by SchemaV3 at load, and
+            // treating a v2 file as v1 here would rebuild it from the v1 field names — i.e. wipe it.
             return !doc.RootElement.TryGetProperty("schemaVersion", out var v)
                 || v.ValueKind != JsonValueKind.Number
-                || v.GetInt32() < AppSettings.CurrentSchemaVersion;
+                || v.GetInt32() < 2;
         }
         catch { return false; }   // unreadable: leave it alone rather than overwrite it
     }
@@ -59,23 +61,38 @@ public static class ConfigMigrator
 
         var settings = BuildSettings(oldSettings?.RootElement, oldTheme?.RootElement);
         var widgets = BuildWidgets(oldWidgets?.RootElement, oldSettings?.RootElement);
+        // Built in the v2 shape (the field mapping below is v1 → v2), then taken the rest of the way
+        // by the same upgrade every v2 file gets, so there is one v2 → v3 rule, not two.
+        SchemaV3.Upgrade(settings);
+        SchemaV3.Upgrade(widgets);
+
+        // In place, the legacy paths ARE the target paths, so the backup has to be a copy taken
+        // before the write. It used to be a move after it — which moved the freshly migrated files
+        // away and left the v1 bytes already overwritten. A failed copy throws here, before
+        // anything is written, so the originals are never lost without a backup.
+        if (inPlace)
+        {
+            BackupCopy(legacySettings);
+            BackupCopy(legacyWidgets);
+        }
 
         Directory.CreateDirectory(targetDir);
         WriteJson(Path.Combine(targetDir, "settings.json"), settings, ConfigJsonContext.Default.AppSettings);
         WriteJson(Path.Combine(targetDir, "widgets.json"), widgets, ConfigJsonContext.Default.WidgetsConfig);
 
-        if (inPlace)
-        {
-            Backup(legacySettings);
-            Backup(legacyWidgets);
-            Backup(legacyTheme);
-        }
+        // theme.json has no v3 counterpart, so nothing is written over it and a move is right.
+        if (inPlace) Backup(legacyTheme);
 
         oldSettings?.Dispose(); oldTheme?.Dispose(); oldWidgets?.Dispose();
 
-        string detail = $"migrated {widgets.Widgets.Count} widgets from {legacyDir} to {targetDir} (schema v2)";
+        string detail = $"migrated {widgets.Widgets.Count} widgets from {legacyDir} to {targetDir} (schema v{AppSettings.CurrentSchemaVersion})";
         log?.Invoke(detail);
         return new Result(true, detail);
+    }
+
+    private static void BackupCopy(string path)
+    {
+        if (File.Exists(path)) File.Copy(path, path + ".v1.bak", overwrite: true);
     }
 
     private static void Backup(string path)
@@ -97,17 +114,18 @@ public static class ConfigMigrator
     {
         var a = new AppSettings
         {
+            SchemaVersion = 2,
             LockAll = Bool(s, "lockAll") ?? false,
             Snap = true,
         };
 
-        a.Appearance.FontFamily = Str(s, "fontFamily") ?? Str(theme, "fontFamily") ?? a.Appearance.FontFamily;
-        a.Appearance.TextSizePt = Num(theme, "textSizePt") ?? a.Appearance.TextSizePt;
+        a.Appearance.FontFamily = Str(s, "fontFamily") ?? Str(theme, "fontFamily");
+        a.Appearance.V2TextSizePt = Num(theme, "textSizePt");
         // v1 kept the widget scale in theme.json. Write it back as an explicit number: an existing
         // layout is tuned to its scale, so "auto" (the fresh-install default) would resize it.
         double? scale = Num(theme, "scale");
         a.Appearance.Scale = scale is { } sc ? ScaleValue.Fixed(sc) : ScaleValue.Auto;
-        a.Appearance.Colors = MigrateColors(theme);
+        a.Appearance.V2Colors = MigrateColors(theme);
 
         a.Collector.FrameLowsWindowS = Num(s, "frameLowsWindowS") ?? a.Collector.FrameLowsWindowS;
         a.Collector.PresentMonEtwFlushMs = (int)(Num(s, "presentMonEtwFlushMs") ?? a.Collector.PresentMonEtwFlushMs);
@@ -172,7 +190,7 @@ public static class ConfigMigrator
 
     private static WidgetsConfig BuildWidgets(JsonElement? w, JsonElement? settings)
     {
-        var cfg = new WidgetsConfig();
+        var cfg = new WidgetsConfig { SchemaVersion = 2 };
         if (w is not { } root || !root.TryGetProperty("widgets", out var list) || list.ValueKind != JsonValueKind.Array)
             return cfg;
 

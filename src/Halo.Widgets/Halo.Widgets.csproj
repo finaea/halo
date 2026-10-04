@@ -8,6 +8,10 @@
     <TieredPgo>true</TieredPgo>
   </PropertyGroup>
   <ItemGroup>
+    <!-- SkinAssets' folder-taking constructor and RenderContext.DigitAdvance are test seams -->
+    <InternalsVisibleTo Include="Halo.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Halo.Metrics\Halo.Metrics.csproj" />
     <ProjectReference Include="..\Halo.Shared\Halo.Shared.csproj" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
@@ -20,5 +24,13 @@
          so they must land next to the exe in every build and publish. -->
     <Content Include="..\..\assets\fonts\*.ttf" LinkBase="assets\fonts" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\assets\halo.ico" Link="assets\halo.ico" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Skin fonts and art (Dx.LoadFonts, SkinAssets). build.ps1 copies the whole assets tree for a
+         release anyway; this is what puts them next to a Debug exe and the render harness. -->
+    <Content Include="..\..\assets\skins\**\*" LinkBase="assets\skins" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Render-harness fixtures (the render verb). Embedded rather than copied, so nothing extra lands
+         next to the exe in dist\app; resource name = Halo.Widgets.Harness.Fixtures.<name>.json. -->
+    <EmbeddedResource Include="Harness\Fixtures\*.json" />
   </ItemGroup>
 </Project>

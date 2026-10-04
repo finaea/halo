@@ -1,0 +1,5 @@
+{
+  "description": "A click on the companion's host at the last tick.",
+  "extends": "idle",
+  "poke": "arona"
+}

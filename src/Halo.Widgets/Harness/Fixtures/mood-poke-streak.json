@@ -1,0 +1,6 @@
+{
+  "description": "Ten clicks in a row on the host, 2.2 s apart: the last poke lands on streak tier 4 (gives up).",
+  "extends": "idle",
+  "poke": "arona",
+  "pokeCount": 10
+}

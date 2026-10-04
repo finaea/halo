@@ -190,6 +190,7 @@ widget from its options.
 | **fans** | `fan.{n}.rpm` | Per fan channel | PawnIO + a SuperIO chip LibreHardwareMonitor supports |
 | **topcpu** | `proc.topcpu.{agg}{n}.name / .cpu.pct / .ram.b`, `proc.count` | Per rank (1–10) | Nothing |
 | **topram** | `proc.topram.{agg}{n}.name / .ram.b / .cpu.pct` | Per rank (1–10) | Nothing |
+| **companion** | `sys.uptime.s` + the widget-side mood (`SystemMood`: temperatures against their warn steps, CPU load, presenting app, RAM, fan duty, network traffic) | — | Nothing |
 
 Three things the panels work out themselves instead of reading:
 
@@ -288,6 +289,7 @@ in these tables is written by hand.
 | `gpu.<i>.power.w` | 1 | W | latest | 10 | 117.093 |
 | `gpu.<i>.power.w.max` | 1 | W | running max | 10 | 131.373 |
 | `gpu.<i>.temp.c` | 1 | °C | latest | 10 | 51 |
+| `gpu.<i>.temp.c.max` | 1 | °C | running max | 10 | *added after this run* |
 | `gpu.<i>.usage.pct` | 1 | % | rolling window (1 s) | 10 | 32 |
 | `gpu.<i>.vendor` | 1 | text | static | 0 *(static)* | nvidia |
 | `gpu.<i>.vram.pct` | 1 | % | calc | 10 | 24.279 |
@@ -304,6 +306,7 @@ in these tables is written by hand.
 | `cpu.package.power.w` | 1 | W | latest | 5 | *N/A* |
 | `cpu.package.power.w.max` | 1 | W | running max | 5 | *N/A* |
 | `cpu.package.temp.c` | 1 | °C | latest | 5 | *N/A* |
+| `cpu.package.temp.c.max` | 1 | °C | running max | 5 | *added after this run* |
 
 **`lhm-superio`** *(values N/A on this unelevated run)*
 
@@ -329,6 +332,8 @@ in these tables is written by hand.
 |---|---|---|---|---|---|
 | `gpu.<i>.voltage.v` | 1 | V | latest | 1 | 0.970 |
 | `gpu.<i>.voltage.v.max` | 1 | V | running max | 1 | 0.975 |
+
+For an AMD or Intel card this provider also publishes the `gpu.<i>.temp.c` family, `.max` included, the same as `nvml` does for an NVIDIA one.
 
 **`presentmon`** *(values N/A here: no 3D app, and a production collector owns the one
 PresentMon ETW session)*

@@ -308,6 +308,53 @@ between, so its cost does not change with the slider.
 
 ---
 
+## Skins, 2026-10-04
+
+### Image memory
+
+These are image-memory estimates from the shipped files, not live measurements. Rainformer draws
+no images; the Azur Archive cases below include decoded images and cached copies.
+
+`SkinAssets` decodes each picture once, at twice the size it is drawn (never above the file's own
+size), and keeps it until the graphics device goes away. A pre-drawn copy of each clipped face or
+portrait is kept at its drawn size as well (at most 96 of them). The shipped art is 18 companion
+portraits at 512 × 512, 108 card faces and chat icons at 256 × 256, and Manjuu at 128 × 128; 4 bytes
+a pixel.
+
+| Case | Decoded pictures | Pre-drawn copies | Total |
+| --- | --- | --- | --- |
+| Default scale 1.7 at 100 % DPI, every file seen once | portraits 208 × 208 (≈ 3.0 MB), faces 96 × 96 (≈ 3.8 MB), icons and Manjuu (≈ 0.1 MB) ≈ 6.9 MB | ≈ 1–3 MB | **≈ 8–10 MB** |
+| Scale 3.5 at 150 % DPI (5.25 px per unit), every file seen once | every file at its full size ≈ 45 MB | up to the 96-copy limit ≈ 26 MB | **≈ 70 MB** |
+
+Both rows assume every picture has been shown at least once. A layout only shows the students on
+its own cards, so a real session stays below them. Portraits reach their full 512 px size at about
+4.2 px per logical unit.
+
+### CPU
+
+**Method.** The same `TotalProcessorTime` change on the Halo.Widgets process — 25 s to settle, then
+a 120 s window — with the skin and motion level switched live in `settings.json` and the runs
+alternated. A 12-widget layout across three monitors (one at 120 DPI), an elevated collector, and a
+machine in use throughout (6–10 % total CPU), so differences of about half a point are noise.
+
+| Setting | % of one core, per run | Mean |
+|---|---|---|
+| Rainformer | 2.98 · 2.94 | **3.0** |
+| Azur Archive, motion off | 3.78 · 4.03 | **3.9** |
+| Azur Archive, motion subtle (default) | 4.12 · 3.78 | **4.0** |
+| Azur Archive, motion full, 30 fps | 4.16 · 5.57 | **4.9** |
+
+Azur Archive costs about one point of a core more than Rainformer, because each card draws more:
+tabs, emblems, two-tone rows, faces and halos. An off-screen benchmark found no single part
+responsible. **Subtle** costs the same as off: transitions start only when something a card draws
+changes. An earlier build started one on every warning step, including the lower steps that change
+nothing on screen — about 150 a minute on this machine, for +2.9 points — and was fixed before this
+measurement. **Full** adds about one point in Halo and three to four in `dwm.exe`, which composes the
+turning halos. An earlier measurement, taken before the per-student halos, found no measurable
+difference between 15, 30 and 60 fps.
+
+---
+
 ## Open at the time of the last measurement
 
 - **An elevated measurement of the collector at the current rates.** `lhm-storage`, `lhm-cpu`'s real

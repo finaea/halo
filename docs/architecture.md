@@ -189,6 +189,77 @@ per-widget opacity and the context menu — lives in `WidgetWindow`. Attaching t
 Progman or the wallpaper `WorkerW` window), the notification-area icon and the collector watchdog
 live in `App`.
 
+## Skins
+
+**A skin owns how a panel looks, never what it measures.** The metrics a panel shows, its options,
+its warning thresholds and the rule that an unreadable value reads `N/A` all stay in `PanelCatalog`
+and the shared panel data, so they behave the same whatever skin draws them. A skin owns the colour
+tokens and presets, the card, the layout of each panel, its fonts and images, and its own options.
+
+A skin has two halves, so the Settings app never has to load the renderer:
+
+| Half | Where | Holds |
+| --- | --- | --- |
+| `SkinInfo` | `src/Halo.Shared/Skins/SkinCatalog.cs` | Id, name, credit line, colour tokens, presets, options, fonts, image slots and the contrast pairs its presets must pass. Read by both the renderer and Settings |
+| `ISkin` | `src/Halo.Widgets/Skins/` | `Build(type, context)` returns a panel's element tree with its card drawing (`ICardChrome`) attached. `SkinRegistry` maps an id to its `ISkin`; an id this Halo does not know draws as Rainformer and stays in the file |
+
+The two skins are built differently on purpose:
+
+- **Rainformer** (`Skins/Rainformer/`) is hand-built per panel, because it is a pixel transcription
+  of the original Rainmeter skin (`tools/extracted/*.json` is its reference). Golden images of every
+  panel under every test fixture (`tests/Halo.Tests/goldens/rainformer/`) fail the tests if one
+  pixel moves.
+- **Azur Archive** (`Skins/AzurArchive/`) builds most panels from skin-neutral **panel models**
+  (`src/Halo.Widgets/PanelModels/`): an ordered list of blocks — title, hero number, stat row,
+  grid, graph, list — that a skin maps to its own elements. Adding a metric to a model shows it in
+  every skin built this way. Graphs stay the shared `GraphEl` in every skin, and a skin only changes
+  how they are painted, because frame-graph wake-ups and the graph settings are wired to that type.
+
+**Colours resolve in one place**, `Theme.Resolve`: the skin's base palette, then the chosen
+preset, then the global colour changes, then the widget's own, then per-metric colours. A widget
+either follows the global look or picks its own preset; global colour changes do not stack onto a
+different preset. Changes are stored per skin (`appearance.skins.<skin id>` in both settings files,
+config schema v3), so switching skins and back keeps them. A change of skin, font or a structural
+skin option rebuilds the widget; anything else, including a preset change, applies in place.
+
+**Azur Archive messages.** The Companion's MomoTalk thread adds greetings, late-night reminders,
+birthdays and holidays, idle chatter, and a "GG" message after a game session of at least 20
+minutes. Some messages get a reply from another student. Clicking a character or a message bubble
+pokes that character or sender; repeated pokes change the response. **Character lines** controls
+the messages. Network widgets also have a **Second character** option (`character2`). Bundled
+in-game lines appear only while **Game art** is on.
+
+**Images** come from `SkinAssets`. A named slot resolves to the user's own file in
+`<data folder>\skins\<skin id>\user-art\`, then the bundled file, then nothing — a skin always
+draws without its picture rather than showing a placeholder. Bitmaps are decoded once per D2D
+device at twice the size they are drawn and shared by every window.
+
+**Game art is isolated.** Azur Archive's character art lives only in
+`assets/skins/azur-archive/game-art/`, with a `CREDITS.md` listing each file's source and owner.
+The per-student halo shapes are stored there as data, with a plain ring as the fallback.
+Settings-gallery pictures that show the art are rendered into that folder too; an art-free set sits
+beside it in `previews/`. The skin draws correctly with the folder deleted, so a takedown request is
+one folder and a rebuild — the steps are in [game-art-removal.md](game-art-removal.md).
+
+**Contrast is tested.** `PresetContrastTests` checks every preset of every skin against the pairs
+its `SkinInfo` declares: main text at 4.5:1 with the card composited over black, mid-grey and white
+wallpaper, warnings and graphics at 3:1 on grey. Rainformer Light is the one exception, because it
+reproduces the original palette exactly. The check assumes full opacity, which the per-widget
+opacity setting says in Settings.
+
+**Motion never touches data.** `appearance.motion` (off, subtle, full) is capped by Windows'
+**Animation effects** setting. Entrances and state changes — a warning step, `N/A`, a character's
+expression — ease in over about 200 ms; numbers, bars and graphs always show the latest reading at
+once. At **full**, a widget runs up to two looping movements (the network card turns both of its
+halos), each on a cached composition visual, without redrawing the panel. **Settings → Appearance → Loop frame rate** selects 15, 24, 30 or 60 fps
+(`appearance.motionFps`, 30 by default). The loop pauses while a game is presenting frames.
+Rainformer has no motion.
+
+**Seeing a change** does not need a desktop. `Halo.Widgets.exe --render <out.png> --type <panel>
+--skin <id> --preset <id> --fixture idle|gaming|hot|na|partial --warp` draws one panel off-screen
+from a fixed metric snapshot, and `--render <assets dir> --previews` draws the Settings gallery
+pictures (`src/Halo.Widgets/Harness/`).
+
 ## Frame data has two lanes
 
 Frame timing is measured twice, on purpose, because the two questions have different answers.
@@ -305,9 +376,12 @@ layout.
 | --- | --- |
 | Add a sensor | `src/Halo.Collector/ISensorProvider.cs`, then a neighbour in `Providers/` |
 | Add a metric to a panel | `src/Halo.Shared/Panels/PanelCatalog.cs` |
-| Add a panel type | `PanelCatalog.cs`, then `src/Halo.Widgets/PanelDefs/` |
+| Add a panel type | `PanelCatalog.cs`, then `src/Halo.Widgets/Skins/Rainformer/` and a model in `src/Halo.Widgets/PanelModels/` |
+| Add a preset | `src/Halo.Shared/Skins/SkinCatalog.cs` |
+| Add a skin | `SkinCatalog.cs`, an `ISkin` in `src/Halo.Widgets/Skins/`, and an entry in `SkinRegistry` |
+| Check how a panel looks | `Halo.Widgets.exe --render` (see [Skins](#skins)) |
 | Read Halo's data from another app | [metrics-protocol.md](metrics-protocol.md), `src/Halo.Metrics` |
 | Change a poll rate | `src/Halo.Collector/CollectorRates.cs` |
 | Understand a number on screen | [current-metrics-inventory.md](current-metrics-inventory.md) |
 | Know what installing puts on a machine | [install-footprint.md](install-footprint.md) |
-| Check nothing broke | `dotnet test Halo.sln` — `tests/Halo.Tests` covers frame statistics, the section layout, provider freshness, settings loading and saving, and the logger |
+| Check nothing broke | `dotnet test Halo.sln` — `tests/Halo.Tests` covers frame statistics, the section layout, provider freshness, settings loading and saving, the logger, and the skins (Rainformer golden images, preset contrast, colour resolution, motion) |

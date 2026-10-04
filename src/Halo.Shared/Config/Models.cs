@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Halo.Shared.Skins;
 
 namespace Halo.Shared.Config;
 
@@ -7,11 +8,13 @@ namespace Halo.Shared.Config;
 /// config\settings.json — everything that is not per widget. Schema v2 (settings plan §Config
 /// schema v2): hardware lists are gone (the collector discovers hardware and widgets pick from
 /// it), appearance moved in from the deleted theme.json, and the collector's own knobs live
-/// under "collector" so it is obvious who reads what.
+/// under "collector" so it is obvious who reads what. Schema v3 only reshaped "appearance".
 /// </summary>
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 2;
+    /// <summary>v3 = skin-scoped appearance (<see cref="SchemaV3"/>). v2 files are upgraded in
+    /// memory at load; v1 (no version) goes through <see cref="ConfigMigrator"/> first.</summary>
+    public const int CurrentSchemaVersion = 3;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
 
@@ -42,17 +45,74 @@ public sealed class DiagnosticsSettings
     public string LogLevel { get; set; } = "info";
 }
 
-/// <summary>Global look: the defaults every widget inherits unless it overrides them.</summary>
+/// <summary>
+/// Global look: the defaults every widget inherits unless it overrides them. Schema v3 (skin
+/// system tech plan §4): colours and skin options are keyed per skin, as a preset reference plus
+/// tweaks, so switching skins and back keeps each skin's tweaks. <c>Theme.Resolve</c> is the one
+/// place that turns this into a palette.
+/// </summary>
 public sealed class AppearanceSettings
 {
+    /// <summary>Skin id from <see cref="SkinCatalog"/>. An id this Halo does not know is kept
+    /// in the file and drawn as Rainformer.</summary>
+    public string Skin { get; set; } = SkinCatalog.RainformerId;
+
     /// <summary>"auto" (per-monitor rule, hardware plan H7) or a fixed number.</summary>
     public ScaleValue Scale { get; set; } = ScaleValue.Auto;
-    public string FontFamily { get; set; } = "Trebuchet MS";
-    public double TextSizePt { get; set; } = 8;
-    public double CornerRadius { get; set; } = 4;
 
-    /// <summary>Theme tokens as #RRGGBBAA. Missing tokens fall back to the built-in palette.</summary>
+    /// <summary>Null = the skin's own font.</summary>
+    public string? FontFamily { get; set; }
+
+    /// <summary>"off" | "subtle" | "full", capped by Windows' "Animation effects" (Halo.Widgets'
+    /// <c>Motion.Resolve</c>). Subtle eases state changes in; full adds the one ambient loop.</summary>
+    public string Motion { get; set; } = "subtle";
+
+    /// <summary>How many times a second the ambient loop moves (motion full only): one of
+    /// <see cref="MotionFpsChoices"/>. Anything else reads as the default, 30.</summary>
+    public int MotionFps { get; set; } = 30;
+
+    public static readonly int[] MotionFpsChoices = [15, 24, 30, 60];
+
+    /// <summary><see cref="MotionFps"/> held to the choices Settings offers, so a hand edit of 0 or
+    /// 1000 can neither stop the loop nor make it spin the compositor.</summary>
+    public static int ValidMotionFps(int fps) => Array.IndexOf(MotionFpsChoices, fps) >= 0 ? fps : 30;
+
+    /// <summary>Per-skin preset + tweaks, keyed by skin id. Entries for unknown skins are kept.</summary>
+    public Dictionary<string, SkinSettings> Skins { get; set; } = new();
+
+    // ---- schema v2 fields: read once by SchemaV3.Upgrade, then nulled so they are never written ----
+
+    [JsonPropertyName("colors")] public Dictionary<string, string>? V2Colors { get; set; }
+    [JsonPropertyName("textSizePt")] public double? V2TextSizePt { get; set; }
+    [JsonPropertyName("cornerRadius")] public double? V2CornerRadius { get; set; }
+
+    /// <summary>This skin's entry, created when missing — for writers.</summary>
+    public SkinSettings SkinFor(string skinId)
+        => Skins.TryGetValue(skinId, out var s) ? s : Skins[skinId] = new SkinSettings();
+}
+
+/// <summary>One skin's look at one level (global or a widget): which preset, plus tweaks on top.
+/// Every field empty/null = inherit.</summary>
+public sealed class SkinSettings
+{
+    /// <summary>Preset id from the skin's catalog entry; null = inherit (a widget follows the global
+    /// look, the global look uses the skin's default preset).</summary>
+    public string? Preset { get; set; }
+
+    /// <summary>Token → #RRGGBBAA, applied over the preset. Unknown tokens are kept and ignored.</summary>
     public Dictionary<string, string> Colors { get; set; } = new();
+
+    /// <summary>The skin's own options (its catalog <c>Options</c>), as strings like panel options.</summary>
+    public Dictionary<string, string> Options { get; set; } = new();
+
+    [JsonIgnore] public bool IsEmpty => Preset == null && (Colors?.Count ?? 0) == 0 && (Options?.Count ?? 0) == 0;
+
+    public SkinSettings Clone() => new()
+    {
+        Preset = Preset,
+        Colors = new Dictionary<string, string>(Colors ?? new(), StringComparer.Ordinal),
+        Options = new Dictionary<string, string>(Options ?? new(), StringComparer.Ordinal),
+    };
 }
 
 /// <summary>Knobs only the collector reads. Rates are engineering constants and are NOT here.</summary>
@@ -94,7 +154,7 @@ public enum ZMode
     Topmost,
 }
 
-/// <summary>One widget window instance (config\widgets.json, schema v2).</summary>
+/// <summary>One widget window instance (config\widgets.json, schema v3).</summary>
 public sealed class WidgetInstance
 {
     public string Id { get; set; } = "";
@@ -164,13 +224,45 @@ public sealed class MetricSetting
 /// <summary>Per-widget appearance overrides; null = inherit the global value.</summary>
 public sealed class WidgetAppearance
 {
-    public Dictionary<string, string>? Colors { get; set; }
+    /// <summary>Skin override; null = the global skin.</summary>
+    public string? Skin { get; set; }
+
+    /// <summary>Per-skin overrides, same shape as the global ones. A widget that names its own
+    /// preset stops inheriting the global tweaks (see <c>Theme.Resolve</c>).</summary>
+    public Dictionary<string, SkinSettings>? Skins { get; set; }
+
     public string? FontFamily { get; set; }
     public ScaleValue? Scale { get; set; }
     public bool? ShowTitle { get; set; }
     public double? Width { get; set; }
     /// <summary>"C" or "F".</summary>
     public string? TempUnit { get; set; }
+
+    /// <summary>Schema v2 per-widget colours; moved into <see cref="Skins"/> by SchemaV3.Upgrade.</summary>
+    [JsonPropertyName("colors")] public Dictionary<string, string>? V2Colors { get; set; }
+
+    /// <summary>This skin's entry, created when missing — for writers.</summary>
+    public SkinSettings SkinFor(string skinId)
+    {
+        Skins ??= new();
+        return Skins.TryGetValue(skinId, out var s) ? s : Skins[skinId] = new SkinSettings();
+    }
+
+    /// <summary>Drop empty per-skin entries so "back to inherit" leaves nothing behind in the file.</summary>
+    public void PruneSkins()
+    {
+        if (Skins == null) return;
+        foreach (var id in Skins.Where(p => p.Value?.IsEmpty != false).Select(p => p.Key).ToList()) Skins.Remove(id);
+        if (Skins.Count == 0) Skins = null;
+    }
+
+    public WidgetAppearance Clone() => new()
+    {
+        Skin = Skin,
+        Skins = Skins?.ToDictionary(p => p.Key, p => p.Value.Clone(), StringComparer.Ordinal),
+        FontFamily = FontFamily, Scale = Scale, ShowTitle = ShowTitle, Width = Width, TempUnit = TempUnit,
+        V2Colors = V2Colors is null ? null : new Dictionary<string, string>(V2Colors, StringComparer.Ordinal),
+    };
 }
 
 public sealed class WidgetsConfig

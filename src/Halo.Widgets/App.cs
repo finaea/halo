@@ -16,7 +16,16 @@ public sealed unsafe class App : IDisposable
 {
     public ConfigStore ConfigStore { get; }
     public MetricCache Metrics { get; } = new();
+    /// <summary>One mood for the whole process (skin tech plan §5), read by every widget.</summary>
+    public SystemMood Mood { get; }
     public nint DesktopHost { get; private set; }
+
+    /// <summary><c>appearance.motion</c> capped by Windows' "Animation effects" (tech plan §5).
+    /// Re-resolved on a config change and on WM_SETTINGCHANGE, which the tray window hears.</summary>
+    public MotionLevel MotionLevel { get; private set; }
+    private bool _windowsAnimates = Motion.WindowsAnimates();
+    private long _nextLoopQpc;               // the ambient loops' next 30 Hz step (motion full)
+    private bool _loopGate;                  // AmbientLoop.Gate as of the last pass
 
     private static readonly ComponentLog WatchdogLog = Log.For("watchdog");
     private static readonly ComponentLog PlacementLog = Log.For("placement");
@@ -58,7 +67,11 @@ public sealed unsafe class App : IDisposable
         bool freshInstall = !File.Exists(Path.Combine(Paths.ConfigDir, "widgets.json"));
         SessionLog.SetPhase("loading config");
         ConfigStore = new ConfigStore(Paths.ConfigDir);
+        // read live, so a warn threshold changed in Settings moves the mood with the next tick. The
+        // birthdays are the one skin's cast that has any; a skin without a thread ignores them.
+        Mood = new SystemMood(() => ConfigStore.Widgets.Widgets, Skins.AzurArchive.AzurArchiveSkin.Birthdays);
         ApplyLogLevel();
+        ResolveMotion();
 
         // The phase is set before the device stack because what happens inside it can end the
         // process with no managed exception at all — see the breadcrumbs in Dx.CreateCore.
@@ -97,6 +110,22 @@ public sealed unsafe class App : IDisposable
     /// additionally ignores this once <c>HALO_LOG_LEVEL</c> has pinned the level, which is the
     /// whole point of that env var.</para>
     /// </summary>
+    private void ResolveMotion()
+    {
+        var level = Motion.Resolve(ConfigStore.Settings.Appearance.Motion, _windowsAnimates);
+        if (level != MotionLevel) Log.Info($"motion: {level} (setting \"{ConfigStore.Settings.Appearance.Motion}\", Windows animation effects {(_windowsAnimates ? "on" : "off")})");
+        MotionLevel = level;
+    }
+
+    /// <summary>A system setting changed (WM_SETTINGCHANGE, broadcast to top-level windows): the
+    /// one Halo cares about is "Animation effects". Reading it is a single cheap call, so any
+    /// change re-reads it rather than decoding which setting it was.</summary>
+    public void SystemSettingChanged()
+    {
+        _windowsAnimates = Motion.WindowsAnimates();
+        ResolveMotion();
+    }
+
     private void ApplyLogLevel()
     {
         // Null-safe on purpose: a settings.json carrying "diagnostics": null deserialises the
@@ -169,6 +198,7 @@ public sealed unsafe class App : IDisposable
             var ctx = new PanelContext
             {
                 Metrics = Metrics,
+                Mood = Mood,
                 // one resolved theme per widget: global appearance + this widget's overrides
                 Theme = ResolveTheme(inst, mon, missing),
                 Settings = ConfigStore.Settings,
@@ -176,7 +206,7 @@ public sealed unsafe class App : IDisposable
                 Type = PanelCatalog.Find(inst.Type),
                 MaxRateHz = maxHz,
             };
-            var panel = PanelDefs.PanelFactory.Create(inst.Type, ctx);
+            var panel = Skins.PanelFactory.Create(inst.Type, ctx);
             if (panel == null)
             {
                 Log.Warn($"unknown widget type '{inst.Type}' ({inst.Id})");
@@ -247,13 +277,17 @@ public sealed unsafe class App : IDisposable
             HostGuard();
 
             long now = Stopwatch.GetTimestamp();
-            bool anyDue = false;
+            bool anyDue = false, anyFrame = false;
             foreach (var w in _windows)
-                if (now >= w.NextDueQpc) { anyDue = true; break; }
+            {
+                if (now >= w.NextDueQpc) anyDue = true;
+                else if (w.AnimDueQpc != 0 && now >= w.AnimDueQpc) anyFrame = true;
+            }
 
             if (anyDue)
             {
                 Metrics.Tick();
+                Mood.Update(Metrics, Stopwatch.GetTimestamp(), DateTime.Now);
                 Watchdog();
                 PositionGuard();
                 now = Stopwatch.GetTimestamp();
@@ -271,16 +305,60 @@ public sealed unsafe class App : IDisposable
                 RateBoundGuard();
             }
 
+            // Ambient loops (motion full only): move each live loop's visual and commit the shared
+            // device once. No drawing — see AmbientVisual for why this beats a DWM animation. The
+            // gate is read live every pass, not from a window's last tick: a game starting or motion
+            // going off stops every loop now, and the windows tick at once to take their content back.
+            bool gate = AmbientLoop.Gate(MotionLevel, Metrics.Stale, Mood);
+            if (gate != _loopGate)
+            {
+                _loopGate = gate;
+                now = Stopwatch.GetTimestamp();
+                foreach (var w in _windows) w.LoopGateChanged(gate, now);
+            }
+            bool anyLoop = false;
+            if (gate) foreach (var w in _windows) if (w.LoopActive) { anyLoop = true; break; }
+            if (!anyLoop) _nextLoopQpc = 0;
+            else if (Stopwatch.GetTimestamp() >= _nextLoopQpc)
+            {
+                now = Stopwatch.GetTimestamp();
+                foreach (var w in _windows) if (w.LoopActive) w.LoopFrame(now);
+                try { _dx.CompDevice.Commit(); }
+                catch (SharpGen.Runtime.SharpGenException ex) { Log.Error("ambient loop commit (device lost?)", ex); RequestDeviceRecovery(); }
+                // read live: a changed appearance.motionFps takes effect at the next frame
+                long step = (long)(qpf / AppearanceSettings.ValidMotionFps(ConfigStore.Settings.Appearance.MotionFps));
+                _nextLoopQpc = (_nextLoopQpc == 0 ? now : _nextLoopQpc) + step;
+                if (_nextLoopQpc < now) _nextLoopQpc = now + step;
+            }
+
+            // Transition-clock frames (motion, tech plan §5): a redraw of what is already there at a
+            // later point on the curve. No metrics read, no elements updated — data never animates.
+            // Only ever scheduled while something is easing, so at rest this costs nothing.
+            if (anyFrame || anyDue)
+            {
+                now = Stopwatch.GetTimestamp();
+                foreach (var w in _windows)
+                {
+                    if (w.AnimDueQpc == 0 || now < w.AnimDueQpc) continue;
+                    try { w.AnimFrame(); }
+                    catch (Exception ex) { Log.Error($"frame {w.Config.Id}", ex); }
+                }
+            }
+
             // outside the anyDue gate: a layout with no windows never has a due tick, and the
             // shortcut still has to produce a collector
             if (_collectorLaunchDueQpc != 0) StartCollectorWhenDue();
 
             // sleep until next due tick, next message, or the collector's frames-ready event
             long soonest = long.MaxValue;
-            foreach (var w in _windows) soonest = Math.Min(soonest, w.NextDueQpc);
+            foreach (var w in _windows)
+            {
+                soonest = Math.Min(soonest, w.NextDueQpc);
+                if (w.AnimDueQpc != 0) soonest = Math.Min(soonest, w.AnimDueQpc);
+            }
+            if (_nextLoopQpc != 0) soonest = Math.Min(soonest, _nextLoopQpc);
             now = Stopwatch.GetTimestamp();
-            uint waitMs = soonest == long.MaxValue ? 100u
-                : (uint)Math.Clamp((soonest - now) * 1000 / qpf, 0, 250);
+            uint waitMs = WaitMs(soonest, now, qpf);
             if (waitMs > 0)
             {
                 if (_framesReadyEvent == 0 && now >= _nextFrameEventOpenQpc) TryOpenFramesEvent(now);
@@ -296,6 +374,20 @@ public sealed unsafe class App : IDisposable
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// How long the loop may sleep before <paramref name="soonest"/>: rounded <b>up</b> to a whole
+    /// millisecond, 0 only when it is already due, 100 when nothing is scheduled, at most 250.
+    /// Flooring made every sub-millisecond remainder 0, which skipped the wait and spun the loop
+    /// until the deadline — before every 30 Hz loop step (review of ticket 09).
+    /// </summary>
+    internal static uint WaitMs(long soonest, long now, long qpf)
+    {
+        if (soonest == long.MaxValue) return 100;
+        long left = soonest - now;
+        if (left <= 0) return 0;
+        return (uint)Math.Clamp((left * 1000 + qpf - 1) / qpf, 1, 250);
     }
 
     /// <summary>The collector appended frames to the shared ring: pull frame-graph widgets'
@@ -341,13 +433,15 @@ public sealed unsafe class App : IDisposable
     /// Hot-reload, one widget at a time (settings plan §Live-apply). A reload always produces new
     /// <see cref="WidgetInstance"/> objects, so every window is re-pointed at its new one even
     /// when nothing else changed — a window left holding the old object would render and save
-    /// stale config. Only a type change, a structural option, a metric show/graph toggle or a
-    /// width/showTitle/fontFamily change costs a window rebuild; everything else is applied in place.
+    /// stale config. Only a type change, a structural option, a metric show/graph toggle, a
+    /// width/showTitle change, or a change in the resolved skin, font or structural skin option
+    /// costs a window rebuild; everything else is applied in place.
     /// </summary>
     private void ApplyConfigChange()
     {
         _configDirty = false;
         ApplyLogLevel();
+        ResolveMotion();
         var wanted = ConfigStore.Widgets.Widgets.Where(w => w.Enabled).ToList();
         var settings = ConfigStore.Settings;
 
@@ -374,7 +468,11 @@ public sealed unsafe class App : IDisposable
                 continue;
             }
 
-            string? rebuild = RebuildReason(win.Config, inst);
+            // Resolve first, then decide: a global skin/font/structural-option change never shows
+            // up in the widget's own config, only in what it resolves to.
+            var (mon, missing, displaced) = ResolveHost(inst);
+            var theme = ResolveTheme(inst, mon, missing);
+            string? rebuild = RebuildReason(win.Config, inst) ?? Theme.RebuildReason(win.Ctx.Theme, theme);
             if (rebuild != null)
             {
                 Log.Info($"config: widget {inst.Id} rebuilt ({rebuild})");
@@ -389,9 +487,8 @@ public sealed unsafe class App : IDisposable
                 continue;
             }
 
-            var (mon, missing, displaced) = ResolveHost(inst);
             double maxHz = MaxRateFor(inst);
-            win.ApplyInPlace(inst, settings, mon, displaced, ResolveTheme(inst, mon, missing), maxHz);
+            win.ApplyInPlace(inst, settings, mon, displaced, theme, maxHz);
         }
 
         // keep window order in step with the config so the packer and snapping are deterministic
@@ -400,7 +497,8 @@ public sealed unsafe class App : IDisposable
         _placementDirty = true;
     }
 
-    /// <summary>Why this widget cannot be updated in place, or null when it can.</summary>
+    /// <summary>Why this widget's own config stops it being updated in place, or null when it
+    /// does not. The theme half of the decision is <see cref="Theme.RebuildReason"/>.</summary>
     private static string? RebuildReason(WidgetInstance prev, WidgetInstance next)
     {
         if (prev.Type != next.Type) return "type changed";
@@ -423,12 +521,12 @@ public sealed unsafe class App : IDisposable
             if (a?.Graph != b?.Graph) return $"metrics.{key}.graph";
         }
 
-        // these are baked into the element tree at build time (pill widths, cached text formats)
+        // these are baked into the element tree at build time (pill widths); the font, skin and
+        // structural skin options are compared on the resolved theme instead (Theme.RebuildReason)
         var pa = prev.Appearance;
         var pb = next.Appearance;
         if (pa.Width != pb.Width) return "appearance.width";
         if (pa.ShowTitle != pb.ShowTitle) return "appearance.showTitle";
-        if (pa.FontFamily != pb.FontFamily) return "appearance.fontFamily";
         return null;
     }
 

@@ -156,7 +156,8 @@ public sealed class NvmlProvider : ISensorProvider
         sink.Register(MetricNames.GpuCount, MetricType.Double, MetricUnit.Count, Name, 0, MetricSemantics.Static);
         sink.Register(MetricNames.GpuName(i), MetricType.String, MetricUnit.Text, Name, 0, MetricSemantics.Static);
         sink.Register(MetricNames.GpuVendor(i), MetricType.String, MetricUnit.Text, Name, 0, MetricSemantics.Static);
-        sink.Register(MetricNames.GpuTempC(i), MetricType.Double, MetricUnit.Celsius, Name, DefaultRateHz);
+        // .max for the session-maximum caption (and reset-max), as LHM's GPU path does
+        sink.RegisterWithMax(MetricNames.GpuTempC(i), MetricUnit.Celsius, Name, DefaultRateHz);
         // NVML computes utilisation over its own sampling window, so polling faster does not make
         // this number fresher — the registry rate says so and the widget "?" popover repeats it.
         sink.Register(MetricNames.GpuUsagePct(i), MetricType.Double, MetricUnit.Percent, Name, DefaultRateHz, MetricSemantics.RollingWindow, windowMs: 1000);

@@ -1,0 +1,7 @@
+{
+  "description": "The idle machine with one sensor gone quiet: the CPU package temperature is registered but N/A.",
+  "extends": "idle",
+  "na": [
+    "cpu.package.temp.c"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "description": "Four topics in one run \u2014 the pump flat out, RAM over budget, a quiet line, a seven-day milestone \u2014 for the MomoTalk group thread.",
+  "extends": "idle",
+  "durationS": 200,
+  "values": {
+    "fan.3.control.pct": 95
+  },
+  "series": {
+    "ram.pct": [
+      60,
+      93,
+      93,
+      93,
+      93
+    ],
+    "net.down.bps": [
+      0
+    ],
+    "net.up.bps": [
+      0
+    ],
+    "sys.uptime.s": [
+      604700,
+      604900
+    ]
+  }
+}

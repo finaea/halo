@@ -1,0 +1,12 @@
+{
+  "description": "The gaming fixture with every temperature below warn step 4: SystemMood Gaming rather than Hot.",
+  "extends": "gaming",
+  "series": {
+    "cpu.package.temp.c": [
+      62
+    ],
+    "gpu.0.temp.c": [
+      61
+    ]
+  }
+}

@@ -8,7 +8,7 @@ namespace Halo.Widgets;
 /// third-party widget uses); what is left here is widget policy: the staleness gate the panels
 /// read and the history rings the graphs draw.
 /// </summary>
-public sealed class MetricCache : IDisposable
+public sealed class MetricCache : IMetricSource, IDisposable
 {
     public const int FrameBufferSize = 4096;
 

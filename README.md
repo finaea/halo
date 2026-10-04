@@ -32,7 +32,7 @@ A native Windows 11 desktop widget suite that renders a live hardware dashboard 
 
 ## Widgets
 
-Eleven widget types are available, and any of them can be added more than once:
+Twelve widget types are available, and any of them can be added more than once:
 
 | Widget | Shows |
 | --- | --- |
@@ -46,9 +46,29 @@ Eleven widget types are available, and any of them can be added more than once:
 | **Network** | Download and upload speed, peak speed, total downloaded, and internal and external IP addresses |
 | **Top processes — CPU** and **— RAM** | The busiest processes by CPU or by memory |
 | **Clock** | Time, date and system uptime |
+| **Companion** | A summary of the machine's state; Azur Archive adds character messages |
 
 Rows, labels, colours, warning thresholds, graph history, refresh rate, monitor, z-order,
 click-through and opacity can all be set per widget.
+
+## Skins
+
+Two skins are included:
+
+- **Rainformer** — Halo's original Rainformer-based layout, with light, dark and high-contrast colour presets.
+- **Azur Archive** — An unofficial fan skin inspired by Azur Lane and Blue Archive, with character art and messages. The art can be hidden with the **Game art** option; [NOTICE.md](NOTICE.md) explains its use.
+
+<div align="center">
+<img src="assets/skins/rainformer/previews/rainformer-light.png" width="200" alt="Rainformer, Rainformer Light preset">
+<img src="assets/skins/rainformer/previews/rainformer-dark.png" width="200" alt="Rainformer, Rainformer Dark preset">
+<img src="assets/skins/azur-archive/previews/port-day.png" width="200" alt="Azur Archive, Port Day preset, without game art">
+<img src="assets/skins/azur-archive/previews/night-watch.png" width="200" alt="Azur Archive, Night Watch preset, without game art">
+</div>
+
+**Settings → Appearance** selects the skin, preset and colours. Each widget can use its own skin
+or preset. Rainformer Light keeps the original palette; other presets are checked for readable
+text at full opacity. Motion follows Halo's setting and Windows' **Animation effects** setting;
+readings update immediately.
 
 ## Requirements
 
@@ -125,11 +145,12 @@ is listed in [docs/install-footprint.md](docs/install-footprint.md).
 The **notification-area icon** shows whether the sensor reader is running, and offers **Lock all
 widgets**, **Refresh all**, **Settings…** and **Exit Halo**.
 
-**Settings** has four pages:
+**Settings** has five pages:
 
 | Page | What it covers |
 | --- | --- |
-| **General** | Start with Windows, snapping, locking, theme presets (Rainformer, Light, High contrast), scale, font, corner radius, panel colours, and exporting or importing a whole layout |
+| **General** | Start with Windows, snapping, locking, and exporting or importing a whole layout |
+| **Appearance** | The skin and its preset, the skin's own options, scale, font, motion, and individual colours |
 | **System check** | Detected hardware, the state of every data source and the reason for any `N/A`, installing PawnIO, repairing autostart, rescanning hardware, arranging widgets, and logging |
 | **Widgets** | Adding, duplicating and removing widgets, and each widget's rows, graphs, refresh rate, appearance and placement |
 | **About** | Versions, the project page, third-party notices and the design credit |
@@ -290,7 +311,8 @@ current user without administrator rights:
 
 ```
 src/Halo.Collector   sensor providers, shared-memory writer, frame capture
-src/Halo.Widgets     rendering, widget definitions, window management, tray icon
+src/Halo.Widgets     rendering, skins, window management, tray icon
+assets/skins         skin fonts, gallery pictures and Azur Archive's game art
 src/Halo.Settings    the Settings app, System check, first-run setup
 src/Halo.Shared      paths, settings models, widget catalogue, logging
 src/Halo.Metrics     the public client library: layout, reader, writer, control pipe
@@ -306,6 +328,7 @@ More detail is available in:
 - [docs/metrics-protocol.md](docs/metrics-protocol.md) — the shared-memory interface
 - [docs/current-metrics-inventory.md](docs/current-metrics-inventory.md) — the catalogue of metrics
 - [docs/perf-usage-breakdown.md](docs/perf-usage-breakdown.md) — measured CPU, GPU and memory use
+- [docs/game-art-removal.md](docs/game-art-removal.md) — how the Azur Archive game art is removed on request
 
 ## License
 

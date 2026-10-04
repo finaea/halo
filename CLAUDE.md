@@ -14,7 +14,7 @@ MacTime and MonitorScreenSaver READMEs. Code comments are exempt and stay techni
 
 ```powershell
 dotnet build Halo.sln -c Debug            # all projects (SDK pinned in global.json, targets net10.0)
-dotnet test Halo.sln                      # tests\Halo.Tests — xUnit, 102 cases, no hardware needed
+dotnet test Halo.sln                      # tests\Halo.Tests — xUnit, no hardware needed
 # run (order matters only for data availability):
 src\Halo.Collector\bin\Debug\net10.0\win-x64\Halo.Collector.exe   # data process (full sensors need admin)
 src\Halo.Widgets\bin\Debug\net10.0\win-x64\Halo.Widgets.exe        # widget windows + tray
@@ -24,14 +24,19 @@ Halo.Collector.exe --dump [--json]
 # one-time upgrade of a pre-v2 config folder:
 Halo.Collector.exe --migrate-config <old config dir> [--to <dir>]
 # release build: all three exes over ONE shared self-contained runtime, into dist\app
-tools\build.ps1 [-Clean] [-Installer] [-Zip] [-NoReadyToRun]   # -Installer needs Inno Setup 6
+tools\build.ps1 [-Clean] [-Installer] [-Zip] [-NoReadyToRun] [-Output <dir>]   # -Installer needs Inno Setup 6
+# one panel off-screen (WARP, fixed fixture) — how a visual change gets looked at:
+Halo.Widgets.exe --render <out.png> --type cpu-ram --skin azur-archive --preset port-day --fixture idle|gaming|hot|na|partial --warp
 # dev autostart against dist\app (one UAC prompt): tools\install-dev.ps1 · tools\uninstall-dev.ps1
+# dev-only halo tuner: per-student halo pose, live; Save writes game-art\halos\<id>.json
+python tools\halo-tuner\halo_tuner.py [--refs <portraits folder>]
 # stop -> build -> start, in the only order that works: tools\redeploy-halo.ps1
 ```
 
 **Tests** live in `tests\Halo.Tests` — the pure, I/O-free parts (frame-stat arithmetic, section
 layout, provider freshness, config load/write) plus the logger (flush durability, envelope framing,
-level filtering, rotation, debug shedding, session classification). Anything needing live hardware
+level filtering, rotation, debug shedding, session classification) and the skins (Rainformer
+pixel goldens, preset contrast, theme resolution, config v3 migration, motion). Anything needing live hardware
 or the PresentMon ETW session stays a hand check (`--pm-smoketest`, `--tap-smoketest`). The project
 is in the solution, so `dotnet build` and `dotnet test` both pick it up, and deliberately **not** in
 `build.ps1`'s publish list — that script names the three shipping exes one by one, so nothing here
@@ -87,8 +92,8 @@ the smoketests, and would delete the "degrades gracefully unelevated" property.
   repeats inside 10 s. `LhmProvider.Part.Cpu` opts out on purpose — see the LHM gotcha below.
 - **Halo.Widgets**: one WS_EX_NOREDIRECTIONBITMAP HWND per widget, DirectComposition +
   D2D on a shared D3D11 device (`Dx`). Panels are element trees (`Render\Elements.cs`)
-  in a Rainmeter-like flow layout (`Render\Panel.cs`), built per type in `PanelDefs\`.
-  Dirty-driven redraw. Drag/snap(8px)/z-modes/click-through/opacity/context menu in
+  in a Rainmeter-like flow layout (`Render\Panel.cs`), built per type by the skin behind
+  `ISkin` (`Skins\Rainformer\`, hand-built; `Skins\AzurArchive\`, a block layout over the skin-neutral `PanelModels\`). Dirty-driven redraw. Drag/snap(8px)/z-modes/click-through/opacity/context menu in
   `WidgetWindow`; desktop parenting (WorkerW/Progman) + tray + watchdog in `App`.
 - **Halo.Settings**: WPF config editor writing the data folder's `config\*.json`; both other
   processes hot-reload via `ConfigStore` file watcher.
@@ -107,10 +112,44 @@ the smoketests, and would delete the "degrades gracefully unelevated" property.
 
 - Layout coordinates are **logical units** (panel = 206 wide); theme scale (1.7) is applied
   once in the renderer. 8-pt text rows use `FixedH = 11` (Rainformer's effective line height).
-- Colors only via `Theme` tokens (extracted from the Rainformer skin's `@Resources\Variables.inc` —
-  values only, no GPL code). The skin is **not vendored here**: a reference copy comes from a
-  Rainmeter install of Rainformer 3.1 HWiNFO Edition, under
-  `%USERPROFILE%\Documents\Rainmeter\Skins\`. Staged warn colors: `CpuRamPanelImpl.WarnColor`.
+- Colors only via `Theme` tokens (Rainformer's base palette was extracted from the Rainformer skin's
+  `@Resources\Variables.inc` — values only, no GPL code). The skin is **not vendored here**: a
+  reference copy comes from a Rainmeter install of Rainformer 3.1 HWiNFO Edition, under
+  `%USERPROFILE%\Documents\Rainmeter\Skins\`. Staged warn colors: `PanelData.WarnColor`
+  (`PanelModels\`), shared by every skin.
+- **Skins: a skin owns how a panel looks, never what it measures.** Metrics, options, warn
+  thresholds and N/A rules stay in `PanelCatalog` + `PanelModels\`; a skin owns tokens, presets,
+  chrome, layout, fonts, image slots and its own options. Two halves: `SkinInfo` in
+  `Halo.Shared\Skins\SkinCatalog.cs` (metadata, read by Settings too — first preset is the default,
+  every skin ships a `HighContrast` one) and `ISkin` in `Halo.Widgets\Skins\` (`Build(type, ctx)` →
+  element tree + `ICardChrome`), mapped by `SkinRegistry`; an unknown id draws Rainformer and stays
+  in the file. The 31 core tokens are a cross-skin contract (same ids, same meaning — they are in
+  users' configs); skins add extras. Rainformer stays hand-built and pinned by the goldens in
+  `tests\Halo.Tests\goldens\rainformer\` (regenerate only goldens that intentionally change, from
+  `bin\...\golden-failures\`, never a blanket `HALO_UPDATE_GOLDENS=1`); block-layout skins build from
+  `PanelModels\`. Graphs are always a top-level `GraphEl` (frame wakes and graph settings key on the
+  type) — a skin restyles them through `GraphVisual`, never wraps them.
+- **Config v3 appearance is per skin.** `appearance.skin` + `appearance.skins.<id>.{preset, colors,
+  options}` in `settings.json`, the same shape (every field nullable = inherit) under each widget's
+  `appearance` in `widgets.json`. `Theme.Resolve` is the one resolution order: base ← preset ←
+  global colours (only if the widget picks no preset of its own) ← widget colours ← `metric:<key>`.
+  v2 files upgrade in memory (`SchemaV3.Upgrade`) to `rainformer-light` + every differing colour as
+  a tweak. Option keys a skin does not declare are kept in the file and ignored (`textSizePt` is one:
+  it never reached the renderer). Hot reload compares **resolved** themes (`Theme.RebuildReason`):
+  skin, font family or a `Structural` option rebuilds, everything else applies through `CopyFrom`.
+- **Contrast gate.** `PresetContrastTests` checks every non-exempt preset against its skin's
+  `ContrastPairs`: text 4.5:1 with the card composited over black, #808080 and white wallpaper,
+  alert text 4.5:1 and graphics/warn ramp 3:1 on grey. `rainformer-light` is `ContrastExempt` — it
+  is today's palette byte for byte, the parity baseline. Opacity < 1 voids the guarantee; Settings
+  says so next to the opacity slider rather than clamping.
+- **Game art is isolated, and never required.** Azur Archive's character art lives only under
+  `assets\skins\azur-archive\game-art\` with a `CREDITS.md` row per file; art-bearing renders
+  (gallery previews) are written **inside** that folder, art-free ones to `previews\`. Every skin must
+  render with `game-art\` deleted (`SkinAssets`: user-art → bundled → nothing, never a placeholder).
+  Per-student halos are data there too (`game-art\halos\<id>.json`, `HaloShape`); missing or
+  unreadable → the generic ring. The `halo` skin option hides them; the clock card never draws one.
+  README/docs screenshots are art-free only — a screenshot with a character in it would escape the
+  folder. Removal steps: `docs\game-art-removal.md`.
 - Metric names: `Halo.Metrics\MetricNames.cs`; `.max` suffix = session maximum. Indexed families
   (`gpu.<i>.*`, `cpu.core.<i>.*`, `fan.<n>.*`, `drive.<x>.*`) are discovered at runtime — read
   `gpu.count` / `cpu.logical.count` / `fan.count`, never assume one of anything. The GPU index
@@ -175,6 +214,15 @@ the smoketests, and would delete the "degrades gracefully unelevated" property.
   because the victim gets no chance to record its own shutdown and a restart must not read as a
   fault. `SessionLog.SetPhase` is **not** level-gated: the last phase written is what a native
   crash or a hard kill leaves behind.
+- **Motion never animates readings.** `Motion.Resolve` caps `appearance.motion` (off/subtle/full)
+  by Windows' Animation effects setting, re-read on `WM_SETTINGCHANGE`. State changes key a
+  `Transition`; its 60 Hz `AnimFrame`s redraw without `Panel.Update` or metric reads, with
+  `NowQpc` frozen. Key a transition on state, never on a reading. Motion off schedules no animation
+  frames. Up to two `AmbientLoop`s per widget (`AmbientLoop.MaxPerWidget`; the network card's two
+  seats) run only at full motion and pause while a game presents. Each has its own cached DComp
+  visual; App moves them all at `appearance.motionFps` (15/24/30/60, default 30, read live) and
+  commits once. Keep the loops app-driven: a DComp animation makes DWM recompose at the monitor's
+  refresh rate. Rainformer has no entrances or transitions.
 - What each panel shows, which options it takes and which theme tokens it paints with is declared
   once in `Halo.Shared\Panels\PanelCatalog.cs`; the renderer and the Settings app both read it.
   Per-widget overrides live in `widgets.json` (`metrics`, `options`, `appearance`).

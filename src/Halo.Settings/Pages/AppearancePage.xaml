@@ -1,0 +1,260 @@
+<UserControl x:Class="Halo.Settings.Pages.AppearancePage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:picker="clr-namespace:ColorPicker;assembly=ColorPicker">
+  <UserControl.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    <Style x:Key="SelectableCard" TargetType="Border">
+      <Setter Property="BorderBrush" Value="{StaticResource HaloBorder}" />
+      <Setter Property="BorderThickness" Value="2" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="8" />
+      <Setter Property="Margin" Value="0,0,12,0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+          <Setter Property="BorderBrush" Value="#0067C0" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+  </UserControl.Resources>
+  <Grid Background="{StaticResource HaloPageBackground}">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="28,22">
+      <StackPanel MaxWidth="860" HorizontalAlignment="Left">
+        <TextBlock Text="Appearance" Style="{StaticResource PageTitle}" />
+        <TextBlock Text="The look every widget starts from. A widget can still pick its own skin, preset or colours on the Widgets page. Changes are written live."
+                   Style="{StaticResource PageSub}" />
+
+        <Border Style="{StaticResource SettingsCard}">
+          <StackPanel>
+            <TextBlock Text="Skin" Style="{StaticResource SectionHeading}" />
+            <ItemsControl ItemsSource="{Binding Skins}">
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <!-- A Button, not a clickable Border: real mouse input and keyboard both reach Click. -->
+                  <Button Click="Skin_Click" Padding="0" Margin="0,0,12,0" Background="Transparent" BorderThickness="0"
+                          AutomationProperties.Name="{Binding Name, StringFormat=Use the {0} skin}">
+                    <Border Style="{StaticResource SelectableCard}" Width="250" Margin="0">
+                      <StackPanel>
+                        <!-- Transparent: the preview PNG carries its own alpha (the cards' translucency
+                             and shadow), so it sits on the Settings card the way it sits on a desktop. -->
+                        <Border Height="130" CornerRadius="4" Background="Transparent" Margin="0,0,0,6" ClipToBounds="True">
+                          <Grid>
+                            <Image Source="{Binding Preview}" Stretch="UniformToFill"
+                                   RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Top" />
+                            <TextBlock Text="No preview in this build" Style="{StaticResource Hint}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Visibility="{Binding HasNoPreview, Converter={StaticResource BoolToVisibility}}" />
+                          </Grid>
+                        </Border>
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Description}" Style="{StaticResource Hint}" />
+                        <TextBlock Text="{Binding Attribution}" Style="{StaticResource Hint}" Margin="0,2,0,0" />
+                      </StackPanel>
+                    </Border>
+                  </Button>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCard}">
+          <StackPanel>
+            <TextBlock Text="Preset" Style="{StaticResource SectionHeading}" />
+            <ItemsControl ItemsSource="{Binding Presets}">
+              <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <ToggleButton Style="{StaticResource PresetChip}" Margin="0,0,8,8" Tag="{Binding Id}"
+                                IsChecked="{Binding IsSelected, Mode=OneWay}" Click="Preset_Click">
+                    <StackPanel Orientation="Horizontal">
+                      <ItemsControl ItemsSource="{Binding Swatches}" Margin="0,0,8,0" VerticalAlignment="Center">
+                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate><Border Width="10" Height="16" Background="{Binding}" BorderBrush="#33000000" BorderThickness="0.5" /></DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                      <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </ToggleButton>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <Separator Margin="0,4,0,0" />
+            <Grid Style="{StaticResource SettingsRow}">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+              <TextBlock Text="{Binding TweakSummary}" VerticalAlignment="Center" />
+              <Button Grid.Column="1" Content="Reset to preset" Style="{StaticResource SubtleButton}" Margin="0"
+                      IsEnabled="{Binding HasTweaks}" Click="ResetToPreset_Click" />
+            </Grid>
+            <TextBlock Text="Windows high contrast is on, so this preset takes its colours from the system theme."
+                       Style="{StaticResource Hint}"
+                       Visibility="{Binding FollowsWindowsHighContrast, Converter={StaticResource BoolToVisibility}}" />
+          </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCard}">
+          <StackPanel>
+            <TextBlock Text="Skin options" Style="{StaticResource SectionHeading}" />
+            <ItemsControl ItemsSource="{Binding SkinOptions}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Grid Style="{StaticResource SettingsRow}">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                      <TextBlock Text="{Binding Label}" />
+                      <TextBlock Text="{Binding Help}" Style="{StaticResource Hint}" />
+                    </StackPanel>
+                    <Grid Grid.Column="1" VerticalAlignment="Center">
+                      <ui:NumberBox Minimum="{Binding Minimum}" Maximum="{Binding Maximum}" SmallChange="1" MaxDecimalPlaces="{Binding Decimals}"
+                                    Value="{Binding NumberValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding Label}"
+                                    Visibility="{Binding IsNumber, Converter={StaticResource BoolToVisibility}}" />
+                      <ui:ToggleSwitch IsChecked="{Binding BoolValue, Mode=TwoWay}" OnContent="On" OffContent="Off"
+                                       Visibility="{Binding IsBoolean, Converter={StaticResource BoolToVisibility}}" />
+                      <ComboBox ItemsSource="{Binding Choices}" SelectedItem="{Binding SelectedChoice, Mode=TwoWay}" MinWidth="180"
+                                Visibility="{Binding IsChoice, Converter={StaticResource BoolToVisibility}}" />
+                    </Grid>
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCard}">
+          <StackPanel>
+            <TextBlock Text="Scale, font and motion" Style="{StaticResource SectionHeading}" />
+            <Grid Style="{StaticResource SettingsRow}">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="220" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+              <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="Scale" />
+                <TextBlock Text="{Binding ScaleSummary}" Style="{StaticResource Hint}" />
+              </StackPanel>
+              <Slider Grid.Column="1" Minimum="1" Maximum="3.5" TickFrequency="0.05" IsSnapToTickEnabled="True"
+                      Value="{Binding FixedScale, Mode=TwoWay}" IsEnabled="{Binding IsFixedScaleEnabled}" Margin="8,0" />
+              <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                <ui:NumberBox Minimum="1" Maximum="3.5" SmallChange="0.05" MaxDecimalPlaces="2"
+                              Value="{Binding FixedScale, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding IsFixedScaleEnabled}" />
+                <ui:ToggleSwitch Margin="10,0,0,0" IsChecked="{Binding AutoScale, Mode=TwoWay}" OnContent="Auto" OffContent="Fixed" />
+              </StackPanel>
+            </Grid>
+            <Separator />
+            <Grid Style="{StaticResource SettingsRow}">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="220" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+              <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="Font" />
+                <TextBlock Text="{Binding FontHint}" Style="{StaticResource Hint}" />
+              </StackPanel>
+              <ComboBox Grid.Column="1" Width="260" HorizontalAlignment="Left" IsEditable="True" VerticalAlignment="Center"
+                        ItemsSource="{Binding FontFamilies}" Text="{Binding FontFamily, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+            </Grid>
+            <Separator />
+            <Grid Style="{StaticResource SettingsRow}">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="220" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+              <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="Motion" />
+                <TextBlock Text="{Binding MotionHint}" Style="{StaticResource Hint}" TextWrapping="Wrap" />
+              </StackPanel>
+              <ComboBox Grid.Column="1" Width="160" HorizontalAlignment="Left" VerticalAlignment="Center"
+                        ItemsSource="{Binding MotionChoices}" DisplayMemberPath="Name" SelectedValuePath="Id"
+                        SelectedValue="{Binding Motion, Mode=TwoWay}" AutomationProperties.Name="Motion" />
+            </Grid>
+            <Grid Style="{StaticResource SettingsRow}">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="220" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+              <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="Loop frame rate" />
+                <TextBlock Text="{Binding MotionFpsHint}" Style="{StaticResource Hint}" TextWrapping="Wrap" />
+              </StackPanel>
+              <ComboBox Grid.Column="1" Width="160" HorizontalAlignment="Left" VerticalAlignment="Center"
+                        ItemsSource="{Binding MotionFpsChoices}" ItemStringFormat="{}{0} fps"
+                        SelectedItem="{Binding MotionFps, Mode=TwoWay}" IsEnabled="{Binding IsMotionFull}"
+                        AutomationProperties.Name="Loop frame rate" />
+            </Grid>
+          </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource SettingsCard}">
+          <StackPanel>
+            <TextBlock Text="Colours" Style="{StaticResource SectionHeading}" />
+            <TextBlock Text="Changes here are tweaks on top of the preset. The small swatch on the right is the preset's own colour."
+                       Style="{StaticResource Hint}" Margin="0,0,0,6" />
+            <ItemsControl ItemsSource="{Binding ColorGroups}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Expander Header="{Binding Name}" Margin="0,4,0,0">
+                    <ItemsControl ItemsSource="{Binding Rows}" Margin="0,6,0,0">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Grid MinHeight="46" Margin="0,1">
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="220" />
+                              <ColumnDefinition Width="56" />
+                              <ColumnDefinition Width="120" />
+                              <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                              <TextBlock Text="{Binding Label}" />
+                              <TextBlock Text="{Binding Description}" Style="{StaticResource Hint}" />
+                            </StackPanel>
+                            <Grid Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Center">
+                              <!-- Sized explicitly: an empty Border has no desired size, and WPF-UI's
+                                   centred content presenter would measure it to a dot. -->
+                              <Button Width="46" Height="30" Padding="3" Click="ColorButton_Click" ToolTip="Open colour picker"
+                                      HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                                      AutomationProperties.Name="{Binding Label, StringFormat=Edit {0} colour}">
+                                <Border Width="36" Height="20" Background="{Binding Swatch}" CornerRadius="4"
+                                        BorderBrush="#55000000" BorderThickness="1" />
+                              </Button>
+                              <Popup IsOpen="{Binding IsPickerOpen, Mode=TwoWay}" StaysOpen="False" Placement="Right"
+                                     AllowsTransparency="True" PopupAnimation="Fade">
+                                <Border Background="White" BorderBrush="#55000000" BorderThickness="1" CornerRadius="8" Padding="10">
+                                  <!-- PixiEditor's StandardColorPicker sizes its own children in hard pixels
+                                       for stock WPF; WPF-UI's implicit styles are reset inside this popup or
+                                       those children render empty (see the Widgets page for the full story). -->
+                                  <Border.Resources>
+                                    <Style TargetType="TextBox"><Setter Property="FontSize" Value="11" /><Setter Property="Padding" Value="1,0" /></Style>
+                                    <Style TargetType="ComboBox"><Setter Property="FontSize" Value="11" /><Setter Property="Padding" Value="2,0" /></Style>
+                                    <Style TargetType="ComboBoxItem"><Setter Property="FontSize" Value="11" /></Style>
+                                    <Style TargetType="TextBlock"><Setter Property="FontSize" Value="11" /></Style>
+                                    <Style TargetType="TabControl" />
+                                    <Style TargetType="TabItem" />
+                                    <Style TargetType="Slider" />
+                                    <Style TargetType="Button" />
+                                    <Style TargetType="ToggleButton" />
+                                  </Border.Resources>
+                                  <picker:StandardColorPicker Width="320" Height="430" ShowAlpha="True" ShowFractionalPart="False"
+                                                              SelectedColor="{Binding Color, Mode=TwoWay}" />
+                                </Border>
+                              </Popup>
+                            </Grid>
+                            <TextBox Grid.Column="2" Text="{Binding Hex, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                                     VerticalAlignment="Center" Padding="7,5" />
+                            <StackPanel Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                              <Button Content="Reset" Style="{StaticResource SubtleButton}" Margin="0,0,10,0" Click="ResetColor_Click"
+                                      Visibility="{Binding IsTweaked, Converter={StaticResource BoolToVisibility}}"
+                                      ToolTip="Back to the preset's colour" />
+                              <Border Width="22" Height="22" CornerRadius="11" Background="{Binding PresetSwatch}"
+                                      BorderBrush="#55000000" BorderThickness="1" Opacity="0.75"
+                                      ToolTip="{Binding PresetHex, StringFormat=Preset colour {0}}" />
+                            </StackPanel>
+                          </Grid>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </Expander>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <Button Content="Reset appearance" HorizontalAlignment="Left" Margin="0,12,0,0"
+                    Style="{StaticResource SubtleButton}" Click="ResetAppearance_Click"
+                    ToolTip="Every skin back to its default preset with no tweaks, auto scale and the skin's own font." />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</UserControl>

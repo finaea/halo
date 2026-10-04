@@ -132,6 +132,10 @@ public sealed class ConfigStore : IDisposable
                 using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                 value = JsonSerializer.Deserialize(fs, ti);
                 if (value == null) return NoteUnreadable(file, "the file holds a bare JSON null");
+                // v2 → v3 here, under every reader — including UpdateWidget's re-read — so no caller
+                // ever mutates or saves a v2 shape. The file becomes v3 on its next save.
+                if (value is AppSettings settings) SchemaV3.Upgrade(settings);
+                else if (value is WidgetsConfig widgets) SchemaV3.Upgrade(widgets);
                 NoteReadable(file);
                 return LoadOutcome.Loaded;
             }

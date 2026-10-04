@@ -6,6 +6,7 @@ using Halo.Metrics;
 using Halo.Settings.Services;
 using Halo.Shared.Config;
 using Halo.Shared.Panels;
+using Halo.Shared.Skins;
 
 namespace Halo.Settings.ViewModels;
 
@@ -409,7 +410,7 @@ public sealed class OptionEditorViewModel : ObservableObject
 
     private static bool IsHardwareOption(string key) => key is "gpuIndex" or "cpuFanChannel" or "channels" or "volumes" or "freeMode";
     private static HashSet<string> Split(string value) => value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
-    private static (double Minimum, double Maximum) ParseRange(string? range)
+    internal static (double Minimum, double Maximum) ParseRange(string? range)
     {
         string[] pieces = (range ?? "0..100").Split("..", StringSplitOptions.TrimEntries);
         if (pieces.Length == 2 && double.TryParse(pieces[0], out double minimum) && double.TryParse(pieces[1], out double maximum))
@@ -472,7 +473,7 @@ public sealed class WidgetColorViewModel : ObservableObject
     {
         _owner = owner;
         Token = token;
-        Label = ThemeTokens.Defaults.FirstOrDefault(item => item.Token == token).Description ?? token;
+        Label = AppearanceViewModel.FriendlyToken(token);
         _color = Parse(value);
         _useGlobal = useGlobal;
     }
@@ -513,6 +514,8 @@ public sealed class WidgetItemViewModel : ObservableObject
     private bool _useGlobalWidth;
     private double _width = 206;
     private ChoiceItem? _tempUnit;
+    private ChoiceItem? _skinChoice;
+    private ChoiceItem? _presetChoice;
     private string _networkInterface = "Best";
     private bool _externalIpEnabled;
     private string _externalIpUrl = "https://api.ipify.org";
@@ -541,7 +544,10 @@ public sealed class WidgetItemViewModel : ObservableObject
     public bool HasTemperature => Panel.Metrics.Any(metric => metric.Unit == MetricUnit.Celsius);
     public ObservableCollection<MetricRowViewModel> MetricRows { get; } = [];
     public ObservableCollection<OptionEditorViewModel> Options { get; } = [];
-    public ObservableCollection<WidgetColorViewModel> AppearanceColors { get; } = [];
+    public ObservableCollection<ColorGroupViewModel<WidgetColorViewModel>> AppearanceColorGroups { get; } = [];
+    public ObservableCollection<SkinOptionViewModel> SkinOptions { get; } = [];
+    public ObservableCollection<ChoiceItem> SkinChoices { get; } = [];
+    public ObservableCollection<ChoiceItem> PresetChoices { get; } = [];
     public ObservableCollection<ChoiceItem> MonitorChoices { get; } = [];
     public IReadOnlyList<ChoiceItem> GraphStyles { get; } = [new("line", "Line"), new("filled", "Filled")];
     public IReadOnlyList<ChoiceItem> ZModes { get; } = [new("Desktop", "On desktop"), new("Normal", "Normal window"), new("Topmost", "Always on top")];
@@ -604,6 +610,39 @@ public sealed class WidgetItemViewModel : ObservableObject
     public bool UseGlobalWidth { get => _useGlobalWidth; set { if (Set(ref _useGlobalWidth, value)) { Raise(nameof(IsWidthOverrideEnabled)); if (!_applying) Change("appearance.width", widget => widget.Appearance.Width = value ? null : Width); } } }
     public bool IsWidthOverrideEnabled => !UseGlobalWidth;
     public double Width { get => _width; set { value = Math.Round(Math.Clamp(value, 120, 800)); if (Set(ref _width, value) && !_applying && !UseGlobalWidth) Change("appearance.width", widget => widget.Appearance.Width = value); } }
+    /// <summary>"" = inherit the global skin.</summary>
+    public ChoiceItem? SkinChoice
+    {
+        get => _skinChoice;
+        set
+        {
+            if (!Set(ref _skinChoice, value) || value is null || _applying) return;
+            string? skin = value.Value.Length == 0 ? null : value.Value;
+            Change("appearance.skin", widget => widget.Appearance.Skin = skin);
+            RebuildLater();
+        }
+    }
+
+    /// <summary>"" = follow the global look. A preset of its own also stops the global colour
+    /// tweaks reaching this widget (<see cref="SkinPalette.InheritedByWidget"/>), so the swatches
+    /// are rebuilt to show what it will actually be drawn with.</summary>
+    public ChoiceItem? PresetChoice
+    {
+        get => _presetChoice;
+        set
+        {
+            if (!Set(ref _presetChoice, value) || value is null || _applying) return;
+            string? preset = value.Value.Length == 0 ? null : value.Value;
+            string skinId = WidgetSkin(_owner.ModelFor(Id)).Id;
+            Change($"appearance.skins.{skinId}.preset", widget =>
+            {
+                widget.Appearance.SkinFor(skinId).Preset = preset;
+                widget.Appearance.PruneSkins();
+            });
+            RebuildLater();
+        }
+    }
+
     public ChoiceItem? TempUnit { get => _tempUnit; set { if (Set(ref _tempUnit, value) && value is not null && !_applying) { string selected = value.Value; Change("appearance.tempUnit", widget => widget.Appearance.TempUnit = selected == "C" ? null : selected); } } }
 
     public string NetworkInterface { get => _networkInterface; set { value = string.IsNullOrWhiteSpace(value) ? "Best" : value.Trim(); if (Set(ref _networkInterface, value) && !_applying) _owner.ChangeSettings("collector.networkInterface", settings => settings.Collector.NetworkInterface = value); } }
@@ -670,7 +709,7 @@ public sealed class WidgetItemViewModel : ObservableObject
         {
             ApplyDataSource(settings, dirty);
             if (!dirty.Any(path => path.StartsWith("appearance.", StringComparison.Ordinal)))
-                BuildAppearanceColors(_owner.ModelFor(Id));
+                RebuildSkinEditors(_owner.ModelFor(Id));
         }
         finally { _applying = false; }
     }
@@ -699,16 +738,29 @@ public sealed class WidgetItemViewModel : ObservableObject
         Raise(nameof(DisplayName)); Raise(nameof(Subtitle));
     }
 
+    /// <summary>A widget colour is a tweak of the skin this widget is drawn with, layered over its
+    /// own preset or, with none, over the global look. Null = follow the inherited value again.</summary>
     public void ChangeAppearanceColor(string token, string? value)
-        => _owner.ChangeWidget(Id, $"appearance.colors.{token}", widget =>
+    {
+        string skinId = WidgetSkin(_owner.ModelFor(Id)).Id;
+        _owner.ChangeWidget(Id, $"appearance.skins.{skinId}.colors.{token}", widget =>
         {
-            if (value is null)
-            {
-                widget.Appearance.Colors?.Remove(token);
-                if (widget.Appearance.Colors?.Count == 0) widget.Appearance.Colors = null;
-            }
-            else (widget.Appearance.Colors ??= new Dictionary<string, string>())[token] = value;
+            if (value is null) widget.Appearance.Skins?.GetValueOrDefault(skinId)?.Colors.Remove(token);
+            else widget.Appearance.SkinFor(skinId).Colors[token] = value;
+            widget.Appearance.PruneSkins();
         });
+    }
+
+    private void ChangeSkinOption(string key, string? value)
+    {
+        string skinId = WidgetSkin(_owner.ModelFor(Id)).Id;
+        _owner.ChangeWidget(Id, $"appearance.skins.{skinId}.options.{key}", widget =>
+        {
+            if (value is null) widget.Appearance.Skins?.GetValueOrDefault(skinId)?.Options.Remove(key);
+            else widget.Appearance.SkinFor(skinId).Options[key] = value;
+            widget.Appearance.PruneSkins();
+        });
+    }
 
     public void ResetRefreshAndGraphs()
     {
@@ -778,7 +830,7 @@ public sealed class WidgetItemViewModel : ObservableObject
     {
         AppearanceSettings global = _owner.Config.Settings.Appearance;
         UseGlobalFont = model.Appearance.FontFamily is null;
-        FontFamily = model.Appearance.FontFamily ?? global.FontFamily;
+        FontFamily = model.Appearance.FontFamily ?? global.FontFamily ?? SkinCatalog.Rainformer.FontFamily;
         UseGlobalScale = model.Appearance.Scale is null;
         ScaleAuto = (model.Appearance.Scale ?? global.Scale).IsAuto;
         Scale = (model.Appearance.Scale ?? global.Scale).Or(1.7);
@@ -788,20 +840,67 @@ public sealed class WidgetItemViewModel : ObservableObject
         Width = model.Appearance.Width ?? 206;
         string temp = model.Appearance.TempUnit ?? "C";
         TempUnit = TemperatureUnits.First(item => item.Value == temp);
-        BuildAppearanceColors(model);
+        RebuildSkinEditors(model);
     }
 
-    private void BuildAppearanceColors(WidgetInstance model)
+    /// <summary>Rebuild after the combo that triggered it has finished its own selection change:
+    /// clearing a ComboBox's items from inside its SelectedItem setter makes it push null back.</summary>
+    private void RebuildLater()
+        => Application.Current.Dispatcher.BeginInvoke(() => RebuildSkinEditors(_owner.ModelFor(Id)));
+
+    /// <summary>The skin this widget is drawn with: the same pick as <c>Theme.Resolve</c>.</summary>
+    private SkinInfo WidgetSkin(WidgetInstance model)
+        => SkinCatalog.Find(model.Appearance.Skin) ?? SkinCatalog.Find(_owner.Config.Settings.Appearance.Skin) ?? SkinCatalog.Rainformer;
+
+    /// <summary>Skin and preset pickers, skin options and colours all depend on which skin and
+    /// preset apply, so they are rebuilt together whenever either can have changed.</summary>
+    private void RebuildSkinEditors(WidgetInstance model)
     {
-        AppearanceColors.Clear();
-        foreach (string token in Panel.Tokens.Distinct(StringComparer.Ordinal))
+        bool applying = _applying;
+        _applying = true;
+        try
         {
-            bool useGlobal = model.Appearance.Colors?.ContainsKey(token) != true;
-            string value = model.Appearance.Colors?.GetValueOrDefault(token)
-                ?? _owner.Config.Settings.Appearance.Colors.GetValueOrDefault(token)
-                ?? ThemeTokens.Default(token) ?? "#000000FF";
-            AppearanceColors.Add(new WidgetColorViewModel(this, token, value, useGlobal));
+            AppearanceSettings global = _owner.Config.Settings.Appearance;
+            SkinInfo skin = WidgetSkin(model);
+            SkinInfo globalSkin = SkinCatalog.Find(global.Skin) ?? SkinCatalog.Rainformer;
+            WidgetAppearance app = model.Appearance;
+            SkinSettings? own = app.Skins?.GetValueOrDefault(skin.Id);
+
+            SkinChoices.Clear();
+            SkinChoices.Add(new ChoiceItem("", $"Inherit · {globalSkin.Name}"));
+            foreach (SkinInfo s in SkinCatalog.All) SkinChoices.Add(new ChoiceItem(s.Id, s.Name));
+            SkinChoice = SkinChoices.FirstOrDefault(c => c.Value == app.Skin) ?? SkinChoices[0];
+
+            PresetChoices.Clear();
+            PresetChoices.Add(new ChoiceItem("", $"Inherit · {SkinPalette.GlobalPreset(global, skin).Name}"));
+            foreach (PresetSpec p in skin.Presets) PresetChoices.Add(new ChoiceItem(p.Id, p.Name));
+            PresetChoice = PresetChoices.FirstOrDefault(c => c.Value == own?.Preset) ?? PresetChoices[0];
+
+            PresetSpec preset = SkinPalette.WidgetPreset(global, app, skin);
+            Dictionary<string, string> inheritedOptions = SkinPalette.OptionBaseline(skin, preset, global);
+            SkinOptions.Clear();
+            foreach (OptionSpec spec in skin.Options.Where(o => o.Types == null || o.Types.Contains(model.Type)))
+            {
+                var row = new SkinOptionViewModel(spec, ChangeSkinOption, canInherit: true);
+                row.Load(own?.Options?.GetValueOrDefault(spec.Key), inheritedOptions[spec.Key]);
+                SkinOptions.Add(row);
+            }
+
+            // Same rule as Theme.Resolve: a widget with its own preset inherits that preset, not the
+            // global tweaks, or the swatch would show (and "Use global" off would save) a colour the
+            // widget is not drawn with.
+            Dictionary<string, string> inherited = SkinPalette.InheritedByWidget(global, app, skin);
+            var tokens = Panel.Tokens.ToHashSet(StringComparer.Ordinal);
+            AppearanceColorGroups.Clear();
+            foreach (var group in skin.Tokens.Where(t => tokens.Contains(t.Token)).GroupBy(t => t.Core ? t.Group : "Skin extras").OrderBy(g => AppearanceViewModel.GroupOrder(g.Key)))
+            {
+                var rows = group.Select(t => new WidgetColorViewModel(this, t.Token,
+                    own?.Colors?.GetValueOrDefault(t.Token) ?? inherited.GetValueOrDefault(t.Token) ?? "#000000FF",
+                    useGlobal: own?.Colors?.ContainsKey(t.Token) != true)).ToArray();
+                AppearanceColorGroups.Add(new ColorGroupViewModel<WidgetColorViewModel>(group.Key, rows));
+            }
         }
+        finally { _applying = applying; }
     }
 
     private void ApplyDataSource(AppSettings settings, IReadOnlySet<string>? dirty = null)
@@ -1088,6 +1187,20 @@ public sealed class WidgetsPageViewModel : ObservableObject, IDisposable
         });
     }
 
+    /// <summary>
+    /// Bring every widget's inherited look up to date with the global one. The Appearance page's
+    /// writes are this process's own, so the watcher suppresses their echo and
+    /// <see cref="Config_ExternalChanged"/> never sees them; without this, coming back from a
+    /// preset change would show (and an unticked "Use global" would save) the old preset's colours.
+    /// Flushing first makes the store hold what the Appearance page queued.
+    /// </summary>
+    public async Task RefreshAppearanceAsync()
+    {
+        await _config.FlushAllAsync();
+        var noDirtyPaths = new HashSet<string>(StringComparer.Ordinal);
+        foreach (WidgetItemViewModel row in Widgets) row.RefreshSettings(_config.Settings, noDirtyPaths);
+    }
+
     internal void ChangeSettings(string path, Action<AppSettings> apply)
     {
         apply(_config.Settings);
@@ -1239,12 +1352,7 @@ public sealed class WidgetsPageViewModel : ObservableObject, IDisposable
             Show = pair.Value.Show, Label = pair.Value.Label, Graph = pair.Value.Graph,
             Color = pair.Value.Color, Warn = pair.Value.Warn?.ToArray(), Max = pair.Value.Max,
         }, StringComparer.Ordinal),
-        Appearance = new WidgetAppearance
-        {
-            Colors = source.Appearance.Colors is null ? null : new Dictionary<string, string>(source.Appearance.Colors, StringComparer.Ordinal),
-            FontFamily = source.Appearance.FontFamily, Scale = source.Appearance.Scale,
-            ShowTitle = source.Appearance.ShowTitle, Width = source.Appearance.Width, TempUnit = source.Appearance.TempUnit,
-        },
+        Appearance = source.Appearance.Clone(),
     };
 
     public void Dispose()

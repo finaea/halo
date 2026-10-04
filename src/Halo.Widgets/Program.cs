@@ -1,5 +1,12 @@
 using Halo.Shared;
 using Halo.Widgets;
+using Halo.Widgets.Harness;
+
+// --render: draw one panel to a PNG and leave. First, before the crash dialog and the
+// single-instance mutex below — a render must work while the real widgets are running, and must
+// never put a modal dialog on the desktop (RenderCli).
+if (args.Length > 0 && args[0].Equals(RenderCli.Verb, StringComparison.OrdinalIgnoreCase))
+    return RenderCli.Run(args);
 
 // --start-collector: what the "Halo" shortcut runs. Bring the overlay up, then ask for the
 // elevation the collector needs (CollectorLauncher). Plain Halo.Widgets.exe stays what it was —

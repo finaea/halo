@@ -183,7 +183,8 @@ public sealed class LhmProvider : ISensorProvider
         {
             case Part.Cpu:
                 sink.Register(MetricNames.CpuName, MetricType.String, MetricUnit.Text, Name, 0, MetricSemantics.Static);
-                sink.Register(MetricNames.CpuPackageTempC, MetricType.Double, MetricUnit.Celsius, Name, DefaultRateHz,
+                // with a .max so a skin can caption the hero "MAX:" and reset-max covers it
+                sink.RegisterWithMax(MetricNames.CpuPackageTempC, MetricUnit.Celsius, Name, DefaultRateHz,
                     flags: MetricFlags.NeedsElevation);
                 sink.RegisterWithMax(MetricNames.CpuPackagePowerW, MetricUnit.Watts, Name, DefaultRateHz,
                     flags: MetricFlags.NeedsElevation);
@@ -640,7 +641,7 @@ public sealed class LhmProvider : ISensorProvider
             // AMD / Intel: LHM is the whole story. Sensor names are English literals that differ
             // between vendors and LHM versions, so match on containment with fallbacks; anything
             // this card does not report simply never registers and its widget row hides itself.
-            Publish(sink, MetricNames.GpuTempC(idx), MetricUnit.Celsius, Pick(hw, SensorType.Temperature, orAny: true, "GPU Core", "GPU Hot Spot", "GPU"));
+            Publish(sink, MetricNames.GpuTempC(idx), MetricUnit.Celsius, Pick(hw, SensorType.Temperature, orAny: true, "GPU Core", "GPU Hot Spot", "GPU"), withMax: true);
             Publish(sink, MetricNames.GpuUsagePct(idx), MetricUnit.Percent, Pick(hw, SensorType.Load, orAny: false, "GPU Core", "D3D 3D", "GPU"));
             Publish(sink, MetricNames.GpuClockCoreMhz(idx), MetricUnit.Megahertz, Pick(hw, SensorType.Clock, orAny: false, "GPU Core", "GPU Graphics"));
             Publish(sink, MetricNames.GpuClockMemMhz(idx), MetricUnit.Megahertz, Pick(hw, SensorType.Clock, orAny: false, "GPU Memory"));

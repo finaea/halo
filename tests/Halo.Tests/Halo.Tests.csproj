@@ -37,6 +37,7 @@
     <ProjectReference Include="..\..\src\Halo.Collector\Halo.Collector.csproj" />
     <ProjectReference Include="..\..\src\Halo.Metrics\Halo.Metrics.csproj" />
     <ProjectReference Include="..\..\src\Halo.Shared\Halo.Shared.csproj" />
+    <ProjectReference Include="..\..\src\Halo.Widgets\Halo.Widgets.csproj" />
   </ItemGroup>
 
   <ItemGroup>

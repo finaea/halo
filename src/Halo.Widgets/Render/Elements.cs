@@ -14,7 +14,7 @@ namespace Halo.Widgets.Render;
 /// </summary>
 public sealed class PanelContext
 {
-    public required MetricCache Metrics { get; init; }
+    public required IMetricSource Metrics { get; init; }
     public required Theme Theme { get; init; }
     // Settings and Widget are re-pointed on an in-place config apply: a reload builds new objects
     // and a window left holding the old ones would render (and save) stale config.
@@ -30,11 +30,54 @@ public sealed class PanelContext
 
     public Dictionary<string, string> Options => Widget.Options;
 
+    /// <summary>The machine's mood, shared by every widget and updated once per master tick (App's
+    /// loop, or the render harness per synthetic tick). A context built without one gets an inert
+    /// mood that never reports a state, so its cards simply rest.</summary>
+    public SystemMood Mood { get; init; } = new();
+
     public bool Stale;
     public DateTime Now;
     /// <summary>QPC of this tick. Graph samples are timestamped with it (rates plan R4).</summary>
     public long NowQpc;
     public long TickIndex;
+
+    // ---- motion (tech plan §5) ----
+
+    /// <summary>The resolved motion level; the window sets it every tick. Off in the render harness,
+    /// so a golden is always the settled frame.</summary>
+    public MotionLevel Motion;
+
+    /// <summary>QPC of the frame being drawn. Equal to <see cref="NowQpc"/> on a data tick; only the
+    /// transition clock's in-between frames move it on alone, so transitions read this and graphs
+    /// (which read <see cref="NowQpc"/>) cannot scroll between readings.</summary>
+    public long AnimQpc;
+
+    /// <summary>True while the window's entrance is fading the card in (set per frame).</summary>
+    public bool Entering;
+
+    /// <summary>The window keeps drawing frames until this QPC; 0 = nothing moving.</summary>
+    public long AnimatingUntilQpc;
+
+    /// <summary>Ask for frames until <paramref name="untilQpc"/> (a <see cref="Transition"/> calls
+    /// this). Never called with motion off.</summary>
+    public void AnimateUntil(long untilQpc)
+    {
+        if (Motion != MotionLevel.Off && untilQpc > AnimatingUntilQpc) AnimatingUntilQpc = untilQpc;
+    }
+
+    /// <summary>Transitions started since the window last logged its counters, and the keys that
+    /// started them ("old→new", capped) — Debug-level evidence of what keeps the clock running.</summary>
+    internal int TransitionStarts;
+    internal readonly List<string> TransitionKeys = new();
+
+    /// <summary>The ambient loops this widget wants this frame, declared by the elements that own
+    /// them while drawing, at most <see cref="AmbientLoop.MaxPerWidget"/> (<see cref="AmbientLoop.Offer"/>
+    /// enforces it). Only ever filled at <see cref="MotionLevel.Full"/>; the window clears it before
+    /// each draw.</summary>
+    public readonly List<AmbientLoop> Ambients = new(AmbientLoop.MaxPerWidget);
+
+    /// <summary>The first loop offered this frame, or null.</summary>
+    public AmbientLoop? Ambient => Ambients.Count > 0 ? Ambients[0] : null;
 
     // ---- options ----
 
@@ -207,6 +250,9 @@ public sealed class TextEl : Element
     public string? SolidColor;               // label pill behind the text
     public double? SolidW, SolidH;
     public double WidthClip;                 // >0: clip/ellipsis to this width (ClipString)
+    /// <summary>Clip with an ellipsis to the theme's <see cref="Theme.ContentWidth"/>, read at
+    /// draw time so an in-place width change is honoured. Text that fits draws untouched.</summary>
+    public bool ClipToContent;
     /// <summary>Rainmeter InlineSetting=Size equivalent: render the returned (start,len) range
     /// of the text at InlineSizePt instead of the style size (baseline-shared).</summary>
     public Func<string, (int Start, int Len)>? InlineRange;
@@ -242,9 +288,12 @@ public sealed class TextEl : Element
             rc.FillTextBox(theme.Color(SolidColor), x, Y, SolidW ?? rc.TextWidth(_cached, Style), SolidH ?? Height, Align);
 
         string text = _cached;
-        if (WidthClip > 0)
+        double clip = ClipToContent ? theme.ContentWidth : WidthClip;
+        // ClipToContent leaves text that fits alone; WidthClip keeps its original rule (trim until
+        // text + "…" fits), which the Rainformer goldens pin.
+        if (clip > 0 && (!ClipToContent || rc.TextWidth(text, Style) > clip))
         {
-            while (text.Length > 1 && rc.TextWidth(text + "…", Style) > WidthClip)
+            while (text.Length > 1 && rc.TextWidth(text + "…", Style) > clip)
                 text = text[..^1];
             if (text.Length < _cached.Length) text += "…";
         }
@@ -346,8 +395,11 @@ public sealed class GraphEl : Element
     /// which puts up to a full ring of bars from two different semantic lanes on one graph.
     /// </summary>
     public Func<PanelContext, long>? ResetKey;
+    /// <summary>How the points are drawn. Sampling stays here; only the look is swappable.</summary>
+    public GraphVisual Visual = GraphVisual.Rainformer;
 
     private bool _dirty = true;
+    private System.Numerics.Vector2[] _points = [];
     private long _lastBucket = long.MinValue;
     private double _lastWidth = 188;
     private double[] _cols = [];
@@ -439,21 +491,29 @@ public sealed class GraphEl : Element
         if (BgColor != null)
             rc.DC.FillRectangle(new Rect((float)x, (float)Y, (float)w, (float)H), rc.Brush(theme.Color(BgColor)));
 
-        if (FrameSample != null) DrawPerSample(rc, theme, x, w);
-        else DrawBuckets(rc, theme, ctx, x, w);
+        var area = new GraphArea(x, Y, w, H);
+        Visual.DrawBackdrop(rc, theme, area);
+        if (FrameSample != null) DrawPerSample(rc, theme, area);
+        else DrawBuckets(rc, theme, ctx, area);
+    }
+
+    private Span<System.Numerics.Vector2> Points(int n)
+    {
+        if (_points.Length < n) _points = new System.Numerics.Vector2[n];
+        return _points.AsSpan(0, n);
     }
 
     /// <summary>Frame graphs: one bar per frame, newest at the Start edge (unchanged).</summary>
-    private void DrawPerSample(RenderContext rc, Theme theme, double x, double w)
+    private void DrawPerSample(RenderContext rc, Theme theme, GraphArea area)
     {
+        double x = area.X, w = area.W;
         foreach (var s in Series)
         {
             int n = s.Ring.Count;
             if (n < 2) continue;
             double max = s.FixedMax ?? Math.Max(1e-9, s.Ring.Max());
             int points = Math.Min(n, (int)w);
-            var brush = rc.Brush(theme.Color(s.Color));
-            System.Numerics.Vector2? prev = null;
+            var pts = Points(points);
             for (int i = 0; i < points; i++)
             {
                 double v = s.Ring.ValueAt(n - points + i);
@@ -461,17 +521,17 @@ public sealed class GraphEl : Element
                     ? (float)(x + w - (points - 1 - i))
                     : (float)(x + (points - 1 - i));
                 float py = (float)(Y + H - Math.Clamp(v / max, 0, 1) * H);
-                var pt = new System.Numerics.Vector2(px, py);
-                if (prev != null) rc.DC.DrawLine(prev.Value, pt, brush, 1.0f);
-                prev = pt;
+                pts[i] = new System.Numerics.Vector2(px, py);
             }
+            Visual.DrawSeries(rc, theme, s, pts, area, Style, perFrame: true);
         }
     }
 
     /// <summary>Time-bucket drawing: column c covers (now-(c+1)·colSpan, now-c·colSpan], value =
     /// the max that landed in it, empty column = hold the previous (older) value.</summary>
-    private void DrawBuckets(RenderContext rc, Theme theme, PanelContext ctx, double x, double w)
+    private void DrawBuckets(RenderContext rc, Theme theme, PanelContext ctx, GraphArea area)
     {
+        double x = area.X, w = area.W;
         int cols = Math.Max(1, (int)w);
         if (_cols.Length < cols) _cols = new double[cols];
         double colTicks = HistoryS * Qpf / cols;
@@ -508,25 +568,16 @@ public sealed class GraphEl : Element
             }
 
             double max = s.FixedMax ?? Math.Max(1e-9, maxSeen);
-            var brush = rc.Brush(theme.Color(s.Color));
-            System.Numerics.Vector2? prev = null;
+            var pts = Points(cols);
             for (int col = 0; col < cols; col++)
             {
                 double v = _cols[col];
-                if (double.IsNaN(v)) { prev = null; continue; }
                 float px = Start == GraphStart.Right ? (float)(x + w - col) : (float)(x + col);
-                float py = (float)(Y + H - Math.Clamp(v / max, 0, 1) * H);
-                if (Style == GraphStyle.Filled)
-                {
-                    rc.DC.FillRectangle(new Rect(px, py, 1f, (float)(Y + H - py)), brush);
-                }
-                else
-                {
-                    var pt = new System.Numerics.Vector2(px, py);
-                    if (prev != null) rc.DC.DrawLine(prev.Value, pt, brush, 1.0f);
-                    prev = pt;
-                }
+                // an empty column is a gap: NaN tells the visual to break the line there
+                float py = double.IsNaN(v) ? float.NaN : (float)(Y + H - Math.Clamp(v / max, 0, 1) * H);
+                pts[col] = new System.Numerics.Vector2(px, py);
             }
+            Visual.DrawSeries(rc, theme, s, pts, area, Style, perFrame: false);
         }
     }
 }

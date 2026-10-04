@@ -1,0 +1,5 @@
+{
+  "description": "A click on Yuuka at the last tick: surprised on every card she sits on.",
+  "extends": "idle",
+  "poke": "yuuka"
+}

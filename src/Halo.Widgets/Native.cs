@@ -20,7 +20,10 @@ internal static unsafe partial class Native
     public const uint WM_WINDOWPOSCHANGING = 0x0046;
     public const uint WM_DISPLAYCHANGE = 0x007E;
     public const uint WM_NCHITTEST = 0x0084;
+    public const uint WM_MOUSEACTIVATE = 0x0021;
+    public const int MA_NOACTIVATE = 3;
     public const uint WM_MOUSEMOVE = 0x0200;
+    public const uint WM_MOUSEWHEEL = 0x020A;
     public const uint WM_LBUTTONDOWN = 0x0201;
     public const uint WM_LBUTTONUP = 0x0202;
     public const uint WM_RBUTTONUP = 0x0205;
@@ -81,6 +84,8 @@ internal static unsafe partial class Native
     [DllImport("user32", SetLastError = true)] public static extern nint GetWindowLongPtrW(nint hwnd, int index);
     [DllImport("user32")] public static extern bool GetWindowRect(nint hwnd, out RECT rect);
     [DllImport("user32")] public static extern bool GetCursorPos(out POINT pt);
+    [DllImport("user32")] public static extern int GetSystemMetrics(int index);
+    public const int SM_CXDRAG = 68, SM_CYDRAG = 69;
     [DllImport("user32")] public static extern nint SetCapture(nint hwnd);
     [DllImport("user32")] public static extern bool ReleaseCapture();
     [DllImport("user32")] public static extern uint MsgWaitForMultipleObjectsEx(uint count, nint* handles, uint timeoutMs, uint wakeMask, uint flags);

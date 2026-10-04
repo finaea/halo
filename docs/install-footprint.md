@@ -157,7 +157,8 @@ Program Files and a development build under `src\…\bin\Debug` find their files
 | Inside the app folder | What | Read by |
 | --- | --- | --- |
 | `presentmon\PresentMonAPI2.dll`, `PresentMonService.exe` | The bundled Intel PresentMon 2 SDK (MIT) | Frame capture — `Paths.PresentMonDir` |
-| `assets\fonts\*.ttf` | `ElegantIcons.ttf`, the one font Halo ships | The renderer's private font collection — `Paths.FontsDir` |
+| `assets\fonts\*.ttf` | `ElegantIcons.ttf`, an icon font for the Drives and Network arrows | The renderer's private font collection — `Paths.FontsDir` |
+| `assets\skins\<skin>\` | Each skin's own fonts (`fonts\`, with their licences) and Settings-gallery pictures (`previews\`); for Azur Archive also `game-art\`, the character art and its `CREDITS.md` | The renderer (fonts, art) and the Settings Appearance page (pictures) |
 | `assets\halo.ico` | Window and notification-area icon | All three processes |
 | `redist\PawnIO_setup.exe` | The PawnIO installer | `Halo.Settings.exe --install-pawnio`, so System check can offer it later — `Paths.RedistDir` |
 | `LICENSE`, `NOTICE.md`, `THIRD-PARTY-NOTICES.md` | Licences and notices | People; Settings → About opens the third-party notices |

@@ -1,13 +1,19 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "lockAll": false,
   "snap": true,
   "appearance": {
+    "skin": "rainformer",
     "scale": 1.7,
-    "fontFamily": "Trebuchet MS",
-    "textSizePt": 8,
-    "cornerRadius": 4,
-    "colors": {}
+    "motion": "subtle",
+    "motionFps": 30,
+    "skins": {
+      "rainformer": {
+        "preset": "rainformer-light",
+        "colors": {},
+        "options": {}
+      }
+    }
   },
   "collector": {
     "frameLowsWindowS": 60,

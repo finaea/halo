@@ -35,8 +35,16 @@ public sealed class Dx : IDisposable
     /// </summary>
     private const LogLevel CrumbLevel = LogLevel.Info;
 
-    public Dx(string assetsFontDir)
+    /// <summary>
+    /// WARP (the software rasteriser) instead of the GPU. Only the render harness asks for it:
+    /// golden images have to come out the same on any box and on any driver, and a hardware
+    /// device's antialiasing is the driver's business.
+    /// </summary>
+    private readonly bool _warp;
+
+    public Dx(string assetsFontDir, bool warp = false)
     {
+        _warp = warp;
         CreateCore();
         LoadFonts(assetsFontDir);
     }
@@ -71,7 +79,7 @@ public sealed class Dx : IDisposable
         var flags = DeviceCreationFlags.BgraSupport;
 
         long t = Begin("D3D11CreateDevice");
-        Vortice.Direct3D11.D3D11.D3D11CreateDevice(null, DriverType.Hardware, flags,
+        Vortice.Direct3D11.D3D11.D3D11CreateDevice(null, _warp ? DriverType.Warp : DriverType.Hardware, flags,
             [Vortice.Direct3D.FeatureLevel.Level_11_1, Vortice.Direct3D.FeatureLevel.Level_11_0, Vortice.Direct3D.FeatureLevel.Level_10_0],
             out ID3D11Device? d3d).CheckError();
         Done("D3D11CreateDevice", t);
@@ -133,25 +141,57 @@ public sealed class Dx : IDisposable
         }
     }
 
+    /// <summary>
+    /// One private collection: the shared icon font(s) in <paramref name="fontDir"/> plus every
+    /// skin's bundled faces (<c>assets\skins\&lt;id&gt;\fonts\*.ttf|*.otf</c>, a sibling of the fonts
+    /// folder). <see cref="Render.RenderContext.Format"/> looks a family up here first and falls
+    /// back to the system collection, so a family name a skin does not bundle (Rainformer's
+    /// Trebuchet MS) still comes from Windows exactly as before.
+    /// </summary>
     private void LoadFonts(string fontDir)
     {
         try
         {
-            if (!Directory.Exists(fontDir)) { Log2.Warn($"font dir missing: {fontDir}"); return; }
+            var files = new List<string>();
+            if (Directory.Exists(fontDir)) files.AddRange(Directory.EnumerateFiles(fontDir, "*.ttf"));
+            else Log2.Warn($"font dir missing: {fontDir}");
+            string skinsDir = Path.Combine(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(fontDir)) ?? "", "skins");
+            if (Directory.Exists(skinsDir))
+                foreach (var dir in Directory.EnumerateDirectories(skinsDir))
+                {
+                    string skinFonts = Path.Combine(dir, "fonts");
+                    if (!Directory.Exists(skinFonts)) continue;
+                    files.AddRange(Directory.EnumerateFiles(skinFonts, "*.ttf"));
+                    files.AddRange(Directory.EnumerateFiles(skinFonts, "*.otf"));
+                }
+            if (files.Count == 0) return;
+
             var f5 = DWrite.QueryInterface<IDWriteFactory5>();
             var builder = f5.CreateFontSetBuilder();
-            foreach (var ttf in Directory.EnumerateFiles(fontDir, "*.ttf"))
+            foreach (var file in files)
             {
-                using var fileRef = f5.CreateFontFileReference(ttf);
+                using var fileRef = f5.CreateFontFileReference(file);
                 builder.AddFontFile(fileRef);
             }
             using var fontSet = builder.CreateFontSet();
             CustomFonts = f5.CreateFontCollectionFromFontSet(fontSet);
-            Log2.Info($"custom fonts loaded from {fontDir}");
+            // the family names are what a skin has to write in its theme, and they are not always
+            // the file name (Oxanium-SemiBold.ttf is the family "Oxanium SemiBold")
+            Log2.Info($"custom fonts: {files.Count} files, families: {string.Join(", ", FamilyNames(CustomFonts))}");
         }
         catch (Exception ex)
         {
             Log2.Error("font load failed (falling back to system fonts)", ex);
+        }
+    }
+
+    public static IEnumerable<string> FamilyNames(IDWriteFontCollection collection)
+    {
+        for (uint i = 0; i < collection.FontFamilyCount; i++)
+        {
+            using var family = collection.GetFontFamily(i);
+            using var names = family.FamilyNames;
+            yield return names.GetString(0);
         }
     }
 
@@ -169,6 +209,10 @@ public sealed class Dx : IDisposable
 
     private void DisposeCore()
     {
+        // skin bitmaps are device resources held in a process-wide cache; release them with the
+        // device rather than leaving an unused skin's cache to pin the old one
+        Skins.SkinAssets.InvalidateAll();
+        Skins.AzurArchive.Az.InvalidateBaked();
         CustomFonts?.Dispose(); CustomFonts = null;
         CompDevice?.Dispose();
         D2DDevice?.Dispose();

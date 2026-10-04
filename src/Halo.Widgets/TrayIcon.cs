@@ -72,6 +72,10 @@ public sealed class TrayIcon : IDisposable
                 ShowMenu();
             return 0;
         }
+        // this hidden top-level window is the process's one listener for broadcasts — the widget
+        // windows can be children of the desktop host and those do not get them
+        if (msg == WM_SETTINGCHANGE)
+            _app.SystemSettingChanged();
         // RegisterWindowMessage returns 0 on failure — never match on that
         if (msg != 0 && msg == _taskbarCreated)
         {

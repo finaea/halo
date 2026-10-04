@@ -31,7 +31,14 @@ the package, or the upstream repository. Versions are the ones `dotnet list pack
 | [Intel PresentMon](https://github.com/GameTechDev/PresentMon) SDK | 2.5.1.0 | MIT | `presentmon\PresentMonAPI2.dll`, `presentmon\PresentMonService.exe`, `presentmon\LICENSE.txt` |
 | [PawnIO](https://github.com/namazso/PawnIO) (installer from [PawnIO.Setup](https://github.com/namazso/PawnIO.Setup)) | 2.2.0 | **GPL-2.0-or-later** | `redist\PawnIO_setup.exe`, run as a separate program |
 | [Elegant Icon Font](https://www.elegantthemes.com/blog/resources/elegant-icon-font) | - | GPL-2.0 / MIT dual - **MIT taken** | `assets\fonts\ElegantIcons.ttf` |
+| [Barlow](https://github.com/jpt/barlow) Condensed (Light, Medium, SemiBold, Bold; Latin subset) | - | SIL OFL 1.1 | `assets\skins\azur-archive\fonts\BarlowCondensed-*.ttf`, licence in `OFL-BarlowCondensed.txt` |
+| [M PLUS Rounded 1c](https://github.com/coz-m/MPLUS_FONTS) (Medium, ExtraBold; subset) | - | SIL OFL 1.1 | `assets\skins\azur-archive\fonts\MPLUSRounded1c-*.ttf`, licence in `OFL-MPLUSRounded1c.txt` |
+| [Oxanium](https://github.com/sevmeyer/oxanium) SemiBold (static instance, Latin subset) | - | SIL OFL 1.1 | `assets\skins\azur-archive\fonts\Oxanium-SemiBold.ttf`, licence in `OFL-Oxanium.txt` |
+| Blue Archive character art (© NEXON Games & Yostar) | - | **all rights reserved** — used as fan content, without a licence, and removed on request | `assets\skins\azur-archive\game-art\blue-archive\*.png`; every file is listed in [CREDITS.md](assets/skins/azur-archive/game-art/CREDITS.md) — see [NOTICE.md](NOTICE.md) |
+| Blue Archive voice-line text (© NEXON Games & Yostar; English transcription from bluearchive.wiki) | - | script **all rights reserved** — used as fan content, without a licence, and removed on request; the wiki's transcription is CC BY-SA 4.0 | `assets\skins\azur-archive\game-art\talk\lines.json`; every line is listed in [CREDITS.md](assets/skins/azur-archive/game-art/CREDITS.md) — see [NOTICE.md](NOTICE.md) |
+| Azur Lane art: Manjuu (© Manjuu, Yongshi & Yostar) | - | **all rights reserved** — used as fan content, without a licence, and removed on request | `assets\skins\azur-archive\game-art\azur-lane\manjuu.png`; listed in [CREDITS.md](assets/skins/azur-archive/game-art/CREDITS.md) — see [NOTICE.md](NOTICE.md) |
 | Rainformer 3.1 HWiNFO Edition (visual design) | - | CC BY-NC 3.0 | the theme and panel geometry - see [NOTICE.md](NOTICE.md) |
+| [coolors.co](https://coolors.co) palettes: [Soft Lavender](https://coolors.co/22223b-4a4e69-9a8c98-c9ada7-f2e9e4), [Soft Pink Delight](https://coolors.co/ffe5ec-ffc2d1-ffb3c6-ff8fab-fb6f92), [Pastel Dreams](https://coolors.co/ff99c8-fcf6bd-d0f4de-a9def9-e4c1f9), [Peach Sorbet](https://coolors.co/f08080-f4978e-f8ad9d-fbc4ab-ffdab9), [Neutral Harmony Bliss](https://coolors.co/f4f1de-e07a5f-3d405b-81b29a-f2cc8f), [Sunrise Glow](https://coolors.co/233d4d-fe7f2d-fcca46-a1c181-619b8a), [Ocean Sunset](https://coolors.co/355070-6d597a-b56576-e56b6f-eaac8b), [Dark Sunset](https://coolors.co/335c67-fff3b0-e09f3e-9e2a2b-540b0e), [Earthy Green](https://coolors.co/cad2c5-84a98c-52796f-354f52-2f3e46), [Leafy Green Garden](https://coolors.co/132a13-31572c-4f772d-90a955-ecf39e), [Serene Nature Tones](https://coolors.co/6b9080-a4c3b2-cce3de-eaf4f4-f6fff8), [Autumn Harvest](https://coolors.co/ede0d4-e6ccb2-ddb892-b08968-7f5539-9c6644), [Autumn Harvest 2](https://coolors.co/6f1d1b-bb9457-432818-99582a-ffe6a7), [Coastal Vibes](https://coolors.co/3d5a80-98c1d9-e0fbfc-ee6c4d-293241), [Blue Serenity](https://coolors.co/edf2fb-d7e3fc-c1d3fe-abc4ff), [Vivid Nightfall](https://coolors.co/10002b-240046-3c096c-5a189a-7b2cbf-9d4edd-c77dff-e0aaff), [Soft Pastels](https://coolors.co/ffd6ff-e7c6ff-c8b6ff-b8c0ff-bbd0ff), [Pastel Dreamland](https://coolors.co/ffcbf2-f3c4fb-ecbcfd-e5b3fe-e2afff-deaaff-d8bbff-d0d1ff-c8e7ff-c0fdff) | - | none given — colour values only | the hues the Rainformer presets from Sakura Dusk to Lavender Haze are built on |
 
 Removed from the repository before the first public release, because Halo either had no right to
 redistribute them or no use for them:
@@ -127,6 +134,20 @@ service manager.
 
 Halo takes the MIT half. `ElegantIcons.ttf` is shipped unmodified and is used for two glyphs: the
 up/down transfer arrows in the Drives and Network panels.
+
+### Azur Archive fonts - SIL Open Font License 1.1
+
+Barlow Condensed (Copyright 2017 The Barlow Project Authors), M PLUS Rounded 1c (Copyright 2016
+The Rounded M+ Project Authors) and Oxanium (Copyright 2019 The Oxanium Project Authors) are
+shipped as subsets: only the characters Halo draws were kept, with their figure and kerning
+features. The OFL allows that. None of the three declares a Reserved Font Name, so the subsets keep
+their original names. Each family's full licence text sits next to its files as `OFL-<family>.txt`.
+
+### Azur Archive game art - all rights reserved
+
+The character art under `assets\skins\azur-archive\game-art\` is not licensed to Halo. It is
+used as fan content, credited file by file in that folder's `CREDITS.md`, and removed when its
+owners ask. It is not covered by Halo's licence. [NOTICE.md](NOTICE.md) has the details.
 
 ### MIT components in general
 

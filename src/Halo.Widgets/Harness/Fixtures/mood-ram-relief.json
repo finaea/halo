@@ -1,0 +1,14 @@
+{
+  "description": "RAM over 90 % that comes back under it near the end: Yuuka relieved.",
+  "extends": "idle",
+  "durationS": 110,
+  "series": {
+    "ram.pct": [
+      93,
+      93,
+      93,
+      93,
+      60
+    ]
+  }
+}

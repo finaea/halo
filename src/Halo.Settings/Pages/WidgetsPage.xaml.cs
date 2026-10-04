@@ -33,6 +33,7 @@ public partial class WidgetsPage : UserControl, ISettingsPage, IDisposable
     {
         _viewModel.PollCollector();
         _collectorTimer.Start();
+        _ = _viewModel.RefreshAppearanceAsync();
     }
 
     public void OnLeave() => _collectorTimer.Stop();

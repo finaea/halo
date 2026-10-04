@@ -698,12 +698,7 @@ public sealed class SystemCheckViewModel : ObservableObject, IDisposable
             Show = pair.Value.Show, Label = pair.Value.Label, Graph = pair.Value.Graph,
             Color = pair.Value.Color, Warn = pair.Value.Warn?.ToArray(), Max = pair.Value.Max,
         }, StringComparer.Ordinal),
-        Appearance = new WidgetAppearance
-        {
-            Colors = source.Appearance.Colors is null ? null : new Dictionary<string, string>(source.Appearance.Colors, StringComparer.Ordinal),
-            FontFamily = source.Appearance.FontFamily, Scale = source.Appearance.Scale,
-            ShowTitle = source.Appearance.ShowTitle, Width = source.Appearance.Width, TempUnit = source.Appearance.TempUnit,
-        },
+        Appearance = source.Appearance.Clone(),
     };
 
     public void Dispose()

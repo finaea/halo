@@ -27,7 +27,7 @@ public partial class MainWindow : FluentWindow
         _config.StatusChanged += Config_StatusChanged;
         ConfigPathText.Text = Paths.ConfigDir;
         ConfigPathText.ToolTip = Paths.ConfigDir;
-        Navigation.SelectedIndex = _firstRun ? 1 : 0;
+        Select(_firstRun ? "system" : "general");
     }
 
     private void Navigation_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -44,6 +44,7 @@ public partial class MainWindow : FluentWindow
             page = key switch
             {
                 "general" => new GeneralPage(_config),
+                "appearance" => new AppearancePage(_config),
                 "system" => new SystemCheckPage(_config, _firstRun, OpenWidgets),
                 "widgets" => new WidgetsPage(_config),
                 "about" => new AboutPage(),
@@ -58,11 +59,15 @@ public partial class MainWindow : FluentWindow
 
     private void OpenWidgets()
     {
-        if (Navigation.SelectedIndex == 2) ShowPage("widgets");
-        else Navigation.SelectedIndex = 2;
+        if (Navigation.SelectedItem is ListBoxItem { Tag: "widgets" }) ShowPage("widgets");
+        else Select("widgets");
         if (_pages.TryGetValue("widgets", out ISettingsPage? page) && page is WidgetsPage widgets)
             widgets.ShowReadyBanner();
     }
+
+    /// <summary>Select a navigation entry by its tag, so adding a page never shifts an index.</summary>
+    private void Select(string key)
+        => Navigation.SelectedItem = Navigation.Items.OfType<ListBoxItem>().First(item => item.Tag as string == key);
 
     private void Config_StatusChanged(object? sender, ConfigWriteStatus e)
     {

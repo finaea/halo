@@ -42,6 +42,11 @@ public sealed unsafe class WidgetWindow : IDisposable
 
     public long NextDueQpc;
 
+    /// <summary>When the transition clock wants its next frame; 0 = nothing moving. Separate from
+    /// <see cref="NextDueQpc"/> because a transition frame only redraws — it never reads metrics or
+    /// updates elements, so no number, bar or graph point can change between two readings.</summary>
+    public long AnimDueQpc;
+
     /// <summary>The monitor this widget is currently drawn on — its own when that monitor
     /// exists, otherwise the fallback the packer placed it on.</summary>
     public MonitorInfo HostMonitor { get; private set; } = MonitorInfo.None;
@@ -79,12 +84,27 @@ public sealed unsafe class WidgetWindow : IDisposable
     private float _dcDpi;
     private bool _needsFullRedraw = true;
 
+    // motion: the entrance, one visual per ambient loop slot, and the loop gate as of the last tick
+    private long _entranceQpc;
+    private bool _entered;
+    private readonly AmbientVisual[] _ambient = [.. Enumerable.Range(0, AmbientLoop.MaxPerWidget).Select(_ => new AmbientVisual())];
+    private AmbientLoop[] _loops = [];
+    private bool _loopOn;
+    private int _spinStep;
+
+    // Debug-level repaint accounting, logged once a minute: what a widget costs and why
+    private int _ticks, _tickDraws, _animDraws;
+    private long _updateQpc, _drawQpc, _statsSinceQpc;
+
     public bool IsDragging => _dragging;
 
     // drag state
     private bool _dragging;
     private POINT _dragStartCursor;
     private int _dragStartX, _dragStartY;
+    // click vs drag, locked or not: a press only becomes a drag once it leaves the system slop
+    private readonly PokeGesture _press = new();
+    private int _wheel;     // wheel delta not yet a whole notch
 
     public WidgetWindow(App app, Dx dx, WidgetInstance config, Panel panel, PanelContext ctx,
         MonitorInfo monitor, bool displaced, double maxRateHz)
@@ -147,6 +167,8 @@ public sealed unsafe class WidgetWindow : IDisposable
 
     private void ReleaseGraphics()
     {
+        foreach (var a in _ambient) a.Dispose();
+        _loops = [];
         _rc?.Dispose(); _rc = null;
         if (_d2dDc != null) { _d2dDc.Target = null; _d2dDc.Dispose(); _d2dDc = null; }
         _swapChain?.Dispose(); _swapChain = null;
@@ -193,11 +215,19 @@ public sealed unsafe class WidgetWindow : IDisposable
     {
         Ctx.Now = DateTime.Now;
         Ctx.NowQpc = System.Diagnostics.Stopwatch.GetTimestamp();
+        Ctx.AnimQpc = Ctx.NowQpc;
         Ctx.TickIndex++;
+        Ctx.Motion = _app.MotionLevel;
         bool wasStale = Ctx.Stale;
         Ctx.Stale = Ctx.Metrics.Stale;
+        LoopGuard();
+        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
         bool dirty = Panel.Update(Ctx) || _needsFullRedraw || wasStale != Ctx.Stale;
+        _updateQpc += System.Diagnostics.Stopwatch.GetTimestamp() - t0;
+        _ticks++;
+        LogStats(Ctx.NowQpc);
         if (!dirty) return false;
+        _tickDraws++;
 
         // Window size is in physical pixels, so it carries the monitor's DPI; the D2D transform
         // carries only the base scale, because the target bitmap is created at that same DPI.
@@ -219,9 +249,113 @@ public sealed unsafe class WidgetWindow : IDisposable
         return true;
     }
 
+    /// <summary>A transition-clock frame: the same elements in the same state, drawn at a later
+    /// <see cref="PanelContext.AnimQpc"/>. Nothing is read or updated, so data cannot move.</summary>
+    public void AnimFrame()
+    {
+        Ctx.AnimQpc = System.Diagnostics.Stopwatch.GetTimestamp();
+        AnimDueQpc = 0;
+        if (_pxH > 0) { _animDraws++; Render(); }
+    }
+
+    /// <summary>Once a minute at Debug: ticks, repaints from data, transition-clock repaints, the
+    /// transitions started and the keys that started them, and the time spent updating and drawing.
+    /// Cheap enough to count always; only the line is level-gated.</summary>
+    private void LogStats(long nowQpc)
+    {
+        long qpf = System.Diagnostics.Stopwatch.Frequency;
+        if (_statsSinceQpc == 0) { _statsSinceQpc = nowQpc; return; }
+        if (nowQpc - _statsSinceQpc < 60 * qpf) return;
+        if (Log.Level <= LogLevel.Debug)
+        {
+            double s = (double)(nowQpc - _statsSinceQpc) / qpf;
+            Log.Debug($"stats {Config.Id} ({Config.Type}) over {s:0}s: ticks {_ticks}, tick draws {_tickDraws}, anim draws {_animDraws}, " +
+                $"transitions {Ctx.TransitionStarts} [{string.Join(", ", Ctx.TransitionKeys)}], " +
+                $"update {_updateQpc * 1000.0 / qpf:0} ms, draw {_drawQpc * 1000.0 / qpf:0} ms");
+        }
+        _ticks = _tickDraws = _animDraws = 0;
+        _updateQpc = _drawQpc = 0;
+        Ctx.TransitionStarts = 0;
+        Ctx.TransitionKeys.Clear();
+        _statsSinceQpc = nowQpc;
+    }
+
+    /// <summary>
+    /// Once per tick: whether this widget's loop may run, and the spin's CPU step. The loop's
+    /// content is drawn on the swapchain when it is off and on its own visual when it is on, so a
+    /// change of gate needs a repaint even when nothing else moved.
+    /// </summary>
+    private void LoopGuard()
+    {
+        if (!Panel.Loops) return;
+        bool on = AmbientLoop.On(Ctx);
+        if (on != _loopOn) { _loopOn = on; _needsFullRedraw = true; }
+        int step = AmbientLoop.SpinStep(Ctx.Metrics, _spinStep);
+        if (step != _spinStep)
+        {
+            _spinStep = step;
+            if (LoopActive) Reconcile(_loops);
+        }
+    }
+
+    /// <summary>True while any of this widget's ambient loops has a visual to move.</summary>
+    public bool LoopActive => _ambient.Any(a => a.Active);
+
+    /// <summary>App saw the live loop gate flip. Closing drops the visual now, so nothing is left to
+    /// move; either way the window ticks next pass, and that tick's <see cref="LoopGuard"/> puts the
+    /// content back on the right surface.</summary>
+    public void LoopGateChanged(bool open, long nowQpc)
+    {
+        if (!Panel.Loops) return;
+        if (!open && LoopActive) Reconcile([]);
+        if (NextDueQpc > nowQpc) NextDueQpc = nowQpc;
+    }
+
+    /// <summary>One step of the ambient loops: transform values only, no drawing. App commits once
+    /// for every window after calling this on each.</summary>
+    public void LoopFrame(long nowQpc)
+    {
+        foreach (var a in _ambient) if (a.Active) a.Frame(nowQpc);
+    }
+
+    /// <summary>Slot i shows loop i; a slot with no loop drops its visual.</summary>
+    private void Reconcile(IReadOnlyList<AmbientLoop> loops)
+    {
+        if (_compVisual == null || _d2dDc == null || _rc == null) return;
+        _loops = [.. loops];   // a copy: the context's list is cleared before the next draw
+        try
+        {
+            for (int i = 0; i < _ambient.Length; i++)
+                _ambient[i].Reconcile(_dx, _compVisual, _d2dDc, _rc, i < _loops.Length ? _loops[i] : null,
+                    Ctx.Theme.EffectiveScale, (float)Config.Opacity, _spinStep);
+        }
+        catch (SharpGen.Runtime.SharpGenException ex)
+        {
+            Log.Error($"ambient loop {Config.Id} (device lost?)", ex);
+            _app.RequestDeviceRecovery();
+        }
+        _dcDpi = 0;   // a bake drew at 96 DPI on this context
+    }
+
     private void Render()
     {
         if (_swapChain == null || _d2dDc == null || _rc == null) return;
+        // the entrance starts on the first frame with a size; with motion off there is none
+        if (!_entered)
+        {
+            _entered = true;
+            if (Panel.Entrance && Ctx.Motion != MotionLevel.Off)
+            {
+                _entranceQpc = Ctx.AnimQpc;
+                Ctx.AnimateUntil(_entranceQpc + (long)(Motion.TransitionS * System.Diagnostics.Stopwatch.Frequency));
+            }
+        }
+        float enter = _entranceQpc == 0 ? 1f
+            : (float)Motion.Ease((Ctx.AnimQpc - _entranceQpc) / (Motion.TransitionS * System.Diagnostics.Stopwatch.Frequency));
+        if (enter >= 1) _entranceQpc = 0;
+        Ctx.Entering = enter < 1;
+        Ctx.Ambients.Clear();
+        long drawStart = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
             using var surface = _swapChain.GetBuffer<IDXGISurface>(0);
@@ -241,11 +375,14 @@ public sealed unsafe class WidgetWindow : IDisposable
 
             _d2dDc.BeginDraw();
             _d2dDc.Clear(new Color4(0, 0, 0, 0));
-            _d2dDc.Transform = System.Numerics.Matrix3x2.CreateScale((float)Ctx.Theme.BaseScale);
+            // full motion lets the entrance rise into place as well as fade in
+            float rise = Ctx.Motion == MotionLevel.Full ? (1 - enter) * 8 : 0;
+            _d2dDc.Transform = System.Numerics.Matrix3x2.CreateTranslation(0, rise) * System.Numerics.Matrix3x2.CreateScale((float)Ctx.Theme.BaseScale);
 
-            bool useOpacityLayer = Config.Opacity < 0.999;
+            float opacity = (float)Config.Opacity * enter;
+            bool useOpacityLayer = opacity < 0.999;
             if (useOpacityLayer)
-                _d2dDc.PushLayer(new LayerParameters1 { ContentBounds = new Rect(0, 0, 100000, 100000), Opacity = (float)Config.Opacity }, null!);
+                _d2dDc.PushLayer(new LayerParameters1 { ContentBounds = new Rect(0, 0, 100000, 100000), Opacity = opacity }, null!);
 
             Panel.Draw(_rc, Ctx);
 
@@ -253,7 +390,14 @@ public sealed unsafe class WidgetWindow : IDisposable
             _d2dDc.EndDraw();
             _d2dDc.Target = null;
             _swapChain.Present(0, PresentFlags.None);
+            _drawQpc += System.Diagnostics.Stopwatch.GetTimestamp() - drawStart;
             _needsFullRedraw = false;
+            // nothing is offered mid-entrance (AmbientLoop.Offer), so the loop's visual joins on the
+            // first settled frame
+            Reconcile(Ctx.Ambients);
+            AnimDueQpc = Ctx.AnimatingUntilQpc >= Ctx.AnimQpc
+                ? System.Diagnostics.Stopwatch.GetTimestamp() + (long)(System.Diagnostics.Stopwatch.Frequency / Motion.FrameHz) : 0;
+            if (AnimDueQpc == 0) Ctx.AnimatingUntilQpc = 0;
         }
         catch (SharpGen.Runtime.SharpGenException ex)
         {
@@ -405,20 +549,35 @@ public sealed unsafe class WidgetWindow : IDisposable
             case WM_NCHITTEST when Config.ClickThrough:
                 return -1; // HTTRANSPARENT
 
+            // A click must not activate anything. WS_EX_NOACTIVATE covers the window itself, but a
+            // desktop-parented one is a child of WorkerW, and DefWindowProc hands the message up to
+            // it, so a click could activate the desktop instead. Jack saw the whole widget blink on a
+            // real click; a synthetic WM_LBUTTONDOWN/UP (which never gets this message) poked the
+            // face with no blink at all (2026-10-04, 90 frames captured), which leaves activation.
+            // The context menu still takes the foreground itself (ShowContextMenu), as
+            // TrackPopupMenu needs.
+            case WM_MOUSEACTIVATE:
+                return MA_NOACTIVATE;
+
             case WM_LBUTTONDOWN:
+                GetCursorPos(out POINT down);
+                _press.Down(down.X, down.Y);
                 if (!IsLocked())
                 {
                     _dragging = true;
-                    GetCursorPos(out _dragStartCursor);
+                    _dragStartCursor = down;
                     var (sx, sy, _, _) = ScreenRect();
                     _dragStartX = sx; _dragStartY = sy;
                     SetCapture(hwnd);
                 }
                 return 0;
 
-            case WM_MOUSEMOVE when _dragging:
+            case WM_MOUSEMOVE when _press.Pressed:
                 {
                     GetCursorPos(out POINT p);
+                    // nothing moves inside the slop: a jitter on a click must not shift the window
+                    // (and snap could make that shift bigger) without the release ever saving it
+                    if (!_press.Move(p.X, p.Y, GetSystemMetrics(SM_CXDRAG), GetSystemMetrics(SM_CYDRAG)) || !_dragging) return 0;
                     int nx = _dragStartX + (p.X - _dragStartCursor.X);
                     int ny = _dragStartY + (p.Y - _dragStartCursor.Y);
                     (nx, ny) = _app.Snap(this, nx, ny, _pxW, _pxH);
@@ -426,14 +585,41 @@ public sealed unsafe class WidgetWindow : IDisposable
                 }
                 return 0;
 
-            case WM_LBUTTONUP when _dragging:
-                _dragging = false;
-                ReleaseCapture();
-                PersistPosition();
+            case WM_LBUTTONUP:
+                {
+                    GetCursorPos(out POINT up);
+                    _press.Move(up.X, up.Y, GetSystemMetrics(SM_CXDRAG), GetSystemMetrics(SM_CYDRAG));
+                    bool click = _press.Up();
+                    if (_dragging)
+                    {
+                        _dragging = false;
+                        ReleaseCapture();
+                        // a click never moved the window, so there is nothing to save; a latched drag
+                        // is saved even when it ends back near where it started
+                        if (!click) PersistPosition();
+                    }
+                    if (click) Poke(lParam);
+                }
                 return 0;
 
             case WM_RBUTTONUP:
                 ShowContextMenu();
+                return 0;
+
+            // Windows sends the wheel to the window under the cursor ("scroll inactive windows"), so
+            // this works without focus; a click-through widget is never under it (WM_NCHITTEST).
+            case WM_MOUSEWHEEL when !Config.ClickThrough:
+                {
+                    var pt = new POINT { X = (short)(lParam & 0xFFFF), Y = (short)((lParam >> 16) & 0xFFFF) };
+                    MapWindowPoints(0, hwnd, ref pt, 1);
+                    // high-resolution wheels send fractions of a notch; whole notches only
+                    _wheel += (short)((ulong)wParam >> 16);
+                    int notches = _wheel / 120;
+                    if (notches == 0) return 0;
+                    _wheel -= notches * 120;
+                    double scale = Ctx.Theme.EffectiveScale;
+                    if (scale > 0 && Panel.Wheel(Ctx, pt.X / scale, pt.Y / scale, notches)) NextDueQpc = 0;
+                }
                 return 0;
 
             // A desktop-parented child does not reliably get either of these, so the 5 s position
@@ -458,6 +644,17 @@ public sealed unsafe class WidgetWindow : IDisposable
     }
 
     private bool IsLocked() => Config.Locked || Ctx.Settings.LockAll;
+
+    /// <summary>A click without drag: hand it to the panel in logical units (the client area is
+    /// drawn at the effective scale, so that is the one divisor), and repaint at once if something
+    /// on it reacted. Click-through windows never get here — WM_NCHITTEST sends the click on.</summary>
+    private void Poke(nint lParam)
+    {
+        int x = (short)(lParam & 0xFFFF), y = (short)((lParam >> 16) & 0xFFFF);
+        double scale = Ctx.Theme.EffectiveScale;
+        if (scale <= 0 || !Panel.Poke(Ctx, x / scale, y / scale)) return;
+        NextDueQpc = 0;
+    }
 
     private void PersistPosition()
     {
@@ -583,9 +780,10 @@ public sealed unsafe class WidgetWindow : IDisposable
     /// <summary>
     /// Adopt a changed config without rebuilding the window (settings plan §Live-apply). Anything
     /// that only changes values — rate, graph history/height/style, colours, labels, warn points,
-    /// scale, placement, opacity, z-mode, click-through, title — lands here; only a type change,
-    /// a structural option, a metric show/graph toggle or a width/showTitle/fontFamily change
-    /// costs a rebuild, and then App replaces this window instead of calling this.
+    /// scale, placement, opacity, z-mode, click-through, title, preset — lands here; only a type
+    /// change, a structural option, a metric show/graph toggle, a width/showTitle change or a
+    /// different resolved skin/font/structural skin option costs a rebuild, and then App replaces
+    /// this window instead of calling this.
     /// </summary>
     public void ApplyInPlace(WidgetInstance next, AppSettings settings, MonitorInfo monitor, bool displaced,
         Theme resolved, double maxRateHz)
@@ -627,9 +825,52 @@ public sealed unsafe class WidgetWindow : IDisposable
     public void Dispose()
     {
         ReleaseGraphics();
+        Panel.Dispose();
         if (Hwnd != 0) { DestroyWindow(Hwnd); ByHwnd.Remove(Hwnd); Hwnd = 0; }
     }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WINDOWPOS { public nint hwnd, hwndInsertAfter; public int x, y, cx, cy; public uint flags; }
+}
+
+/// <summary>
+/// Click-versus-drag, apart from the window so it can be tested. A press <b>latches</b> into a drag
+/// the first time the cursor leaves the system drag rectangle (SM_CXDRAG × SM_CYDRAG, 4 px by
+/// default) and stays a drag even if it comes back; a press released without ever latching is a
+/// click. Deciding from the final position alone let a drag that ended near its start pass for a
+/// click (moved, never saved), and let a click's jitter move the window.
+/// </summary>
+internal sealed class PokeGesture
+{
+    private int _x, _y;
+
+    public bool Pressed { get; private set; }
+    public bool Latched { get; private set; }
+
+    public void Down(int x, int y)
+    {
+        Pressed = true;
+        Latched = false;
+        _x = x;
+        _y = y;
+    }
+
+    /// <summary>Feed a cursor position; true once the press is a drag (the window may follow).</summary>
+    public bool Move(int x, int y, int slopX, int slopY)
+    {
+        if (Pressed && !Latched && !IsClick(x - _x, y - _y, slopX, slopY)) Latched = true;
+        return Latched;
+    }
+
+    /// <summary>End the press; true = it was a click.</summary>
+    public bool Up()
+    {
+        bool click = Pressed && !Latched;
+        Pressed = false;
+        Latched = false;
+        return click;
+    }
+
+    public static bool IsClick(int dx, int dy, int slopX, int slopY)
+        => Math.Abs(dx) <= Math.Max(1, slopX) && Math.Abs(dy) <= Math.Max(1, slopY);
 }

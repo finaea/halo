@@ -14,7 +14,7 @@
     the portable zip contains:
 
         Halo.Collector.exe  Halo.Widgets.exe  Halo.Settings.exe  + shared runtime
-        assets\fonts\*.ttf  assets\halo.ico
+        assets\fonts\*.ttf  assets\halo.ico  assets\skins\<id>\previews\*.png
         presentmon\PresentMonAPI2.dll  PresentMonService.exe  LICENSE.txt
         redist\PawnIO_setup.exe
         LICENSE  NOTICE.md  THIRD-PARTY-NOTICES.md
@@ -178,6 +178,12 @@ function Copy-Tree($from, $to, $what) {
     return $true
 }
 
+# Skin assets are replaced, not merged: Copy-Item never deletes, so a game-art folder removed from
+# source (a takedown) would otherwise survive in a reused output folder, be re-rendered into
+# previews below and ship again. The csproj Content items re-copy the current source on publish
+# anyway; wiping first makes the output match source exactly.
+$appSkins = Join-Path $appDir 'assets\skins'
+if (Test-Path -LiteralPath $appSkins) { Remove-Item -LiteralPath $appSkins -Recurse -Force }
 [void](Copy-Tree (Join-Path $root 'assets') (Join-Path $appDir 'assets') 'assets')
 $pmOk = Copy-Tree (Join-Path $root 'tools\presentmon\sdk') (Join-Path $appDir 'presentmon') 'PresentMon SDK'
 if ($pmOk) {
@@ -196,6 +202,49 @@ foreach ($f in @('LICENSE', 'NOTICE.md', 'THIRD-PARTY-NOTICES.md')) {
     else { Warn "$f missing at repo root - not shipped" }
 }
 Ok 'payload copied'
+Write-Host ""
+
+# ---------------------------------------------------------------------------
+# 2b. Skin gallery previews: one art-free PNG per skin x preset (plus an art-bearing one
+#     inside game-art\previews\ for a skin that ships game art), rendered by the published
+#     Halo.Widgets.exe itself (it walks SkinCatalog, so a new preset needs no edit here).
+#     WARP so the pictures are the same on every machine. Rendered into dist\app, where the
+#     exe finds its fonts, then copied back to assets\skins\<id>\previews\ so a plain
+#     `dotnet build` of Halo.Settings has them too.
+# ---------------------------------------------------------------------------
+Step 'Rendering skin previews'
+# Pictures for a Settings page are not worth failing a release over: on any problem, warn and
+# ship whatever previews assets\ already holds (the payload copy above put them in dist\app).
+$widgetsExe = Join-Path $appDir 'Halo.Widgets.exe'
+$appAssets = Join-Path $appDir 'assets'
+try {
+    if (-not (Test-Path -LiteralPath $widgetsExe)) { throw "$widgetsExe not found" }
+    # WinExe: without -Wait PowerShell would not wait for it, nor see its exit code.
+    $render = Start-Process -FilePath $widgetsExe -ArgumentList @('--render', "`"$appAssets`"", '--previews', '--warp') `
+        -Wait -PassThru -NoNewWindow
+    if ($render.ExitCode -ne 0) { throw "render exited with code $($render.ExitCode)" }
+    foreach ($dir in Get-ChildItem -Directory -Path (Join-Path $appAssets 'skins')) {
+        $from = Join-Path $dir.FullName 'previews'
+        if (-not (Test-Path -LiteralPath $from)) { continue }
+        $to = Join-Path $root "assets\skins\$($dir.Name)\previews"
+        New-Item -ItemType Directory -Force -Path $to | Out-Null
+        Copy-Item -Path (Join-Path $from '*.png') -Destination $to -Force
+        Ok "$($dir.Name): $((Get-ChildItem -Path $from -Filter *.png).Count) previews"
+        # Art-bearing previews exist only where the skin's game-art folder shipped, and stay inside
+        # it, so deleting game-art\ removes them from the next build as well.
+        $artFrom = Join-Path $dir.FullName 'game-art\previews'
+        $artSource = Join-Path $root "assets\skins\$($dir.Name)\game-art"
+        if ((Test-Path -LiteralPath $artFrom) -and (Test-Path -LiteralPath $artSource)) {
+            $artTo = Join-Path $root "assets\skins\$($dir.Name)\game-art\previews"
+            New-Item -ItemType Directory -Force -Path $artTo | Out-Null
+            Copy-Item -Path (Join-Path $artFrom '*.png') -Destination $artTo -Force
+            Ok "$($dir.Name): $((Get-ChildItem -Path $artFrom -Filter *.png).Count) previews with game art"
+        }
+    }
+}
+catch {
+    Warn "Skin previews not rendered ($($_.Exception.Message)) - keeping the ones already in assets\."
+}
 Write-Host ""
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,5 @@
+{
+  "description": "An ordinary date at 08:15: the day's first message is the host's morning greeting.",
+  "extends": "idle",
+  "now": "2026-03-10T08:15:00"
+}

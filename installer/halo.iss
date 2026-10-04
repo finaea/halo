@@ -114,6 +114,10 @@ Name: "autostart"; Description: "Start with Windows"; Types: full
 ; current version still ships is deleted here and restored by the copy a moment later.
 Type: files; Name: "{app}\assets\fonts\SegMDL2.ttf"
 Type: files; Name: "{app}\assets\fonts\MaterialIcons.ttf"
+; Azur Archive's game art, for the same reason: when art is removed on request
+; (docs\game-art-removal.md), an upgrade must not leave the old files on every machine that had
+; them. One exact folder, deleted before [Files] runs, so a build that still ships it puts it back.
+Type: filesandordirs; Name: "{app}\assets\skins\azur-archive\game-art"
 
 [Files]
 ; dist\app is the layout contract, shipped verbatim: three exes over one shared

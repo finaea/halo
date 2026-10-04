@@ -1,0 +1,7 @@
+{
+  "description": "Collector down: stale badge on, every reading absent. cpu.logical.count is still registered, because the registry outlives the collector and a count is a fact about the machine rather than a reading. Pinning it to 16 also keeps the cpu-ram core grid the same on every machine (CoreCount falls back to Environment.ProcessorCount otherwise).",
+  "stale": true,
+  "values": {
+    "cpu.logical.count": 16
+  }
+}

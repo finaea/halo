@@ -1,4 +1,4 @@
-# Reference config (schema v2)
+# Reference config (schema v3)
 
 **Halo never reads this folder.** It is here to show what the two settings files look like without
 installing anything.
@@ -13,12 +13,13 @@ optional. Either way, the file watcher picks up an outside edit within about 200
 | `settings.json` | Global appearance defaults, snapping and locking, collector options, and the log level |
 | `widgets.json` | One entry per widget: type, monitor, position, z-order, refresh rate, and per-widget metric, option and appearance overrides |
 
-There is no `theme.json` any more. Colours live under `settings.json > appearance.colors` (global)
-and under `widgets[].appearance` for each widget.
+There is no `theme.json` any more. Colours live under `settings.json > appearance.skins.<skin>`
+(global) and under `widgets[].appearance.skins.<skin>` for each widget, as a preset plus any
+individual colours changed on top of it.
 
 ## What these files are
 
-They were produced by running the v1 → v2 migration over an existing layout:
+They were produced by running the v1 → v2 migration over an existing layout, then brought up to v3:
 
 ```powershell
 Halo.Collector.exe --migrate-config <old config dir> --to <new dir>
@@ -37,13 +38,16 @@ written into the settings.
 | Key | Notes |
 | --- | --- |
 | `appearance.scale` | `"auto"` (follows each monitor's DPI) or a number. The example uses `1.7`. |
+| `appearance.skin` | Which skin draws the widgets; a widget can name its own under `appearance.skin`. |
+| `appearance.fontFamily` | Left out (or `null`) to use the skin's own font. |
+| `appearance.skins.<skin>` | `preset` (the starting palette), `colors` (individual colours changed on top of it) and `options` (the skin's own settings, such as `cornerRadius`). A widget that names its own `preset` no longer picks up the global `colors`. |
 | `widgets[].rateHz` | From 0.5 up to the widget's limit. Raising it beyond a metric's real update rate gains nothing; the "?" help next to the Refresh rate setting explains each widget's limit. |
 | `widgets[].graph.historyS` | Seconds of history in the widget's graph |
 | `widgets[].metrics` | Per-row overrides: `show`, `label`, `graph`, `color`, `warn`, `max` |
 | `collector.externalIp.enabled` | The only outbound network request Halo can make. `false` on a fresh install. |
 | `collector.presentMonTransport` | `auto` or `sdk`; both mean the bundled PresentMon SDK |
 | `diagnostics.logLevel` | `"info"` by default; System check's **Verbose logging** switch sets `"debug"`. The `HALO_LOG_LEVEL` environment variable overrides it. |
-| `schemaVersion` | `2`. A v1 config folder is upgraded automatically the first time Halo starts. |
+| `schemaVersion` | `3`. Older files are upgraded automatically when Halo reads them; nothing about the look changes. |
 
 The complete list is in `src/Halo.Shared/Config/Models.cs`, and what each widget accepts is
 declared in `src/Halo.Shared/Panels/PanelCatalog.cs`.

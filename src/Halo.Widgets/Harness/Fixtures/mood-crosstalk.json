@@ -1,0 +1,7 @@
+{
+  "description": "A game hitches late in the run (a 120 ms frame past the FPS row's lowest step): Momoi calls the spike in one line and, as the run's first exchange-capable event, the latency card's student answers 3.5 s later.",
+  "extends": "mood-gaming",
+  "series": {
+    "fps.frametime.presented.worst.ms": [8, 8, 8, 8, 8, 8, 8, 8, 120, 120]
+  }
+}

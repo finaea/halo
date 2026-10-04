@@ -1,0 +1,9 @@
+{
+  "description": "Idle desktop with the CPU past its usage warn point: SystemMood Busy.",
+  "extends": "idle",
+  "series": {
+    "cpu.total.pct": [
+      86
+    ]
+  }
+}

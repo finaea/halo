@@ -1,0 +1,16 @@
+{
+  "description": "The GPU climbs to warn step 4 (70 \u00b0C on 45/55/65/75) while the CPU stays cool: SystemMood Hot, the host says so, and every card character sweats.",
+  "extends": "idle",
+  "series": {
+    "gpu.0.temp.c": [
+      50,
+      70,
+      70,
+      70,
+      70
+    ],
+    "cpu.package.temp.c": [
+      52
+    ]
+  }
+}

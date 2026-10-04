@@ -39,7 +39,9 @@ public sealed record MetricSpec(
 
 /// <summary>
 /// A per-widget knob. <see cref="Structural"/> options change which rows exist, so the widget
-/// window is rebuilt when they change; everything else is applied in place.
+/// window is rebuilt when they change; everything else is applied in place. <see cref="Types"/>
+/// narrows a skin option to the panel types it means anything on, for a widget's own editor; null
+/// is every type, and the global editor always lists it.
 /// </summary>
 public sealed record OptionSpec(
     string Key,
@@ -49,7 +51,8 @@ public sealed record OptionSpec(
     string Help,
     bool Structural = false,
     string? Range = null,
-    string[]? Choices = null);
+    string[]? Choices = null,
+    string[]? Types = null);
 
 /// <summary>One instantiable widget type, described once for the renderer and the Settings UI.</summary>
 public sealed record PanelType(
@@ -85,7 +88,7 @@ public sealed record PanelType(
 public static class PanelCatalog
 {
     // Tokens every panel uses for the card itself.
-    private static readonly string[] Frame = ["bgTop", "bgBody", "title", "text", "text2", "staleBadge"];
+    private static readonly string[] Frame = ["bgTop", "bgBody", "stroke", "title", "text", "text2", "staleBadge"];
     private static readonly double[] Warn75 = [75];
     private static readonly double[] CpuTempWarn = [50, 60, 70, 80];
     private static readonly double[] GpuTempWarn = [45, 55, 65, 75];
@@ -325,6 +328,20 @@ public static class PanelCatalog
             Options: TopProcOptions(),
             Tokens: [.. Frame, "redText"],
             DefaultRateHz: 1),
+
+        // The machine's mood in one card (skin tech plan §5): Rainformer prints it as a status
+        // line, Azur Archive hosts it with Arona/Plana and a MomoTalk thread. Not in the default
+        // layout — it is the fun layer, added on purpose.
+        new PanelType("companion", "Companion",
+            Metrics:
+            [
+                new MetricSpec("uptime", "Uptime", MetricNames.SysUptimeS, MetricUnit.Seconds, ColorToken: "text2"),
+            ],
+            Options: [],
+            Tokens: [.. Frame, "solidLabel"],
+            DefaultRateHz: 5,
+            // the mood is worked out in the widget process, so no single metric bounds the repaint
+            LocalContent: true),
     ];
 
     /// <summary>Row-count bounds for the Top-processes panels. The ceiling is the collector's:

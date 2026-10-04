@@ -1,15 +1,24 @@
-﻿using Vortice.Direct2D1;
-using Vortice.Mathematics;
-
-namespace Halo.Widgets.Render;
+﻿namespace Halo.Widgets.Render;
 
 /// <summary>
-/// A widget panel: the Rainformer two-zone rounded background + a flow of elements.
+/// A widget panel: a skin's card chrome + a flow of elements.
 /// Layout mirrors the skins: title row inside the top band, content flows from
 /// TopMarginFormula downward; panel height = last element bottom + margins.
 /// </summary>
-public sealed class Panel
+public sealed class Panel : IDisposable
 {
+    /// <summary>The card behind the elements. Set by the skin that built this panel.</summary>
+    public ICardChrome? Chrome;
+
+    /// <summary>The window fades this panel in when it first appears (motion subtle or full). Set by
+    /// a skin that wants motion; Rainformer leaves it off and so never moves at all.</summary>
+    public bool Entrance;
+
+    /// <summary>Some element of this panel may offer an ambient loop. Panels that never do (all of
+    /// Rainformer) skip the loop gate and CPU step entirely, so a game starting or stopping never
+    /// repaints them on motion's account.</summary>
+    public bool Loops;
+
     /// <summary>Title-zone rows drawn at fixed positions inside the band (Yâ‰ˆ9).</summary>
     public List<Element> TitleElements = new();
     public List<Element> Elements = new();
@@ -104,7 +113,7 @@ public sealed class Panel
     public void Draw(RenderContext rc, PanelContext ctx)
     {
         var theme = rc.Theme;
-        DrawBackground(rc, theme, ComputedHeight);
+        Chrome?.DrawCard(rc, theme, ComputedHeight);
 
         if (theme.ShowTitle)
             foreach (var e in TitleElements)
@@ -113,71 +122,40 @@ public sealed class Panel
             e.Draw(rc, ctx);
 
         if (ctx.Stale)
-        {
-            // per-panel stale badge (plan Â§11): small red dot in the title band corner
-            rc.DC.FillEllipse(new Ellipse(new System.Numerics.Vector2((float)(theme.BgWidth - theme.BgOffset - 6), (float)(theme.BgOffset + 5 + theme.ContentShiftY)), 2.5f, 2.5f),
-                rc.Brush(theme.Color("staleBadge")));
-        }
+            Chrome?.DrawStaleBadge(rc, theme);
     }
 
-    /// <summary>Two-zone card: rounded-top band + rounded-bottom body (StyleBackground shapes).
-    /// With the title bar hidden there is one zone, rounded on all four corners.</summary>
-    private static void DrawBackground(RenderContext rc, Theme theme, double panelH)
+    /// <summary>A click without drag at (x, y) in logical units: the first element that claims it
+    /// reacts (a character pokes, the companion marks its thread read). False = nothing there.</summary>
+    public bool Poke(PanelContext ctx, double x, double y)
     {
-        float x = (float)theme.BgOffset, w = (float)theme.BgShapeW, r = (float)theme.CornerRadius;
-
-        if (!theme.ShowTitle)
-        {
-            float h = (float)(panelH - 2 * theme.BgOffset);
-            if (h > 2)
-                rc.DC.FillRoundedRectangle(new RoundedRectangle
-                {
-                    Rect = new Rect(x, (float)theme.BgOffset, w, h),
-                    RadiusX = r,
-                    RadiusY = r,
-                }, rc.Brush(theme.Color("bgBody")));
-            return;
-        }
-
-        // top band: y 5..26, rounded top corners, square bottom
-        DrawHalfRounded(rc, x, (float)theme.BgOffset, w, (float)theme.TitleZoneH, r, roundTop: true, theme.Color("bgTop"));
-
-        // body: y 29.5 .. panelH-5, square top, rounded bottom
-        float bodyTop = (float)(theme.BgOffset + 24.5);
-        float bodyH = (float)(panelH - theme.BgOffset - bodyTop);
-        if (bodyH > 2)
-            DrawHalfRounded(rc, x, bodyTop, w, bodyH, r, roundTop: false, theme.Color("bgBody"));
+        foreach (var e in _visible)
+            if (e is IPokeTarget t && t.Poke(ctx, x, y)) return true;
+        return false;
     }
 
-    private static void DrawHalfRounded(RenderContext rc, float x, float y, float w, float h, float r, bool roundTop, Color4 color)
+    /// <summary>A mouse wheel turn over (x, y), in logical units, of <paramref name="notches"/>
+    /// (positive = away from the user, so up and back in time). True = something scrolled.</summary>
+    public bool Wheel(PanelContext ctx, double x, double y, int notches)
     {
-        var dc = rc.DC;
-        var factory = dc.Factory;
-        using var geo = factory.CreatePathGeometry();
-        using (var sink = geo.Open())
-        {
-            if (roundTop)
-            {
-                sink.BeginFigure(new System.Numerics.Vector2(x, y + r), FigureBegin.Filled);
-                sink.AddArc(new ArcSegment(new System.Numerics.Vector2(x + r, y), new Size(r, r), 0, SweepDirection.Clockwise, ArcSize.Small));
-                sink.AddLine(new System.Numerics.Vector2(x + w - r, y));
-                sink.AddArc(new ArcSegment(new System.Numerics.Vector2(x + w, y + r), new Size(r, r), 0, SweepDirection.Clockwise, ArcSize.Small));
-                sink.AddLine(new System.Numerics.Vector2(x + w, y + h));
-                sink.AddLine(new System.Numerics.Vector2(x, y + h));
-            }
-            else
-            {
-                sink.BeginFigure(new System.Numerics.Vector2(x, y), FigureBegin.Filled);
-                sink.AddLine(new System.Numerics.Vector2(x + w, y));
-                sink.AddLine(new System.Numerics.Vector2(x + w, y + h - r));
-                sink.AddArc(new ArcSegment(new System.Numerics.Vector2(x + w - r, y + h), new Size(r, r), 0, SweepDirection.Clockwise, ArcSize.Small));
-                sink.AddLine(new System.Numerics.Vector2(x + r, y + h));
-                sink.AddArc(new ArcSegment(new System.Numerics.Vector2(x, y + h - r), new Size(r, r), 0, SweepDirection.Clockwise, ArcSize.Small));
-            }
-            sink.EndFigure(FigureEnd.Closed);
-            sink.Close();
-        }
-        dc.FillGeometry(geo, rc.Brush(color));
+        foreach (var e in _visible)
+            if (e is IScrollTarget t && t.Wheel(ctx, x, y, notches)) return true;
+        return false;
     }
+
+    public void Dispose() => Chrome?.Dispose();
 }
 
+/// <summary>An element with a zone that the mouse wheel scrolls — the companion's MomoTalk thread.</summary>
+public interface IScrollTarget
+{
+    /// <summary>Scroll if (x, y), in logical units, is over this element's zone; true if it moved.</summary>
+    bool Wheel(PanelContext ctx, double x, double y, int notches);
+}
+
+/// <summary>An element with something on it that answers a click — a character's face.</summary>
+public interface IPokeTarget
+{
+    /// <summary>React if (x, y), in logical units, is on this element's target; true if it was.</summary>
+    bool Poke(PanelContext ctx, double x, double y);
+}

@@ -52,6 +52,7 @@
       <ListBox x:Name="Navigation" Margin="8" BorderThickness="0" Background="Transparent"
                SelectionChanged="Navigation_SelectionChanged">
         <ListBoxItem Tag="general" Padding="12,9" Margin="0,2"><TextBlock Text="General" /></ListBoxItem>
+        <ListBoxItem Tag="appearance" Padding="12,9" Margin="0,2"><TextBlock Text="Appearance" /></ListBoxItem>
         <ListBoxItem Tag="system" Padding="12,9" Margin="0,2"><TextBlock Text="System check" /></ListBoxItem>
         <ListBoxItem Tag="widgets" Padding="12,9" Margin="0,2"><TextBlock Text="Widgets" /></ListBoxItem>
         <ListBoxItem IsEnabled="False" Height="18" />

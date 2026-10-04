@@ -29,5 +29,9 @@
     <!-- Also embedded, so the window and title-bar icons resolve through
          pack://application:,,,/assets/halo.ico instead of a loose file next to the exe. -->
     <Resource Include="..\..\assets\halo.ico" Link="assets\halo.ico" />
+    <!-- The Appearance gallery's pictures, rendered by build.ps1 (Halo.Widgets.exe - -render - -previews).
+         Only the art-free previews: an art-bearing render belongs under game-art\ and must leave
+         with it. Release builds copy the whole assets tree anyway. -->
+    <Content Include="..\..\assets\skins\**\previews\*.png" LinkBase="assets\skins" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -4,7 +4,6 @@ using System.IO.Compression;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Controls.Primitives;
 using Halo.Settings.Services;
 using Halo.Settings.ViewModels;
 using Halo.Shared;
@@ -36,18 +35,6 @@ public partial class GeneralPage : UserControl, ISettingsPage, IDisposable
     }
 
     public void OnLeave() { }
-
-    private void Preset_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is ToggleButton { Tag: string name }) _viewModel.ApplyPreset(name);
-    }
-
-    private void ColorButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is Button { DataContext: GlobalColorViewModel row }) row.IsPickerOpen = !row.IsPickerOpen;
-    }
-
-    private void ResetAppearance_Click(object sender, RoutedEventArgs e) => _viewModel.ResetAppearance();
 
     private async void AutostartSwitch_Click(object sender, RoutedEventArgs e)
     {
@@ -153,6 +140,10 @@ public partial class GeneralPage : UserControl, ISettingsPage, IDisposable
             using ZipArchive archive = ZipFile.OpenRead(dialog.FileName);
             AppSettings settings = await ReadEntryAsync(archive, "settings.json", ConfigJsonContext.Default.AppSettings);
             WidgetsConfig widgets = await ReadEntryAsync(archive, "widgets.json", ConfigJsonContext.Default.WidgetsConfig);
+            // A layout exported before schema v3 carries v2 appearance; bring it up the same way
+            // ConfigStore does at load, or its colours would be dropped on the way in.
+            SchemaV3.Upgrade(settings);
+            SchemaV3.Upgrade(widgets);
             _config.QueueSettings("$", target => CopySettings(settings, target), flushImmediately: true);
             _config.QueueWidgets("$", target => CopyWidgets(widgets, target), flushImmediately: true);
             await _config.FlushAllAsync();
