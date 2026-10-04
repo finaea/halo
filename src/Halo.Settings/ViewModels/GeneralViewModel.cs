@@ -8,7 +8,8 @@ public sealed record ChoiceItem(string Value, string Label)
     public override string ToString() => Label;
 }
 
-/// <summary>The General page: desktop behaviour and whole-config actions. The look itself lives on
+/// <summary>The General page: desktop behaviour. Profiles are driven from the page through
+/// <see cref="Services.ProfileService"/>. The look itself lives on
 /// the Appearance page (<see cref="AppearanceViewModel"/>).</summary>
 public sealed class GeneralViewModel : ObservableObject, IDisposable
 {
@@ -48,20 +49,6 @@ public sealed class GeneralViewModel : ObservableObject, IDisposable
 
     public void RefreshFromCurrent() => ApplyFromStore(NoDirtyPaths);
 
-    public void ResetEverything()
-    {
-        var defaults = new AppSettings();
-        _applying = true;
-        try { ApplySettings(defaults, NoDirtyPaths); }
-        finally { _applying = false; }
-        _config.QueueSettings("$", s => CopySettings(defaults, s), flushImmediately: true);
-        _config.QueueWidgets("$", widgets =>
-        {
-            widgets.SchemaVersion = AppSettings.CurrentSchemaVersion;
-            widgets.Widgets.Clear();
-        }, flushImmediately: true);
-    }
-
     private void Config_ExternalChanged(object? sender, ConfigChangedEventArgs e)
     {
         if (e.File == ConfigFileKind.Settings) ApplyFromStore(e.DirtyPaths);
@@ -83,15 +70,6 @@ public sealed class GeneralViewModel : ObservableObject, IDisposable
     private static bool Conflicts(string path, IReadOnlySet<string> dirty)
         => dirty.Any(candidate => candidate == "$" || candidate == path ||
             candidate.StartsWith(path + ".", StringComparison.Ordinal) || path.StartsWith(candidate + ".", StringComparison.Ordinal));
-
-    private static void CopySettings(AppSettings source, AppSettings destination)
-    {
-        destination.SchemaVersion = source.SchemaVersion;
-        destination.LockAll = source.LockAll;
-        destination.Snap = source.Snap;
-        destination.Appearance = source.Appearance;
-        destination.Collector = source.Collector;
-    }
 
     public void Dispose() => _config.ExternalChanged -= Config_ExternalChanged;
 }

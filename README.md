@@ -149,7 +149,7 @@ widgets**, **Refresh all**, **Settings…** and **Exit Halo**.
 
 | Page | What it covers |
 | --- | --- |
-| **General** | Start with Windows, snapping, locking, and exporting or importing a whole layout |
+| **General** | Start with Windows, snapping, locking, and profiles for saving, switching, exporting and importing widget layouts and appearance |
 | **Appearance** | The skin and its preset, the skin's own options, scale, font, motion, and individual colours |
 | **System check** | Detected hardware, the state of every data source and the reason for any `N/A`, installing PawnIO, repairing autostart, rescanning hardware, arranging widgets, and logging |
 | **Widgets** | Adding, duplicating and removing widgets, and each widget's rows, graphs, refresh rate, appearance and placement |

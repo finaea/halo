@@ -45,6 +45,11 @@ is in the solution, so `dotnet build` and `dotnet test` both pick it up, and del
 can reach `dist\app`. `OutputType=Exe` + `GenerateProgramFile=false` + the hand-written
 `Program.cs` are **one unit**: the cross-process config test spawns a second copy of itself and a
 default test project produces no apphost. Removing any of the three gives CS5001.
+The test project targets `net10.0-windows` with `UseWPF` and references Halo.Settings, so the
+settings write-queue tests (`SettingsWriteFailureTests`) can drive its view-models; its output is
+`tests\Halo.Tests\bin\...\net10.0-windows\win-x64` (where `portable.marker` and `golden-failures`
+land). WPF bodies run on one STA thread that owns the single `Application`, and `UseWPF` drops
+`System.IO` from the implicit usings, so the csproj adds it back.
 
 Two things about the log tests specifically. **`tests\Halo.Tests\portable.marker` is load-bearing**
 (a `Content` item in the csproj): `SessionLog` has no path seam and `Paths.DataDir` has no setter,
@@ -135,6 +140,20 @@ the smoketests, and would delete the "degrades gracefully unelevated" property.
   options}` in `settings.json`, the same shape (every field nullable = inherit) under each widget's
   `appearance` in `widgets.json`. `Theme.Resolve` is the one resolution order: base ← preset ←
   global colours (only if the widget picks no preset of its own) ← widget colours ← `metric:<key>`.
+  `colors` is always the **active** preset's tweaks; `presetColors` parks every other preset's
+  (a widget's "Inherit" has its own slot) and only Settings reads it — one swap,
+  `SkinSettings.SwitchPreset`, used by both pages. HC under Windows HC re-derives, never restores.
+  Placement is per skin the same way: a widget's live `monitor/x/y/enabled` are its **effective**
+  skin's, `placements` parks the other skins' (`WidgetInstance.SwitchSkin`, global via
+  `WidgetsConfig.SwitchGlobalSkin`); only Settings swaps, widgets.json flushed before settings.json,
+  each switch queued under its own path so two cannot coalesce. A skin with nothing parked keeps
+  the live placement.
+  **Profiles** (`ProfileStore`, `config\profiles\<id>.json`, which no watcher sees) hold lock all,
+  snap, all of `appearance` and all of widgets.json — **never** `collector.*` or `diagnostics`.
+  Auto-save: the active profile (`settings.json > activeProfile`) *is* the live files, and its file
+  is only refreshed when another is selected. A switch (`ProfileService`) swaps both files as one
+  queued mutation each, widgets first, capturing the outgoing state inside the same transaction;
+  it does not go through `SwitchGlobalSkin` (the incoming placement already matches its skin).
   v2 files upgrade in memory (`SchemaV3.Upgrade`) to `rainformer-light` + every differing colour as
   a tweak. Option keys a skin does not declare are kept in the file and ignored (`textSizePt` is one:
   it never reached the renderer). Hot reload compares **resolved** themes (`Theme.RebuildReason`):
@@ -188,6 +207,11 @@ the smoketests, and would delete the "degrades gracefully unelevated" property.
   read-modify-write cycles interleaved and one process's change vanished. A config file that is
   present but does not parse is **not** treated as absent: last good copy kept, reason logged,
   writes to it refused rather than clobbering a hand edit (`ConfigStore.Load` → `NoteUnreadable`).
+  In Settings, a write that touches **both** files (profile switch, global skin switch, Reset
+  appearance) flushes them one at a time with `LiveConfigService.FlushFileAsync`, which returns
+  whether that file committed; a failed half is `CancelPending`'d and a committed half undone. A
+  mutation having *run* proves nothing — it runs on the in-memory document before the save that
+  can still throw (the store reloads from disk when it does).
 - **Logging is evidence, so it is allowed to cost something.** `Halo.Shared\Log.cs` writes
   **one file per process instance** (`logs\<proc>-<yyyyMMdd-HHmmss>-<pid>.log`) — a shared per-day
   file could not survive more than one writer, and five collectors once interleaved into one file

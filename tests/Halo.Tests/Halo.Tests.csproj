@@ -12,6 +12,12 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- Halo.Settings is net10.0-windows + WPF, and a project cannot reference a higher platform
+         than its own. The settings write-queue tests (SettingsWriteFailureTests) drive its
+         view-models and services directly. The output folder moves with the TFM
+         (bin\...\net10.0-windows\win-x64); portable.marker and golden-failures follow it. -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
     <!-- Directory.Build.props pins RuntimeIdentifier=win-x64 for the shipping exes; the test
          host is happy with it and it keeps this project on the same restore graph. -->
 
@@ -36,12 +42,15 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Halo.Collector\Halo.Collector.csproj" />
     <ProjectReference Include="..\..\src\Halo.Metrics\Halo.Metrics.csproj" />
+    <ProjectReference Include="..\..\src\Halo.Settings\Halo.Settings.csproj" />
     <ProjectReference Include="..\..\src\Halo.Shared\Halo.Shared.csproj" />
     <ProjectReference Include="..\..\src\Halo.Widgets\Halo.Widgets.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <!-- UseWPF drops System.IO and System.Net.Http from the implicit usings (WPF types clash with them). -->
+    <Using Include="System.IO" />
   </ItemGroup>
 
   <!-- Redirects Paths.DataDir into this project's own output folder.

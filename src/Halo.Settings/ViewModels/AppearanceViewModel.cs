@@ -65,7 +65,13 @@ public sealed class AppearanceViewModel : ObservableObject, IDisposable
     private PresetSpec _preset = SkinCatalog.Rainformer.DefaultPreset;
     private readonly Dictionary<string, string> _tweaks = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _options = new(StringComparer.Ordinal);
+    /// <summary>The active skin's <see cref="SkinSettings.PresetColors"/>: other presets' tweaks.</summary>
+    private Dictionary<string, Dictionary<string, string>>? _parked;
     private bool _applying;
+    private long _skinSwitches;
+    /// <summary>One skin change at a time: the next one's "from" is whatever the last one left in
+    /// the file, which is only known once its writes are checked.</summary>
+    private readonly SemaphoreSlim _switchGate = new(1, 1);
     private bool _autoScale = true;
     private double _fixedScale = 1.7;
     private string _fontFamily = SkinFontChoice;
@@ -201,35 +207,95 @@ public sealed class AppearanceViewModel : ObservableObject, IDisposable
 
     public void Refresh() => Load(_config.Settings);
 
-    public void SelectSkin(string id)
+    /// <summary>
+    /// Each skin keeps its own preset and tweaks, so switching back finds them where they were; the
+    /// widgets that follow the global skin get their placement back too
+    /// (<see cref="WidgetsConfig.SwitchGlobalSkin"/>, decision D21). widgets.json is written first.
+    /// </summary>
+    public async Task SelectSkinAsync(string id)
     {
-        if (SkinCatalog.Find(id) is not { } skin) return;
-        // Each skin keeps its own preset and tweaks, so switching back finds them where they were.
-        LoadSkin(skin, _config.Settings.Appearance.Skins.GetValueOrDefault(skin.Id));
-        _config.QueueSettings("appearance.skin", s => s.Appearance.Skin = skin.Id);
-        Rebuild();
+        await _switchGate.WaitAsync();
+        try
+        {
+            if (SkinCatalog.Find(id) is not { } skin) return;
+            string from = _skin.Id;
+            LoadSkin(skin, _config.Settings.Appearance.Skins.GetValueOrDefault(skin.Id));
+            Rebuild();
+            await CommitSkinChangeAsync(from, skin.Id, "appearance.skin", s => s.Appearance.Skin = skin.Id);
+        }
+        finally { _switchGate.Release(); }
     }
 
     /// <summary>
-    /// Picking a preset drops the colour tweaks: they were made against the old preset and do not
-    /// carry over to a different one (tech plan §4). Options stay — they are the user's, not the
-    /// palette's. The high-contrast preset is the exception that brings tweaks: while Windows'
-    /// high contrast is on it follows the system colours, written as tweaks so the static preset
-    /// is still what a non-HC session sees.
+    /// The two halves of a global skin change, one at a time and each checked: the placement swap
+    /// in widgets.json, then the skin itself in settings.json. A half that fails is cancelled so it
+    /// cannot land on its own later; a settings failure also swaps the placements back, or a retry
+    /// would park the new skin's placement under the old skin and lose the old one. Either way the
+    /// page goes back to the skin the file really holds.
+    /// </summary>
+    private async Task CommitSkinChangeAsync(string from, string to, string settingsPath, Action<AppSettings> apply)
+    {
+        (string Path, long Generation)? placement = QueuePlacementSwitch(from, to);
+        if (placement is { } queued && !await _config.FlushFileAsync(ConfigFileKind.Widgets))
+        {
+            _config.CancelPending(ConfigFileKind.Widgets, queued.Path, queued.Generation);
+            Load(_config.Settings);
+            return;
+        }
+
+        long generation = _config.QueueSettings(settingsPath, apply);
+        if (await _config.FlushFileAsync(ConfigFileKind.Settings)) return;
+
+        _config.CancelPending(ConfigFileKind.Settings, settingsPath, generation);
+        if (placement is not null)
+        {
+            // Its own path again, like any switch. Should this write fail as well it stays queued:
+            // it is the repair, and it lands with the next widgets.json write that succeeds.
+            QueuePlacementSwitch(to, from);
+            await _config.FlushFileAsync(ConfigFileKind.Widgets);
+        }
+        Load(_config.Settings);
+    }
+
+    /// <summary>Queued under a path of its own per switch: two switches inside one write window must
+    /// both run, in order — keyed by one path, the second would replace the first and park the
+    /// placement under the wrong skin.</summary>
+    private (string Path, long Generation)? QueuePlacementSwitch(string from, string to)
+    {
+        if (from == to) return null;
+        string path = $"widgets.skinSwitch.{++_skinSwitches}";
+        return (path, _config.QueueWidgets(path, w => w.SwitchGlobalSkin(from, to)));
+    }
+
+    /// <summary>
+    /// Picking a preset parks the old preset's colour tweaks and brings back the new one's
+    /// (<see cref="SkinSettings.SwitchPreset"/>, decision D19): tweaks were made against one preset,
+    /// so they stay with it. Options stay — they are the user's, not the palette's. The
+    /// high-contrast preset is the exception: while Windows' high contrast is on it follows the
+    /// system colours, re-derived as tweaks on every pick (never restored from the stash) so the
+    /// static preset is still what a non-HC session sees.
     /// </summary>
     public void SelectPreset(string id)
     {
         if (SkinCatalog.FindPreset(_skin, id) is not { } preset) return;
-        _preset = preset;
-        _tweaks.Clear();
+        Dictionary<string, string>? derived = null;
         if (preset.HighContrast && SystemParameters.HighContrast)
-            foreach (var (token, hex) in HighContrast.FromSystemColors(_skin))
-                if (!SameColor(preset.Colors.GetValueOrDefault(token), hex)) _tweaks[token] = hex;
+            derived = HighContrast.FromSystemColors(_skin)
+                .Where(p => !SameColor(preset.Colors.GetValueOrDefault(p.Key), p.Value))
+                .ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+        var local = new SkinSettings { Preset = _preset.Id, Colors = new(_tweaks, StringComparer.Ordinal), PresetColors = _parked };
+        local.SwitchPreset(id, _skin.DefaultPreset.Id, derived);
+        _preset = preset;
+        _parked = local.PresetColors;
+        _tweaks.Clear();
+        foreach (var (token, hex) in local.Colors) _tweaks[token] = hex;
 
         string skinId = _skin.Id;
         var tweaks = new Dictionary<string, string>(_tweaks, StringComparer.Ordinal);
+        var parked = local.Clone().PresetColors;
         _config.QueueSettings($"appearance.skins.{skinId}.preset", s => s.Appearance.SkinFor(skinId).Preset = id);
         _config.QueueSettings($"appearance.skins.{skinId}.colors", s => s.Appearance.SkinFor(skinId).Colors = tweaks);
+        _config.QueueSettings($"appearance.skins.{skinId}.presetColors", s => s.Appearance.SkinFor(skinId).PresetColors = parked);
         Rebuild();
     }
 
@@ -241,12 +307,20 @@ public sealed class AppearanceViewModel : ObservableObject, IDisposable
         Rebuild();
     }
 
-    /// <summary>Back to a fresh install's look: every skin's preset, tweaks and options go too.</summary>
-    public void ResetAppearance()
+    /// <summary>Back to a fresh install's look: every skin's preset, tweaks and options go too. The
+    /// skin goes back to the default one, so its widgets move like on any other skin switch; the
+    /// parked placements are layout, not look, and stay.</summary>
+    public async Task ResetAppearanceAsync()
     {
-        _config.QueueSettings("appearance", s => s.Appearance = new AppearanceSettings(), flushImmediately: true);
-        var fresh = new AppSettings();
-        Load(fresh);
+        await _switchGate.WaitAsync();
+        try
+        {
+            var fresh = new AppSettings();
+            string from = _skin.Id;
+            Load(fresh);
+            await CommitSkinChangeAsync(from, fresh.Appearance.Skin, "appearance", s => s.Appearance = new AppearanceSettings());
+        }
+        finally { _switchGate.Release(); }
     }
 
     private void Config_ExternalChanged(object? sender, ConfigChangedEventArgs e)
@@ -282,6 +356,7 @@ public sealed class AppearanceViewModel : ObservableObject, IDisposable
         _preset = SkinCatalog.FindPreset(skin, entry?.Preset) ?? skin.DefaultPreset;
         _tweaks.Clear();
         _options.Clear();
+        _parked = entry?.Clone().PresetColors;
         foreach (var (k, v) in entry?.Colors ?? []) _tweaks[k] = v;
         foreach (var (k, v) in entry?.Options ?? []) _options[k] = v;
     }

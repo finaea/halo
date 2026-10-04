@@ -610,7 +610,8 @@ public sealed class WidgetItemViewModel : ObservableObject
     public bool UseGlobalWidth { get => _useGlobalWidth; set { if (Set(ref _useGlobalWidth, value)) { Raise(nameof(IsWidthOverrideEnabled)); if (!_applying) Change("appearance.width", widget => widget.Appearance.Width = value ? null : Width); } } }
     public bool IsWidthOverrideEnabled => !UseGlobalWidth;
     public double Width { get => _width; set { value = Math.Round(Math.Clamp(value, 120, 800)); if (Set(ref _width, value) && !_applying && !UseGlobalWidth) Change("appearance.width", widget => widget.Appearance.Width = value); } }
-    /// <summary>"" = inherit the global skin.</summary>
+    /// <summary>"" = inherit the global skin. A different effective skin brings back where this
+    /// widget sat under it (<see cref="WidgetInstance.SwitchSkin"/>, decision D21).</summary>
     public ChoiceItem? SkinChoice
     {
         get => _skinChoice;
@@ -618,14 +619,24 @@ public sealed class WidgetItemViewModel : ObservableObject
         {
             if (!Set(ref _skinChoice, value) || value is null || _applying) return;
             string? skin = value.Value.Length == 0 ? null : value.Value;
+            string from = WidgetSkin(_owner.ModelFor(Id)).Id;
             Change("appearance.skin", widget => widget.Appearance.Skin = skin);
+            SwitchPlacement(from);
             RebuildLater();
         }
     }
 
     /// <summary>"" = follow the global look. A preset of its own also stops the global colour
     /// tweaks reaching this widget (<see cref="SkinPalette.InheritedByWidget"/>), so the swatches
-    /// are rebuilt to show what it will actually be drawn with.</summary>
+    /// are rebuilt to show what it will actually be drawn with. The widget's colour tweaks stay
+    /// with the choice they were made on (<see cref="SkinSettings.SwitchPreset"/>; "Inherit" has a
+    /// slot of its own). The switch is worked out on the page's own copy of the widget, which
+    /// already holds every queued colour edit, and the whole skin entry — preset, colours and
+    /// stash together — is queued as one snapshot, as the Appearance page does for the global
+    /// look. The entry's path supersedes the colour edits queued under it, and a later switch
+    /// supersedes this one with a snapshot that contains it, so nothing is replayed against the
+    /// wrong preset. (Keyed as a plain preset assignment, a second switch replaced the first and a
+    /// colour edit made between them landed on the wrong preset.)</summary>
     public ChoiceItem? PresetChoice
     {
         get => _presetChoice;
@@ -633,10 +644,14 @@ public sealed class WidgetItemViewModel : ObservableObject
         {
             if (!Set(ref _presetChoice, value) || value is null || _applying) return;
             string? preset = value.Value.Length == 0 ? null : value.Value;
-            string skinId = WidgetSkin(_owner.ModelFor(Id)).Id;
-            Change($"appearance.skins.{skinId}.preset", widget =>
+            WidgetInstance local = _owner.ModelFor(Id);
+            string skinId = WidgetSkin(local).Id;
+            local.Appearance.SkinFor(skinId).SwitchPreset(preset);
+            SkinSettings entry = local.Appearance.SkinFor(skinId).Clone();
+            Change($"appearance.skins.{skinId}", widget =>
             {
-                widget.Appearance.SkinFor(skinId).Preset = preset;
+                widget.Appearance.SkinFor(skinId);
+                widget.Appearance.Skins![skinId] = entry.Clone();
                 widget.Appearance.PruneSkins();
             });
             RebuildLater();
@@ -786,12 +801,45 @@ public sealed class WidgetItemViewModel : ObservableObject
 
     public void UseGlobalForAll()
     {
+        string from = WidgetSkin(_owner.ModelFor(Id)).Id;
         Change("appearance", widget => widget.Appearance = new WidgetAppearance());
+        SwitchPlacement(from);
         WidgetInstance model = _owner.ModelFor(Id);
-        model.Appearance = new WidgetAppearance();
         _applying = true;
         try { ApplyAppearance(model); }
         finally { _applying = false; }
+    }
+
+    /// <summary>
+    /// After a change to this widget's own skin: park its placement under <paramref name="from"/>
+    /// and bring back the new effective skin's, then show it. Queued under a path of its own per
+    /// switch, like the Appearance page's global one: keyed by one path, a second switch inside the
+    /// write window would replace the first and park the placement under the wrong skin.
+    /// </summary>
+    private void SwitchPlacement(string from)
+    {
+        string to = WidgetSkin(_owner.ModelFor(Id)).Id;
+        if (from == to) return;
+        Change($"placements.{Interlocked.Increment(ref s_skinSwitches)}", widget => widget.SwitchSkin(from, to));
+        ApplyPlacement(_owner.ModelFor(Id));
+    }
+
+    private static long s_skinSwitches;
+
+    /// <summary>Show the live placement fields a skin switch may have swapped.</summary>
+    public void ApplyPlacement(WidgetInstance model)
+    {
+        bool applying = _applying;
+        _applying = true;
+        try
+        {
+            Enabled = model.Enabled;
+            BuildMonitorChoices(model.Monitor);
+            Monitor = MonitorChoices.FirstOrDefault(item => item.Value.Equals(model.Monitor, StringComparison.OrdinalIgnoreCase)) ?? MonitorChoices[0];
+            X = model.X; Y = model.Y;
+            Raise(nameof(MonitorLabel)); Raise(nameof(Subtitle));
+        }
+        finally { _applying = applying; }
     }
 
     public void ResetPlacement()
@@ -1192,13 +1240,26 @@ public sealed class WidgetsPageViewModel : ObservableObject, IDisposable
     /// writes are this process's own, so the watcher suppresses their echo and
     /// <see cref="Config_ExternalChanged"/> never sees them; without this, coming back from a
     /// preset change would show (and an unticked "Use global" would save) the old preset's colours.
-    /// Flushing first makes the store hold what the Appearance page queued.
+    /// Flushing first makes the store hold what the Appearance page queued. A global skin switch
+    /// there also moved the widgets that follow it (<see cref="WidgetsConfig.SwitchGlobalSkin"/>),
+    /// so their placement fields are taken from the store as well.
     /// </summary>
     public async Task RefreshAppearanceAsync()
     {
         await _config.FlushAllAsync();
         var noDirtyPaths = new HashSet<string>(StringComparer.Ordinal);
-        foreach (WidgetItemViewModel row in Widgets) row.RefreshSettings(_config.Settings, noDirtyPaths);
+        IReadOnlySet<string> dirty = _config.DirtyPaths(ConfigFileKind.Widgets);
+        foreach (WidgetItemViewModel row in Widgets)
+        {
+            if (_config.Widgets.Widgets.FirstOrDefault(item => item.Id == row.Id) is { } disk && _models.TryGetValue(row.Id, out WidgetInstance? local)
+                && !dirty.Any(path => path.StartsWith($"widgets.{row.Id}.", StringComparison.Ordinal)))
+            {
+                local.Monitor = disk.Monitor; local.X = disk.X; local.Y = disk.Y; local.Enabled = disk.Enabled;
+                local.Placements = Clone(disk).Placements;
+                row.ApplyPlacement(local);
+            }
+            row.RefreshSettings(_config.Settings, noDirtyPaths);
+        }
     }
 
     internal void ChangeSettings(string path, Action<AppSettings> apply)
@@ -1309,6 +1370,12 @@ public sealed class WidgetsPageViewModel : ObservableObject, IDisposable
             case "metrics": target.Metrics = Clone(source).Metrics; return;
             case "appearance": target.Appearance = Clone(source).Appearance; return;
         }
+        if (field.StartsWith("placements.", StringComparison.Ordinal))
+        {
+            target.Monitor = source.Monitor; target.X = source.X; target.Y = source.Y; target.Enabled = source.Enabled;
+            target.Placements = Clone(source).Placements;
+            return;
+        }
         if (field.StartsWith("graph.", StringComparison.Ordinal))
         {
             if (field == "graph.historyS") target.Graph.HistoryS = source.Graph.HistoryS;
@@ -1353,6 +1420,7 @@ public sealed class WidgetsPageViewModel : ObservableObject, IDisposable
             Color = pair.Value.Color, Warn = pair.Value.Warn?.ToArray(), Max = pair.Value.Max,
         }, StringComparer.Ordinal),
         Appearance = source.Appearance.Clone(),
+        Placements = source.Placements?.ToDictionary(pair => pair.Key, pair => pair.Value.Clone(), StringComparer.Ordinal),
     };
 
     public void Dispose()

@@ -6,7 +6,7 @@
     <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="28,22">
       <StackPanel MaxWidth="860" HorizontalAlignment="Left">
         <TextBlock Text="General" Style="{StaticResource PageTitle}" />
-        <TextBlock Text="Desktop behaviour and layout files. The look of the widgets is on the Appearance page. Changes are written live."
+        <TextBlock Text="Desktop behaviour and profiles. The look of the widgets is on the Appearance page. Changes are written live."
                    Style="{StaticResource PageSub}" />
 
         <ui:InfoBar x:Name="PageInfoBar" IsOpen="False" IsClosable="True" Margin="0,0,0,12" />
@@ -51,15 +51,34 @@
 
         <Border Style="{StaticResource SettingsCard}">
           <StackPanel>
-            <TextBlock Text="Layout files" Style="{StaticResource SectionHeading}" />
-            <TextBlock Text="Export or import both settings.json and widgets.json as one Halo layout file." Style="{StaticResource Hint}" Margin="0,0,0,10" />
-            <WrapPanel>
-              <Button Content="Open data folder" Click="OpenDataFolder_Click" Style="{StaticResource SubtleButton}" />
-              <Button Content="Export layout…" Click="ExportLayout_Click" Style="{StaticResource SubtleButton}" />
-              <Button Content="Import layout…" Click="ImportLayout_Click" Style="{StaticResource SubtleButton}" />
+            <TextBlock Text="Profiles" Style="{StaticResource SectionHeading}" />
+            <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,10" TextWrapping="Wrap"
+                       Text="A profile holds the look, every widget and where it sits, plus lock all and snap. Every change is kept in the active profile as it happens. Collector and logging settings belong to this PC and are shared by all profiles." />
+            <Grid Style="{StaticResource SettingsRow}">
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+              <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="Active profile" />
+                <TextBlock x:Name="ProfileStatusText" Text="Choosing another profile keeps this one as it is now." Style="{StaticResource Hint}" />
+              </StackPanel>
+              <ComboBox x:Name="ProfileBox" Grid.Column="1" MinWidth="240" VerticalAlignment="Center"
+                        DisplayMemberPath="Label" SelectionChanged="ProfileBox_SelectionChanged"
+                        AutomationProperties.Name="Active profile" />
+            </Grid>
+            <WrapPanel Margin="0,8,0,0">
+              <Button Content="Rename…" Click="RenameProfile_Click" Style="{StaticResource SubtleButton}" />
+              <Button Content="Duplicate" Click="DuplicateProfile_Click" Style="{StaticResource SubtleButton}" />
+              <Button Content="Save as new…" Click="SaveAsNewProfile_Click" Style="{StaticResource SubtleButton}" />
+              <Button Content="New default…" Click="NewDefaultProfile_Click" Style="{StaticResource SubtleButton}" />
+              <Button x:Name="DeleteProfileButton" Content="Delete…" Click="DeleteProfile_Click" Style="{StaticResource SubtleButton}" />
             </WrapPanel>
-            <Button Content="Reset everything…" Foreground="{StaticResource HaloDanger}" HorizontalAlignment="Left"
-                    Margin="0,8,0,0" Style="{StaticResource SubtleButton}" Click="ResetEverything_Click" />
+            <WrapPanel Margin="0,8,0,0">
+              <Button Content="Export…" Click="ExportProfile_Click" Style="{StaticResource SubtleButton}" />
+              <Button Content="Import…" Click="ImportProfile_Click" Style="{StaticResource SubtleButton}" />
+              <Button Content="Open data folder" Click="OpenDataFolder_Click" Style="{StaticResource SubtleButton}" />
+            </WrapPanel>
+            <Button Content="Reset to default…" Foreground="{StaticResource HaloDanger}" HorizontalAlignment="Left"
+                    Margin="0,8,0,0" Style="{StaticResource SubtleButton}" Click="ResetProfile_Click"
+                    ToolTip="Gives the active profile a fresh look and a default set of widgets. Collector and logging settings stay as they are." />
           </StackPanel>
         </Border>
       </StackPanel>

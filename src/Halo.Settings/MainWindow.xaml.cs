@@ -10,6 +10,7 @@ namespace Halo.Settings;
 public partial class MainWindow : FluentWindow
 {
     private readonly LiveConfigService _config;
+    private readonly ProfileService _profiles;
     private readonly bool _firstRun;
     private readonly Dictionary<string, ISettingsPage> _pages = new(StringComparer.Ordinal);
     private ISettingsPage? _current;
@@ -24,6 +25,8 @@ public partial class MainWindow : FluentWindow
         // default or on HALO_LOG_LEVEL — which is the escape hatch by design: the moment you most
         // need verbose logging is when settings.json is the thing that will not parse.
         if (Log.TryParseLevel(_config.Settings.Diagnostics.LogLevel, out LogLevel level)) Log.SetLevel(level);
+        _profiles = new ProfileService(_config);
+        _profiles.EnsureActive();
         _config.StatusChanged += Config_StatusChanged;
         ConfigPathText.Text = Paths.ConfigDir;
         ConfigPathText.ToolTip = Paths.ConfigDir;
@@ -43,12 +46,12 @@ public partial class MainWindow : FluentWindow
         {
             page = key switch
             {
-                "general" => new GeneralPage(_config),
+                "general" => new GeneralPage(_config, _profiles),
                 "appearance" => new AppearancePage(_config),
                 "system" => new SystemCheckPage(_config, _firstRun, OpenWidgets),
                 "widgets" => new WidgetsPage(_config),
                 "about" => new AboutPage(),
-                _ => new GeneralPage(_config),
+                _ => new GeneralPage(_config, _profiles),
             };
             _pages[key] = page;
         }

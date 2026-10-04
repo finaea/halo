@@ -29,6 +29,10 @@ public sealed class AppSettings
     public CollectorSettings Collector { get; set; } = new();
 
     public DiagnosticsSettings Diagnostics { get; set; } = new();
+
+    /// <summary>Id of the profile the live files belong to (<see cref="ProfileStore"/>, decision
+    /// D20). Only Settings reads it. Additive like <see cref="Diagnostics"/>: no schema bump.</summary>
+    public string? ActiveProfile { get; set; }
 }
 
 /// <summary>
@@ -105,13 +109,53 @@ public sealed class SkinSettings
     /// <summary>The skin's own options (its catalog <c>Options</c>), as strings like panel options.</summary>
     public Dictionary<string, string> Options { get; set; } = new();
 
-    [JsonIgnore] public bool IsEmpty => Preset == null && (Colors?.Count ?? 0) == 0 && (Options?.Count ?? 0) == 0;
+    /// <summary>Tweaks parked by <see cref="SwitchPreset"/>: slot → token → hex for every preset
+    /// that is <b>not</b> active, so switching back brings its tweaks back (decision D19). Slots are
+    /// preset ids, plus <see cref="InheritSlot"/> for a widget's "Inherit" choice. Nothing but
+    /// Settings reads it; the renderer only ever sees <see cref="Colors"/>. Null = nothing parked.</summary>
+    public Dictionary<string, Dictionary<string, string>>? PresetColors { get; set; }
+
+    /// <summary>The slot of a widget's "Inherit" choice (preset null): its tweaks sit on the global
+    /// look, not on a preset. Not a valid preset id, so it cannot collide with one.</summary>
+    public const string InheritSlot = "(inherit)";
+
+    [JsonIgnore] public bool IsEmpty => Preset == null && (Colors?.Count ?? 0) == 0 && (Options?.Count ?? 0) == 0
+                                        && (PresetColors?.Count ?? 0) == 0;
+
+    /// <summary>
+    /// Make <paramref name="preset"/> the active one: park the current <see cref="Colors"/> under
+    /// the old preset's slot (or drop that slot when there are none) and move the new preset's
+    /// parked tweaks back into <see cref="Colors"/>. Re-picking the active preset changes nothing.
+    /// A null preset takes <paramref name="defaultSlot"/> — the global level passes its skin's
+    /// default preset id, since null and the default are the same look there; a widget passes
+    /// nothing and gets <see cref="InheritSlot"/>.
+    /// <paramref name="derived"/> replaces whatever the new slot had parked, which is dropped: the
+    /// high-contrast preset under Windows' high contrast re-derives the system colours on every
+    /// pick and never restores a stash.
+    /// </summary>
+    public void SwitchPreset(string? preset, string? defaultSlot = null, IReadOnlyDictionary<string, string>? derived = null)
+    {
+        string from = Preset ?? defaultSlot ?? InheritSlot;
+        string to = preset ?? defaultSlot ?? InheritSlot;
+        Preset = preset;
+        if (from != to)
+        {
+            PresetColors ??= new(StringComparer.Ordinal);
+            if (Colors is { Count: > 0 }) PresetColors[from] = Colors;
+            else PresetColors.Remove(from);
+            Colors = PresetColors.Remove(to, out var parked) ? parked : new(StringComparer.Ordinal);
+            if (PresetColors.Count == 0) PresetColors = null;
+        }
+        if (derived != null) Colors = new Dictionary<string, string>(derived, StringComparer.Ordinal);
+    }
 
     public SkinSettings Clone() => new()
     {
         Preset = Preset,
         Colors = new Dictionary<string, string>(Colors ?? new(), StringComparer.Ordinal),
         Options = new Dictionary<string, string>(Options ?? new(), StringComparer.Ordinal),
+        PresetColors = PresetColors?.ToDictionary(p => p.Key,
+            p => new Dictionary<string, string>(p.Value ?? new(), StringComparer.Ordinal), StringComparer.Ordinal),
     };
 }
 
@@ -195,6 +239,42 @@ public sealed class WidgetInstance
     public Dictionary<string, MetricSetting> Metrics { get; set; } = new();
 
     public WidgetAppearance Appearance { get; set; } = new();
+
+    /// <summary>Placements parked by <see cref="SwitchSkin"/>: skin id → where this widget sat, and
+    /// whether it was on, under every skin it is <b>not</b> drawn with now (decision D21). The live
+    /// <see cref="Monitor"/>/<see cref="X"/>/<see cref="Y"/>/<see cref="Enabled"/> are always the
+    /// current skin's; nothing but Settings reads this. Null = nothing parked.</summary>
+    public Dictionary<string, SkinPlacement>? Placements { get; set; }
+
+    /// <summary>
+    /// The widget's effective skin changed from <paramref name="fromSkin"/> to
+    /// <paramref name="toSkin"/>: park the live placement under the old skin and bring back the new
+    /// skin's, if one was parked. A skin with nothing parked keeps the live placement as it is (no
+    /// arrange pass). The same skin on both sides changes nothing.
+    /// </summary>
+    public void SwitchSkin(string fromSkin, string toSkin)
+    {
+        if (fromSkin == toSkin) return;
+        Placements ??= new(StringComparer.Ordinal);
+        Placements[fromSkin] = new SkinPlacement { Monitor = Monitor, X = X, Y = Y, Enabled = Enabled };
+        if (Placements.Remove(toSkin, out var parked) && parked != null)
+        {
+            Monitor = parked.Monitor ?? ""; X = parked.X; Y = parked.Y; Enabled = parked.Enabled;
+        }
+        if (Placements.Count == 0) Placements = null;
+    }
+}
+
+/// <summary>One parked placement in <see cref="WidgetInstance.Placements"/>: the live placement
+/// fields of a widget, as they were under a skin it is not drawn with now.</summary>
+public sealed class SkinPlacement
+{
+    public string Monitor { get; set; } = "";
+    public int X { get; set; }
+    public int Y { get; set; }
+    public bool Enabled { get; set; } = true;
+
+    public SkinPlacement Clone() => new() { Monitor = Monitor, X = X, Y = Y, Enabled = Enabled };
 }
 
 public sealed class GraphSettings
@@ -241,6 +321,11 @@ public sealed class WidgetAppearance
     /// <summary>Schema v2 per-widget colours; moved into <see cref="Skins"/> by SchemaV3.Upgrade.</summary>
     [JsonPropertyName("colors")] public Dictionary<string, string>? V2Colors { get; set; }
 
+    /// <summary>The id of the skin this widget is drawn with — the same pick as <c>Theme.Resolve</c>:
+    /// its own skin, else the global one, an id this Halo does not know counting as unset.</summary>
+    public string EffectiveSkin(string? globalSkin)
+        => (SkinCatalog.Find(Skin) ?? SkinCatalog.Find(globalSkin) ?? SkinCatalog.Rainformer).Id;
+
     /// <summary>This skin's entry, created when missing — for writers.</summary>
     public SkinSettings SkinFor(string skinId)
     {
@@ -269,6 +354,15 @@ public sealed class WidgetsConfig
 {
     public int SchemaVersion { get; set; } = AppSettings.CurrentSchemaVersion;
     public List<WidgetInstance> Widgets { get; set; } = new();
+
+    /// <summary>The global skin changed: <see cref="WidgetInstance.SwitchSkin"/> on every widget that
+    /// follows it, i.e. has no skin of its own this Halo knows. Ids are effective skins, as
+    /// <see cref="WidgetAppearance.EffectiveSkin"/> works them out.</summary>
+    public void SwitchGlobalSkin(string fromSkin, string toSkin)
+    {
+        foreach (WidgetInstance widget in Widgets)
+            if (SkinCatalog.Find(widget.Appearance.Skin) == null) widget.SwitchSkin(fromSkin, toSkin);
+    }
 
     /// <summary>
     /// <c>"pending"</c> asks the widget process to place every widget on the primary monitor with
@@ -339,4 +433,6 @@ public sealed class ScaleValueConverter : JsonConverter<ScaleValue>
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(AppSettings))]
 [JsonSerializable(typeof(WidgetsConfig))]
+[JsonSerializable(typeof(Profile))]
+[JsonSerializable(typeof(ProfileSettings))]
 public sealed partial class ConfigJsonContext : JsonSerializerContext;

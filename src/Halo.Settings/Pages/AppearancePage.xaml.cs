@@ -20,9 +20,11 @@ public partial class AppearancePage : UserControl, ISettingsPage, IDisposable
 
     public void OnLeave() { }
 
-    private void Skin_Click(object sender, RoutedEventArgs e)
+    // A failed write is reported on the status line and the view model puts the page back on the
+    // skin in the file, so there is nothing left for these handlers to catch.
+    private async void Skin_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: SkinCardViewModel card }) _viewModel.SelectSkin(card.Id);
+        if (sender is FrameworkElement { DataContext: SkinCardViewModel card }) await _viewModel.SelectSkinAsync(card.Id);
     }
 
     private void Preset_Click(object sender, RoutedEventArgs e)
@@ -39,7 +41,7 @@ public partial class AppearancePage : UserControl, ISettingsPage, IDisposable
 
     private void ResetToPreset_Click(object sender, RoutedEventArgs e) => _viewModel.ResetToPreset();
 
-    private void ResetAppearance_Click(object sender, RoutedEventArgs e) => _viewModel.ResetAppearance();
+    private async void ResetAppearance_Click(object sender, RoutedEventArgs e) => await _viewModel.ResetAppearanceAsync();
 
     private void ColorButton_Click(object sender, RoutedEventArgs e)
     {

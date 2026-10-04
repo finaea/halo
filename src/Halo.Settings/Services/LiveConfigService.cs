@@ -17,6 +17,13 @@ public sealed record ConfigChangedEventArgs(ConfigFileKind File, IReadOnlySet<st
 /// Stamped where the status is raised so a late footer repaint cannot report a stale time.</param>
 public sealed record ConfigWriteStatus(string Message, bool IsError = false, bool IsSaving = false, DateTime? At = null);
 
+/// <summary>Per file: true when everything queued for it before the flush is on disk (or nothing
+/// was queued), false when its write failed and the batch is still pending.</summary>
+public readonly record struct FlushOutcome(bool Widgets, bool Settings)
+{
+    public bool Both => Widgets && Settings;
+}
+
 /// <summary>
 /// Settings-side live editing around the shared ConfigStore. Mutations are keyed by JSON path,
 /// coalesced for 200 ms, and applied to a fresh disk snapshot before ConfigStore performs its
@@ -76,36 +83,85 @@ public sealed class LiveConfigService : IDisposable
         _watcher.Deleted += OnFileChanged;
     }
 
-    public void QueueSettings(string path, Action<AppSettings> apply, bool flushImmediately = false)
+    /// <returns>The mutation's generation, for <see cref="CancelPending"/>.</returns>
+    public long QueueSettings(string path, Action<AppSettings> apply, bool flushImmediately = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(apply);
+        long generation;
         lock (_gate)
         {
-            AddMutation(_settingsPending, path, new Mutation<AppSettings>(++_generation, apply));
+            AddMutation(_settingsPending, path, new Mutation<AppSettings>(generation = ++_generation, apply));
         }
         PublishStatus(new("Saving…", IsSaving: true));
         _settingsWriteTimer.Change(flushImmediately ? 1 : 200, Timeout.Infinite);
+        return generation;
     }
 
-    public void QueueWidgets(string path, Action<WidgetsConfig> apply, bool flushImmediately = false)
+    /// <returns>The mutation's generation, for <see cref="CancelPending"/>.</returns>
+    public long QueueWidgets(string path, Action<WidgetsConfig> apply, bool flushImmediately = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(apply);
+        long generation;
         lock (_gate)
         {
-            AddMutation(_widgetsPending, path, new Mutation<WidgetsConfig>(++_generation, apply));
+            AddMutation(_widgetsPending, path, new Mutation<WidgetsConfig>(generation = ++_generation, apply));
         }
         PublishStatus(new("Saving…", IsSaving: true));
         _widgetsWriteTimer.Change(flushImmediately ? 1 : 200, Timeout.Infinite);
+        return generation;
     }
 
-    public async Task FlushAllAsync()
+    /// <summary>Write both files now. widgets.json goes first: a skin switch parks and restores
+    /// placements there (<see cref="WidgetInstance.SwitchSkin"/>), and the widgets should be in the
+    /// new skin's places by the time settings.json tells them to redraw in it. Both are attempted
+    /// whatever the first one does; a caller whose two halves depend on each other flushes them
+    /// one at a time with <see cref="FlushFileAsync"/> instead.</summary>
+    public async Task<FlushOutcome> FlushAllAsync()
     {
         _settingsWriteTimer.Change(Timeout.Infinite, Timeout.Infinite);
         _widgetsWriteTimer.Change(Timeout.Infinite, Timeout.Infinite);
-        await FlushAsync(ConfigFileKind.Settings).ConfigureAwait(false);
-        await FlushAsync(ConfigFileKind.Widgets).ConfigureAwait(false);
+        bool widgets = await FlushAsync(ConfigFileKind.Widgets).ConfigureAwait(false);
+        bool settings = await FlushAsync(ConfigFileKind.Settings).ConfigureAwait(false);
+        return new(widgets, settings);
+    }
+
+    /// <summary>Write one file now. True when everything queued for it before this call is on
+    /// disk; false when the write failed (the status line says why) and the batch is still
+    /// pending.</summary>
+    public Task<bool> FlushFileAsync(ConfigFileKind kind)
+    {
+        (kind == ConfigFileKind.Settings ? _settingsWriteTimer : _widgetsWriteTimer).Change(Timeout.Infinite, Timeout.Infinite);
+        return FlushAsync(kind);
+    }
+
+    /// <summary>Drop a queued mutation that has not been written — a paired write whose flush
+    /// failed must not land later, on its own, on top of whatever comes next. With
+    /// <paramref name="generation"/>, only that exact mutation goes, not a later one queued under
+    /// the same path.</summary>
+    public void CancelPending(ConfigFileKind kind, string path, long? generation = null)
+    {
+        lock (_gate)
+        {
+            if (kind == ConfigFileKind.Settings) Cancel(_settingsPending);
+            else Cancel(_widgetsPending);
+        }
+
+        void Cancel<T>(Dictionary<string, Mutation<T>> pending)
+        {
+            if (pending.TryGetValue(path, out Mutation<T>? queued) && (generation is null || queued.Generation == generation))
+                pending.Remove(path);
+        }
+    }
+
+    /// <summary>Both files were replaced wholesale from this process (a profile switch). Our own
+    /// writes never raise <see cref="ExternalChanged"/>, so the pages are told here, through the
+    /// same path a hand edit takes: widgets first, then settings.</summary>
+    public void AnnounceReplaced()
+    {
+        PublishExternalChange(new(ConfigFileKind.Widgets, DirtyPaths(ConfigFileKind.Widgets)));
+        PublishExternalChange(new(ConfigFileKind.Settings, DirtyPaths(ConfigFileKind.Settings)));
     }
 
     public IReadOnlySet<string> DirtyPaths(ConfigFileKind kind)
@@ -130,28 +186,31 @@ public sealed class LiveConfigService : IDisposable
     private static bool IsDescendant(string candidate, string parent)
         => parent == "$" || candidate.StartsWith(parent + ".", StringComparison.Ordinal);
 
-    private async Task FlushAsync(ConfigFileKind kind)
+    /// <summary>True when the pending batch for <paramref name="kind"/> reached the disk or there
+    /// was none. The batch is taken <b>after</b> <see cref="_ioGate"/>: taken before it, a flush
+    /// queued behind one already in flight replayed that flight's mutations a second time.</summary>
+    private async Task<bool> FlushAsync(ConfigFileKind kind)
     {
-        Dictionary<string, Mutation<AppSettings>>? settingsBatch = null;
-        Dictionary<string, Mutation<WidgetsConfig>>? widgetsBatch = null;
-        lock (_gate)
-        {
-            if (_disposed) return;
-            if (kind == ConfigFileKind.Settings)
-            {
-                if (_settingsPending.Count == 0) return;
-                settingsBatch = new(_settingsPending, StringComparer.Ordinal);
-            }
-            else
-            {
-                if (_widgetsPending.Count == 0) return;
-                widgetsBatch = new(_widgetsPending, StringComparer.Ordinal);
-            }
-        }
-
         await _ioGate.WaitAsync().ConfigureAwait(false);
         try
         {
+            Dictionary<string, Mutation<AppSettings>>? settingsBatch = null;
+            Dictionary<string, Mutation<WidgetsConfig>>? widgetsBatch = null;
+            lock (_gate)
+            {
+                if (_disposed) return false;
+                if (kind == ConfigFileKind.Settings)
+                {
+                    if (_settingsPending.Count == 0) return true;
+                    settingsBatch = new(_settingsPending, StringComparer.Ordinal);
+                }
+                else
+                {
+                    if (_widgetsPending.Count == 0) return true;
+                    widgetsBatch = new(_widgetsPending, StringComparer.Ordinal);
+                }
+            }
+
             string hash = "";
             // The reload has to be inside the lock, not just the write. Our document comes from
             // that reload and goes back out through SaveWidgets a few milliseconds later; the
@@ -194,10 +253,17 @@ public sealed class LiveConfigService : IDisposable
             }
 
             PublishStatus(new("Saved", At: DateTime.Now));
+            return true;
         }
         catch (Exception ex)
         {
+            // The batch ran on the in-memory document before the save threw. Put that document
+            // back to what is on disk (an unparsable file keeps its last good copy), so nothing
+            // reading Settings/Widgets sees a change that never landed; the batch stays pending.
+            try { _store.Transaction(FileName(kind), _store.Reload); }
+            catch { /* the next flush or watcher event reloads anyway */ }
             PublishStatus(new($"Could not save {FileName(kind)}: {ex.Message}", IsError: true));
+            return false;
         }
         finally
         {
