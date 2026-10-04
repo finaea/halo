@@ -155,14 +155,11 @@ jobs:
               $lines += "- [$tick$(Split-Path $name -Leaf)$tick]($url)"
             }
             $lines += ''
-            # Measured on 1.0.3: 1/68 on the installer and 1/66 on the zip, the lone hit
-            # being one ML engine returning a bare "MALICIOUS" with no family name. The
-            # bundled PawnIO_setup.exe is 0/70 on its own, so it is not the driver.
-            $lines += 'A single unnamed detection from one machine-learning engine is expected. These'
-            $lines += 'are new, unsigned programs that include a ~175 MB .NET runtime, and automated'
-            $lines += 'scanners are often suspicious of that combination. The major engines report'
-            $lines += 'both files as clean. Several engines agreeing on a named threat would be a'
-            $lines += 'different matter, and a GitHub issue about it would be appreciated.'
+            # 1.0.3 measured 1/68 (installer) and 1/66 (zip): DeepInstinct's ML engine on the
+            # ReadyToRun build of SharpGen.Runtime.COM.dll. With that file excluded from R2R
+            # (Halo.Widgets.csproj) both read 0 on 2026-10-04, so nothing is expected here; the
+            # text covers the next stray ML hit without claiming one.
+            $lines += 'A lone unnamed detection from a single machine-learning engine is most likely a false positive on new, unsigned software. Several engines agreeing on a named threat would be a different matter, and a GitHub issue about it would be appreciated.'
           } else {
             $lines += '**VirusTotal** - no analysis is available for this release.'
           }

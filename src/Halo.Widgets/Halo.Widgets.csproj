@@ -20,6 +20,12 @@
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Ships as the package's IL, not ReadyToRun. The R2R build of SharpGen.Runtime.COM 2.4.2-beta
+         is the one file in a release VirusTotal flags (DeepInstinct, bare "MALICIOUS"); the package's
+         own lib\net9.0 copy is clean. Measured 2026-10-04 on 1.0.3 + main 4808172. -->
+    <PublishReadyToRunExclude Include="SharpGen.Runtime.COM.dll" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Fonts and the tray icon are read from <app root>\assets at runtime (Halo.Shared.Paths),
          so they must land next to the exe in every build and publish. -->
     <Content Include="..\..\assets\fonts\*.ttf" LinkBase="assets\fonts" CopyToOutputDirectory="PreserveNewest" />
