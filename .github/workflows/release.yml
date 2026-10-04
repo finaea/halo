@@ -159,7 +159,7 @@ jobs:
             # ReadyToRun build of SharpGen.Runtime.COM.dll. With that file excluded from R2R
             # (Halo.Widgets.csproj) both read 0 on 2026-10-04, so nothing is expected here; the
             # text covers the next stray ML hit without claiming one.
-            $lines += 'A lone unnamed detection from a single machine-learning engine is most likely a false positive on new, unsigned software. Several engines agreeing on a named threat would be a different matter, and a GitHub issue about it would be appreciated.'
+            $lines += 'A single unnamed detection from a single machine-learning engine is most likely a false positive on new, unsigned software. Several engines agreeing on a named threat would be a different matter, and a GitHub issue about it would be appreciated.'
           } else {
             $lines += '**VirusTotal** - no analysis is available for this release.'
           }
