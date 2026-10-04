@@ -17,11 +17,16 @@ public sealed class PresetContrastTests(ITestOutputHelper output)
 
     private record Check(string Token, string Surface, string Wallpaper, double Min);
 
-    private static IEnumerable<Check> Checks(SkinInfo skin)
+    /// <summary>The checks a preset is held to: every declared pair except the ones that name it in
+    /// <see cref="ContrastPair.ExemptPresets"/>.</summary>
+    private static IEnumerable<Check> Checks(SkinInfo skin, string presetId)
     {
         foreach (var pair in skin.ContrastPairs ?? [])
+        {
+            if (pair.ExemptPresets?.Contains(presetId) == true) continue;
             foreach (var (w, _) in Wallpapers.Where(w => pair.AllWallpapers || w.Name == "grey"))
                 yield return new(pair.Foreground, pair.Surface, w, pair.MinRatio);
+        }
     }
 
     public static IEnumerable<object[]> Presets()
@@ -64,7 +69,7 @@ public sealed class PresetContrastTests(ITestOutputHelper output)
         foreach (var pair in SkinCatalog.Find(skinId)!.ContrastPairs ?? [])
             foreach (var t in new[] { pair.Foreground, pair.Surface })
                 Assert.True(p.Colors.ContainsKey(t), $"{presetId}: contrast pair names unknown token '{t}'");
-        foreach (var c in Checks(SkinCatalog.Find(skinId)!))
+        foreach (var c in Checks(SkinCatalog.Find(skinId)!, presetId))
         {
             double r = Ratio(p, c);
             if (r + 1e-9 < c.Min)
@@ -79,7 +84,7 @@ public sealed class PresetContrastTests(ITestOutputHelper output)
         foreach (var skin in SkinCatalog.All)
             foreach (var p in skin.Presets.Where(p => !p.ContrastExempt))
             {
-                var mins = Checks(skin).GroupBy(c => (c.Min, c.Wallpaper == "grey" ? "grey" : "any"))
+                var mins = Checks(skin, p.Id).GroupBy(c => (c.Min, c.Wallpaper == "grey" ? "grey" : "any"))
                     .OrderByDescending(g => g.Key.Min)
                     .Select(g => { var worst = g.MinBy(c => Ratio(p, c))!; return $"min{g.Key.Min:F1}/{g.Key.Item2}={Ratio(p, worst):F2} ({worst.Token}/{worst.Wallpaper})"; });
                 output.WriteLine($"{p.Id,-18} {string.Join("  ", mins)}");

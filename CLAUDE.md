@@ -142,8 +142,10 @@ the smoketests, and would delete the "degrades gracefully unelevated" property.
 - **Contrast gate.** `PresetContrastTests` checks every non-exempt preset against its skin's
   `ContrastPairs`: text 4.5:1 with the card composited over black, #808080 and white wallpaper,
   alert text 4.5:1 and graphics/warn ramp 3:1 on grey. `rainformer-light` is `ContrastExempt` — it
-  is today's palette byte for byte, the parity baseline. Opacity < 1 voids the guarantee; Settings
-  says so next to the opacity slider rather than clamping.
+  is today's palette byte for byte, the parity baseline. One pair can also exempt named presets
+  (`ContrastPair.ExemptPresets`): Azur's FPS app tag keeps white on Port Day's and Shittim's bright
+  blue by Jack's choice (2.62:1). Opacity < 1 voids the guarantee; Settings says so next to the
+  opacity slider rather than clamping.
 - **Game art is isolated, and never required.** Azur Archive's character art lives only under
   `assets\skins\azur-archive\game-art\` with a `CREDITS.md` row per file; art-bearing renders
   (gallery previews) are written **inside** that folder, art-free ones to `previews\`. Every skin must

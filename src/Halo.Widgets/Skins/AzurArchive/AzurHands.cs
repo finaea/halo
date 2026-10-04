@@ -127,7 +127,8 @@ internal sealed class FpsTagsEl(AzurCard card, StatBlock app, StatBlock dlss) : 
         var shape = Lean(rc, x, y, w, h, slant);
         if (solid) rc.DC.FillGeometry(shape, rc.Brush(C(rc, Card.Data("keyFps"))));
         else rc.DC.DrawGeometry(shape, rc.Brush(C(rc, "rule")), U(1));
-        Text(rc, s, font, solid ? C(rc, "tabText") : C(rc, "text2"), x + slant / 2 + U(9), y + h / 2 + U(3.6));
+        // keyFpsText, not tabText: the tag sits on keyFps, and white on Port Day's bright blue was 2.62:1
+        Text(rc, s, font, solid ? C(rc, "keyFpsText") : C(rc, "text2"), x + slant / 2 + U(9), y + h / 2 + U(3.6));
         return x + w;
     }
 }

@@ -477,7 +477,8 @@ internal sealed class GridEl(AzurCard card, GridBlock block) : AzEl(card)
             int col = i / rows, row = i % rows;     // C1..C8 down the left, C9.. down the right
             float x = x0 + col * (colW + gap), y = (float)Y + U(1) + row * U(15), mid = y + U(6);
             var cell = block.Cells[i];
-            Text(rc, cell.Label, Grid, C(rc, "faint"), x, mid + U(4.2));
+            // text2, not faint: these identify the cores, and faint was 2.88:1 on the body
+            Text(rc, cell.Label, Grid, C(rc, "text2"), x, mid + U(4.2));
             if (cell.IsHeading) continue;
             var v = _v[i];
             Text(rc, v.IsNa ? "N/A" : v.Text + v.Unit, Grid, C(rc, v.IsNa ? "inactiveButton" : "text"), x + colW, mid + U(4.2), TextAlign.Right);
@@ -625,13 +626,17 @@ internal sealed class TrafficEl(AzurCard card, TrafficBlock block) : AzEl(card)
         float w = BubbleW(rc, label, v, num, unit), h = U(42);
         var rect = new Rect(x, y, w, h);
         var shape = Bubble(rc, rect, U(9), U(2), outgoing);
-        var fill = outgoing ? C(rc, Card.Down ? "inactiveButton" : "netUp") : C(rc, "diamondFill");
+        // the bubble has its own fill so the upload graph line (netUp) keeps its colour
+        var fill = outgoing ? C(rc, Card.Down ? "inactiveButton" : "netUpFill") : C(rc, "diamondFill");
         rc.DC.FillGeometry(shape, rc.Brush(fill));
         if (!outgoing) rc.DC.DrawGeometry(shape, rc.Brush(C(rc, "rule")), U(1));
-        // outgoing ink is whichever of black and white reads on the preset's netUp fill
-        var onFill = Luma(fill) > 0.55f ? new Color4(0, 0, 0, 1) : new Color4(1, 1, 1, 1);
+        // outgoing ink is the preset's netUpText, which the contrast gate holds to 4.5:1 on netUpFill;
+        // a card that is down greys the bubble, so then it is whichever of black and white reads on grey
+        var onFill = !Card.Down ? C(rc, "netUpText")
+            : Luma(fill) > 0.55f ? new Color4(0, 0, 0, 1) : new Color4(1, 1, 1, 1);
         var ink = outgoing ? onFill : C(rc, "text");
-        var mut = outgoing ? Alpha(onFill, 0.85f) : C(rc, "text2");
+        // full strength: the caption and unit at 85 % fell under 4.5:1
+        var mut = outgoing ? onFill : C(rc, "text2");
         float tx = x + U(10);
         // ▼ / ▲ as vector triangles: the bundled faces have no arrows
         float ay = y + U(10.5), s = U(3.2);

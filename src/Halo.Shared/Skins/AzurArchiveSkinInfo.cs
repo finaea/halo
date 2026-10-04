@@ -46,6 +46,9 @@ public static class AzurArchiveSkinInfo
         ("pillFill", "Skin extras", "Power panel's energy pill"),
         ("pillText", "Skin extras", "Reading inside the energy pill"),
         ("keyFps", "Skin extras", "FPS key bar and emblem"),
+        ("keyFpsText", "Skin extras", "App name on the FPS card's tag"),
+        ("netUpFill", "Skin extras", "Network card's upload bubble"),
+        ("netUpText", "Skin extras", "Reading and caption in the upload bubble"),
         ("keyPower", "Skin extras", "Power key bar and emblem"),
         ("keyDrives", "Skin extras", "Drives key bar and emblem"),
         ("keyFans", "Skin extras", "Fans key bar and emblem"),
@@ -85,6 +88,11 @@ public static class AzurArchiveSkinInfo
         new("maxLabelGray", "bgBody", 4.5, AllWallpapers: true),
         new("redText", "bgBody", 4.5),
         new("tabText", "tabFill", 4.5),
+        // the FPS app tag and the upload bubble are drawn on their own fills, not the tab. Port Day
+        // and Shittim keep white on their bright blue tag (2.62:1) by choice: the look was reviewed
+        // and kept on 2026-10-04, and the tag only repeats the game's name.
+        new("keyFpsText", "keyFps", 4.5, ExemptPresets: ["port-day", "shittim"]),
+        new("netUpText", "netUpFill", 4.5),
         new("warnText", "barWarn", 4.5),
         new("critText", "red", 4.5),
         new("critText", "critHatch", 4.5),
@@ -135,6 +143,7 @@ public static class AzurArchiveSkinInfo
                 texture=#4F6FAE38 mosaic=#18B7F31A bandFill=#E3EEF8 bandTick=#18B7F3 barEnd=#0CD3FF faint=#7F8DA4
                 diamondFill=#FFFFFF warnText=#3A2A00 critText=#FFFFFF pillFill=#1F2D44E6 pillText=#FFFFFF
                 keyFps=#28A8F5 keyPower=#F5A524 keyDrives=#3FB9A0 keyFans=#4CC6B8 keyTop=#F2C230
+                keyFpsText=#FFFFFF netUpFill=#3F78BC netUpText=#FFFFFF
                 receiptFill=#FFFEFB receiptInk=#2E2A24 receiptMuted=#857C69 receiptAccent=#A87200 stamp=#D3203A99
                 signFill=#FFFFFF signInk=#6B4A28 signBorder=#A87A4A mascotFx=#8D9BB0 lime=#3A9E28
                 talkHeader=#FB91A5 talkBody=#FFFFFF talkText=#3D4246 badge=#F94414
@@ -151,6 +160,7 @@ public static class AzurArchiveSkinInfo
                 texture=#8CAAE638 mosaic=#0CD3FF17 bandFill=#5571AC42 bandTick=#0CD3FF barEnd=#5BE3FF faint=#7D8BA3
                 diamondFill=#1B2233 warnText=#2A1E00 critText=#FFFFFF pillFill=#0C101AE6 pillText=#FFFFFF
                 keyFps=#3FB4FF keyPower=#F5A524 keyDrives=#3FC9AE keyFans=#4CD6C6 keyTop=#F2C230
+                keyFpsText=#171D2C netUpFill=#7FB2F5 netUpText=#000000
                 receiptFill=#FFFEFB receiptInk=#2E2A24 receiptMuted=#857C69 receiptAccent=#A87200 stamp=#D3203A99
                 signFill=#2B3550 signInk=#E8D4B8 signBorder=#A87A4A mascotFx=#7D8BA3 lime=#94FF63
                 talkHeader=#FB91A5 talkBody=#222B40 talkText=#E8EEF8 badge=#F94414
@@ -167,6 +177,7 @@ public static class AzurArchiveSkinInfo
                 texture=#3060923D mosaic=#FFFFFF66 bandFill=#FFFFFF99 bandTick=#28A8F5 barEnd=#59C8FF faint=#5F82A8
                 diamondFill=#FFFFFF warnText=#3A2A00 critText=#FFFFFF pillFill=#1F3F63E6 pillText=#FFFFFF
                 keyFps=#28A8F5 keyPower=#F5A524 keyDrives=#2FAE94 keyFans=#3DB8AA keyTop=#E8B820
+                keyFpsText=#FFFFFF netUpFill=#3878C5 netUpText=#FFFFFF
                 receiptFill=#FFFEFB receiptInk=#2E2A24 receiptMuted=#857C69 receiptAccent=#A87200 stamp=#D3203A99
                 signFill=#FFFFFF signInk=#6B4A28 signBorder=#A87A4A mascotFx=#6F90B2 lime=#2E8A1E
                 talkHeader=#FB91A5 talkBody=#FFFFFF talkText=#3D4246 badge=#F94414
@@ -183,6 +194,7 @@ public static class AzurArchiveSkinInfo
                 texture=#FB91A54D mosaic=#FB91A51F bandFill=#E7EDF0 bandTick=#FB91A5 barEnd=#6BCBF0 faint=#7F8994
                 diamondFill=#FFFFFF warnText=#3A2A00 critText=#FFFFFF pillFill=#3D4246E6 pillText=#FFFFFF
                 keyFps=#3BB5E8 keyPower=#F5A524 keyDrives=#3FB9A0 keyFans=#4CC6B8 keyTop=#F2C230
+                keyFpsText=#2B2F33 netUpFill=#4C5B6F netUpText=#FFFFFF
                 receiptFill=#FFFEFB receiptInk=#2E2A24 receiptMuted=#857C69 receiptAccent=#A87200 stamp=#D3203A99
                 signFill=#FFFFFF signInk=#6B4A28 signBorder=#A87A4A mascotFx=#98A1AA lime=#3A9E28
                 talkHeader=#FB91A5 talkBody=#FFFFFF talkText=#3D4246 badge=#F94414
@@ -199,6 +211,7 @@ public static class AzurArchiveSkinInfo
                 texture=#00000000 mosaic=#00000000 bandFill=#000000 bandTick=#00FFFF barEnd=#00FFFF faint=#C0C0C0
                 diamondFill=#000000 warnText=#000000 critText=#000000 pillFill=#000000 pillText=#FFFFFF
                 keyFps=#00FFFF keyPower=#00FFFF keyDrives=#00FFFF keyFans=#00FFFF keyTop=#00FFFF
+                keyFpsText=#000000 netUpFill=#00FF00 netUpText=#000000
                 receiptFill=#000000 receiptInk=#FFFFFF receiptMuted=#C0C0C0 receiptAccent=#FFFF00 stamp=#FF4040
                 signFill=#000000 signInk=#FFFFFF signBorder=#FFFFFF mascotFx=#FFFFFF lime=#3FF23F
                 talkHeader=#FFFF00 talkBody=#000000 talkText=#FFFFFF badge=#FF4040

@@ -26,8 +26,11 @@ public sealed record AssetSlot(string Id, string Description);
 /// must reach between them (skin system tech plan §8): the surface composited over a wallpaper,
 /// the foreground composited over that. <see cref="AllWallpapers"/> = black, #808080 and white;
 /// otherwise grey only. Declared by the skin because only the skin knows what sits on what.
+/// <see cref="ExemptPresets"/> lists presets this one pair is not held to — a deliberate look
+/// kept below the ratio, decided per pair rather than exempting the whole preset.
 /// </summary>
-public sealed record ContrastPair(string Foreground, string Surface, double MinRatio, bool AllWallpapers = false);
+public sealed record ContrastPair(string Foreground, string Surface, double MinRatio, bool AllWallpapers = false,
+    string[]? ExemptPresets = null);
 
 /// <summary>Everything about a skin that is not rendering code: its tokens, presets, options, fonts
 /// and image slots. The renderer and the Settings app both read it. <see cref="FontFamily"/> is
