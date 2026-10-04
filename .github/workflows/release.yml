@@ -110,6 +110,60 @@ jobs:
           # to; the links are read off this step's output in the next step instead.
           update_release_body: false
 
+      # The scan only submits the files; VirusTotal takes a few minutes to analyse each one.
+      # This waits for both verdicts so the notes can state them ("0 of 69 security vendors
+      # flagged it") rather than only link to them, and writes the finished section to
+      # vt-section.md for the release step - and to the run summary, so a manual run shows it
+      # too. One request per unfinished file a minute (2/min, the public API allows 4); after
+      # 15 minutes a file still being analysed is listed with its link alone. The link is the
+      # file's permanent report, by SHA-256, not the one-off analysis page. If this step fails,
+      # the release step falls back to the plain links.
+      - name: Read the VirusTotal verdicts
+        if: steps.vt.outputs.analysis != ''
+        continue-on-error: true
+        shell: pwsh
+        env:
+          VT_ANALYSIS: ${{ steps.vt.outputs.analysis }}
+        run: |
+          # "<path>=<url>" pairs; the analysis id is the URL's second-to-last segment
+          # (.../gui/file-analysis/<id>/detection). The id ends in '=' padding, so split once.
+          $files = foreach ($pair in $env:VT_ANALYSIS -split ',') {
+            $path, $url = $pair -split '=', 2
+            [pscustomobject]@{ Path = $path; Id = ($url -split '/')[-2]; Stats = $null }
+          }
+          $deadline = (Get-Date).AddMinutes(15)
+          while (($files | Where-Object { -not $_.Stats }) -and (Get-Date) -lt $deadline) {
+            foreach ($f in @($files | Where-Object { -not $_.Stats })) {
+              try {
+                $r = Invoke-RestMethod -Uri "https://www.virustotal.com/api/v3/analyses/$($f.Id)" -Headers @{ 'x-apikey' = $env:VT_API_KEY }
+                if ($r.data.attributes.status -eq 'completed') { $f.Stats = $r.data.attributes.stats }
+              } catch { Write-Host "VirusTotal: $($f.Path): $($_.Exception.Message); retrying" }
+            }
+            if ($files | Where-Object { -not $_.Stats }) { Start-Sleep -Seconds 60 }
+          }
+
+          $tick = '`'
+          $lines = @('## VirusTotal', '')
+          foreach ($f in $files) {
+            $sha = (Get-FileHash -LiteralPath $f.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+            $item = "- [$tick$(Split-Path $f.Path -Leaf)$tick](https://www.virustotal.com/gui/file/$sha)"
+            if ($f.Stats) {
+              $flagged = [int]$f.Stats.malicious + [int]$f.Stats.suspicious
+              $vendors = $flagged + [int]$f.Stats.undetected + [int]$f.Stats.harmless
+              $lines += "${item}: $flagged of $vendors security vendors flagged it"
+            } else {
+              $lines += "${item}: still being analysed when this release was published"
+            }
+          }
+          # The false-positive note only where it can matter: a file with a detection, or one
+          # whose verdict is not in yet.
+          if ($files | Where-Object { -not $_.Stats -or ([int]$_.Stats.malicious + [int]$_.Stats.suspicious) -gt 0 }) {
+            $lines += ''
+            $lines += 'A single unnamed detection from a single machine-learning engine is most likely a false positive on new, unsigned software. Several engines agreeing on a named threat would be a different matter, and a GitHub issue about it would be appreciated.'
+          }
+          ($lines -join "`n") | Out-File vt-section.md -Encoding utf8
+          Get-Content vt-section.md | Add-Content $env:GITHUB_STEP_SUMMARY
+
       - name: Create the release
         if: github.ref_type == 'tag'
         shell: pwsh
@@ -150,8 +204,11 @@ jobs:
           # when the scan was skipped (no VT_API_KEY) or failed (continue-on-error). The
           # action echoes back the path it was given, not a bare asset name - hence
           # Split-Path.
+          # The verdicts step's finished section when it ran, else the plain links.
           $vt = '${{ steps.vt.outputs.analysis }}'
-          if ($vt) {
+          if (Test-Path vt-section.md) {
+            $lines += Get-Content vt-section.md
+          } elseif ($vt) {
             $lines += '## VirusTotal'
             $lines += ''
             foreach ($pair in $vt -split ',') {
