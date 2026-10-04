@@ -47,6 +47,9 @@ under "Derived images outside this folder" in `CREDITS.md` and included in remov
 5. **Regenerate anything derived from the art.** Gallery pictures with the art are inside
    `game-art/previews/`, so step 1 already removed them. Anything listed under "Derived images
    outside this folder" in `CREDITS.md` is replaced with an art-free version.
+6. **Reword the skin's description** once the Blue Archive cast is gone. The Settings blurb in
+   `src/Halo.Shared/Skins/AzurArchiveSkinInfo.cs` describes the skin as themed around that cast,
+   which would oversell it without the art.
 
 ### A copy that is already installed
 

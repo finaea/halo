@@ -127,7 +127,7 @@ public static class AzurArchiveSkinInfo
     private static SkinInfo Build() => new(
         Id: Id,
         Name: "Azur Archive",
-        Description: "A naval academy's tablet: Port-style cards, halos, and a cast who notices when it gets hot.",
+        Description: "Cards inspired by Azur Lane's port screens, with Blue Archive's Millennium School characters.",
         Attribution: "Inspired by Azur Lane and Blue Archive",
         Tokens: [.. SkinCatalog.CoreTokens, .. Extras.Select(e => new TokenSpec(e.Token, e.Group, e.Description, Core: false))],
         Presets:

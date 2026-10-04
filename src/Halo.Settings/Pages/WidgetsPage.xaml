@@ -3,7 +3,8 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
              xmlns:local="clr-namespace:Halo.Settings"
-             xmlns:picker="clr-namespace:ColorPicker;assembly=ColorPicker">
+             xmlns:picker="clr-namespace:ColorPicker;assembly=ColorPicker"
+             Background="{StaticResource HaloPageBackground}">
   <UserControl.Resources>
     <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
     <SolidColorBrush x:Key="HaloDropIndicator" Color="#0067C0" />
@@ -42,9 +43,72 @@
       <Setter Property="VerticalAlignment" Value="Center" />
       <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
+
+    <!-- WPF-UI 4.3.0's TabControl template pins its header TabPanel at Margin 0 and draws rounded
+         "folder" tabs, so the strip started at the card edge while the header above and the tab
+         content below sit 18 in. Only a template reaches that panel. Header text inset 18 (8 here,
+         10 in the tab) to line up with them, one full-width divider under the strip, an accent underline on the selected tab. -->
+    <Style x:Key="EditorTabItem" TargetType="TabItem">
+      <Setter Property="FocusVisualStyle" Value="{DynamicResource DefaultControlFocusVisualStyle}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="OverridesDefaultStyle" Value="True" />
+      <Setter Property="SnapsToDevicePixels" Value="True" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TabItem">
+            <Border x:Name="Border" Background="{TemplateBinding Background}" CornerRadius="4,4,0,0">
+              <Grid>
+                <!-- Reserves the SemiBold width, so selecting a tab never reflows or wraps the strip. -->
+                <ContentPresenter ContentSource="Header" Margin="10,9,10,10" TextElement.FontWeight="SemiBold"
+                                  Visibility="Hidden" />
+                <ContentPresenter x:Name="ContentSite" ContentSource="Header" RecognizesAccessKey="True"
+                                  Margin="10,9,10,10" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                <Border x:Name="Underline" Height="2" Margin="10,0" VerticalAlignment="Bottom" CornerRadius="1"
+                        Background="{StaticResource HaloDropIndicator}" Visibility="Hidden" />
+              </Grid>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Border" Property="Background" Value="#0A000000" />
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Underline" Property="Visibility" Value="Visible" />
+                <!-- On the header only: the TabItem's own FontWeight is inherited by its tab's content. -->
+                <Setter TargetName="ContentSite" Property="TextElement.FontWeight" Value="SemiBold" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.45" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="EditorTabs" TargetType="TabControl" BasedOn="{StaticResource {x:Type TabControl}}">
+      <Setter Property="ItemContainerStyle" Value="{StaticResource EditorTabItem}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TabControl">
+            <Grid KeyboardNavigation.TabNavigation="Local">
+              <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+              <TabPanel x:Name="HeaderPanel" Margin="8,0,18,0" Panel.ZIndex="1" Background="Transparent"
+                        IsItemsHost="True" KeyboardNavigation.TabIndex="1" />
+              <Border Grid.Row="1" Background="{TemplateBinding Background}" BorderBrush="{StaticResource HaloBorder}"
+                      BorderThickness="0,1,0,0" KeyboardNavigation.DirectionalNavigation="Contained"
+                      KeyboardNavigation.TabIndex="2" KeyboardNavigation.TabNavigation="Local">
+                <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent"
+                                  TextElement.Foreground="{TemplateBinding Foreground}" />
+              </Border>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
   </UserControl.Resources>
 
-  <Grid Background="{StaticResource HaloPageBackground}" Margin="24,20,24,16">
+  <!-- The page background is painted by the UserControl, not this grid: a margin on the painted
+       grid left a band of the window's backdrop around it. -->
+  <Grid Margin="28,22,28,16">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
@@ -154,7 +218,7 @@
             <TextBlock Grid.Column="1" Text="Live" Foreground="{StaticResource HaloSuccess}" VerticalAlignment="Center" />
           </Grid>
 
-          <TabControl Grid.Row="1" BorderThickness="0" Background="Transparent">
+          <TabControl Grid.Row="1" Style="{StaticResource EditorTabs}" Background="Transparent">
             <TabItem Header="Refresh &amp; graphs">
               <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="18,12">
                 <StackPanel>

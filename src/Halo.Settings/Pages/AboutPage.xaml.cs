@@ -13,6 +13,7 @@ public partial class AboutPage : UserControl, ISettingsPage, IDisposable
     private const string RainformerUrl = "https://www.deviantart.com/pul53dr1v3r/art/Rainformer-3-1-HWiNFO-Edition-Rainmeter-789616481";
     private readonly CollectorSession _session = new();
     private readonly string _noticesPath = Path.Combine(Paths.AppRoot, "THIRD-PARTY-NOTICES.md");
+    private readonly string _artCreditsPath = Path.Combine(Paths.AssetsDir, "skins", "azur-archive", "game-art", "CREDITS.md");
 
     public AboutPage()
     {
@@ -20,6 +21,8 @@ public partial class AboutPage : UserControl, ISettingsPage, IDisposable
         SettingsVersionText.Text = AppVersion.Current;
         NoticesButton.IsEnabled = File.Exists(_noticesPath);
         NoticesButton.ToolTip = NoticesButton.IsEnabled ? _noticesPath : "THIRD-PARTY-NOTICES.md is not present in this build.";
+        ArtCreditsButton.Visibility = File.Exists(_artCreditsPath) ? Visibility.Visible : Visibility.Collapsed;
+        ArtCreditsButton.ToolTip = _artCreditsPath;
     }
 
     public void OnEnter()
@@ -45,6 +48,7 @@ public partial class AboutPage : UserControl, ISettingsPage, IDisposable
     private void Project_Click(object sender, RoutedEventArgs e) => Open(ProjectUrl);
     private void Rainformer_Click(object sender, RoutedEventArgs e) => Open(RainformerUrl);
     private void Notices_Click(object sender, RoutedEventArgs e) => Open(_noticesPath);
+    private void ArtCredits_Click(object sender, RoutedEventArgs e) => Open(_artCreditsPath);
     private void DataFolder_Click(object sender, RoutedEventArgs e) => Open(Paths.DataDir);
 
     private void Open(string target)

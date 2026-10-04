@@ -53,13 +53,21 @@
 
         <Border Style="{StaticResource SettingsCard}">
           <StackPanel>
-            <TextBlock Text="Visual design credit" Style="{StaticResource SectionHeading}" />
+            <TextBlock Text="Skin credits" Style="{StaticResource SectionHeading}" />
+            <TextBlock Text="Rainformer" FontWeight="SemiBold" />
             <TextBlock Text="Visual design based on Rainformer 3.1 HWiNFO Edition by Pul53dr1v3r, used under CC BY-NC 3.0."
-                       TextWrapping="Wrap" />
-            <TextBlock Text="Halo’s Settings UI is new; the desktop widgets retain Rainformer’s visual language and attribution."
-                       Style="{StaticResource Hint}" Margin="0,6,0,0" />
-            <Button Content="View Rainformer ↗" HorizontalAlignment="Left" Padding="12,6" Margin="0,12,0,0"
+                       TextWrapping="Wrap" Margin="0,4,0,0" />
+            <Button Content="View Rainformer ↗" HorizontalAlignment="Left" Padding="12,6" Margin="0,10,0,0"
                     Click="Rainformer_Click" />
+
+            <TextBlock Text="Azur Archive" FontWeight="SemiBold" Margin="0,18,0,0" />
+            <TextBlock Text="An unofficial fan skin inspired by Azur Lane and Blue Archive, not affiliated with or endorsed by their publishers."
+                       TextWrapping="Wrap" Margin="0,4,0,0" />
+            <TextBlock Text="Character art and game text © NEXON Games &amp; Yostar (Blue Archive) and © Manjuu, Yongshi &amp; Yostar (Azur Lane). They are used without a licence and removed on request."
+                       Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,6,0,0" />
+            <!-- Hidden, not disabled, when game-art\ is gone: the skin has to stand on its own without it (D22). -->
+            <Button x:Name="ArtCreditsButton" Content="Art credits" HorizontalAlignment="Left" Padding="12,6"
+                    Margin="0,10,0,0" Click="ArtCredits_Click" />
           </StackPanel>
         </Border>
       </StackPanel>

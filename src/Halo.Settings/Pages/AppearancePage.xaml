@@ -34,14 +34,17 @@
               <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
-                  <!-- A Button, not a clickable Border: real mouse input and keyboard both reach Click. -->
+                  <!-- A Button, not a clickable Border: real mouse input and keyboard both reach Click.
+                       Stretched to the WrapPanel row's height so cards in one row match whatever their
+                       blurbs wrap to; the attribution docks to the bottom and lines up across them. -->
                   <Button Click="Skin_Click" Padding="0" Margin="0,0,12,0" Background="Transparent" BorderThickness="0"
+                          VerticalAlignment="Stretch" VerticalContentAlignment="Stretch"
                           AutomationProperties.Name="{Binding Name, StringFormat=Use the {0} skin}">
-                    <Border Style="{StaticResource SelectableCard}" Width="250" Margin="0">
-                      <StackPanel>
+                    <Border Style="{StaticResource SelectableCard}" Width="250" Margin="0" VerticalAlignment="Stretch">
+                      <DockPanel LastChildFill="False">
                         <!-- Transparent: the preview PNG carries its own alpha (the cards' translucency
                              and shadow), so it sits on the Settings card the way it sits on a desktop. -->
-                        <Border Height="130" CornerRadius="4" Background="Transparent" Margin="0,0,0,6" ClipToBounds="True">
+                        <Border DockPanel.Dock="Top" Height="130" CornerRadius="4" Background="Transparent" Margin="0,0,0,6" ClipToBounds="True">
                           <Grid>
                             <Image Source="{Binding Preview}" Stretch="UniformToFill"
                                    RenderOptions.BitmapScalingMode="HighQuality" VerticalAlignment="Top" />
@@ -50,10 +53,10 @@
                                        Visibility="{Binding HasNoPreview, Converter={StaticResource BoolToVisibility}}" />
                           </Grid>
                         </Border>
-                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                        <TextBlock Text="{Binding Description}" Style="{StaticResource Hint}" />
-                        <TextBlock Text="{Binding Attribution}" Style="{StaticResource Hint}" Margin="0,2,0,0" />
-                      </StackPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="{Binding Name}" FontWeight="SemiBold" />
+                        <TextBlock DockPanel.Dock="Top" Text="{Binding Description}" Style="{StaticResource Hint}" />
+                        <TextBlock DockPanel.Dock="Bottom" Text="{Binding Attribution}" Style="{StaticResource Hint}" Margin="0,2,0,0" />
+                      </DockPanel>
                     </Border>
                   </Button>
                 </DataTemplate>
