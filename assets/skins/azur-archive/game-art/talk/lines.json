@@ -1,0 +1,18 @@
+{
+  "about": "Official English Blue Archive voice-line text, a supplement to Azur Archive's own MomoTalk lines. Each line joins one deck slot (who:slot) while gameArt is on. 'Sensei' is written {S} so addressAs applies; line breaks in the source are rendered as a space. Text (c) NEXON Games & Yostar; English transcription from bluearchive.wiki, CC BY-SA 4.0. One CREDITS.md row per line.",
+  "lines": [
+    { "who": "yuuka", "slot": "poke.1", "text": "I have approximately 34 tips on how to improve your behavior, {S}.", "source": "https://bluearchive.wiki/wiki/Yuuka/audio", "key": "Lobby_2" },
+    { "who": "arona", "slot": "poke.1", "text": "Me? Doze off? Never... Zzz.", "source": "https://bluearchive.wiki/wiki/Arona/audio", "key": "Work_Sleep_Talk_4" },
+    { "who": "kotama", "slot": "poke.1", "text": "...Crime? What do you mean? Wiretapping is not a crime.", "source": "https://bluearchive.wiki/wiki/Kotama/audio", "key": "Lobby_2" },
+    { "who": "koyuki", "slot": "poke.1", "text": "Nihaha, {S}! ...Huh? No, I didn't touch anything. Maybe...?", "source": "https://bluearchive.wiki/wiki/Koyuki/audio", "key": "LogIn_2" },
+    { "who": "toki", "slot": "poke.1", "text": "Do I need a break? I've been taking enough breaks, thanks to you.", "source": "https://bluearchive.wiki/wiki/Toki/audio", "key": "Lobby_3" },
+    { "who": "asuna", "slot": "poke.1", "text": "Rest? Nope, I'm good to go! Let's play together instead!", "source": "https://bluearchive.wiki/wiki/Asuna/audio", "key": "Lobby_5" },
+    { "who": "momoi", "slot": "fps.gameover", "text": "Clear! Onto the next stage!", "source": "https://bluearchive.wiki/wiki/Momoi/audio", "key": "Battle_Victory_1" },
+    { "who": "momoi", "slot": "fps.gameover.anon", "text": "Clear! Onto the next stage!", "source": "https://bluearchive.wiki/wiki/Momoi/audio", "key": "Battle_Victory_1" },
+    { "who": "noa", "slot": "chatter.idle", "text": "Oh, don't mind me. I'm just...observing.", "source": "https://bluearchive.wiki/wiki/Noa/audio", "key": "Lobby_1_2" },
+    { "who": "plana", "slot": "chatter.idle", "text": "Understood. You don't have much to do right now. You're bored.", "source": "https://bluearchive.wiki/wiki/Plana/audio", "key": "Work_Talk_5" },
+    { "who": "chihiro", "slot": "chatter.idle", "text": "{S}, I told you to lock your computer before leaving.", "source": "https://bluearchive.wiki/wiki/Chihiro/audio", "key": "LogIn_2_1" },
+    { "who": "arona", "slot": "greet.late", "text": "Take care of your health too. It's gotta take priority!", "source": "https://bluearchive.wiki/wiki/Arona/audio", "key": "Work_Talk_5" },
+    { "who": "noa", "slot": "greet.late", "text": "Heehee, aren't you a bit late, {S}?", "source": "https://bluearchive.wiki/wiki/Noa/audio", "key": "LogIn_2_1" }
+  ]
+}
