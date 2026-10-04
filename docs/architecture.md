@@ -101,6 +101,7 @@ judge what a sensor tolerates, and the host computes each period once at start-u
 | `lhm-storage` — SMART and NVMe temperatures | 0.1 Hz (every 10 s) | 0.2 Hz | Yes |
 | `lhm-gpu` — NVAPI extras, AMD and Intel cards | 1 Hz | 2 Hz | No |
 | `presentmon` — frame data | 40 Hz | 120 Hz | Yes |
+| `ngx` — DLSS state of the game being tracked (NVAPI) | 1 Hz | 2 Hz | No |
 | `pclstats` — Reflex PC latency markers | 5 Hz | 20 Hz | Yes |
 
 Every metric registers the cadence it *actually* changes at, which is not always its provider's

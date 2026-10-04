@@ -29,6 +29,7 @@ the package, or the upstream repository. Versions are the ones `dotnet list pack
 | [Microsoft.Xaml.Behaviors.Wpf](https://github.com/Microsoft/XamlBehaviorsWpf) | 1.1.31 | MIT | `Microsoft.Xaml.Behaviors.dll` |
 | [PixiEditor.ColorPicker](https://github.com/PixiEditor/ColorPicker) (+ `.Models`) | 3.4.2.3 / 1.0.11 | MIT | `ColorPicker.dll`, `ColorPicker.Models.dll` |
 | [Intel PresentMon](https://github.com/GameTechDev/PresentMon) SDK | 2.5.1.0 | MIT | `presentmon\PresentMonAPI2.dll`, `presentmon\PresentMonService.exe`, `presentmon\LICENSE.txt` |
+| [NVIDIA NVAPI](https://github.com/NVIDIA/nvapi) headers (function ids and the `NvAPI_NGX_GetNGXOverrideState` structure layout) | - | MIT | values written into `Halo.Collector.dll`; `nvapi64.dll` itself comes with the NVIDIA driver and is not shipped |
 | [PawnIO](https://github.com/namazso/PawnIO) (installer from [PawnIO.Setup](https://github.com/namazso/PawnIO.Setup)) | 2.2.0 | **GPL-2.0-or-later** | `redist\PawnIO_setup.exe`, run as a separate program |
 | [Elegant Icon Font](https://www.elegantthemes.com/blog/resources/elegant-icon-font) | - | GPL-2.0 / MIT dual - **MIT taken** | `assets\fonts\ElegantIcons.ttf` |
 | [Barlow](https://github.com/jpt/barlow) Condensed (Light, Medium, SemiBold, Bold; Latin subset) | - | SIL OFL 1.1 | `assets\skins\azur-archive\fonts\BarlowCondensed-*.ttf`, licence in `OFL-BarlowCondensed.txt` |

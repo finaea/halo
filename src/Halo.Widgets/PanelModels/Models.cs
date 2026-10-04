@@ -392,14 +392,13 @@ public static class Models
             new StatBlock("click", c => L(c, "click", "CLICK"), c => FpsIdle(c) ? Val.Na : Read(c, MetricNames.LatencyClickMs, ValueFormat.Int0, "ms")) { Visible = c => c.Shows("click") },
             new StatBlock("input", c => L(c, "input", "ALL INPUT"), c => FpsIdle(c) ? Val.Na : Read(c, MetricNames.LatencyAllInputMs, ValueFormat.Int0, "ms")) { Visible = c => c.Shows("input") })
         { Visible = c => c.Shows("click") || c.Shows("input") });
-        m.Blocks.Add(new HeadingBlock(_ => "DLSS") { Visible = c => c.Shows("dlss") || c.Shows("model") || c.Shows("framegen") });
-        m.Blocks.Add(new StatBlock("dlss", c => L(c, "dlss", "VERSION"), c => Text(c, MetricNames.DlssVersion)) { Visible = c => c.Shows("dlss") });
-        m.Blocks.Add(new StatBlock("model", c => L(c, "model", "MODEL"), c => Text(c, MetricNames.DlssModel)) { Visible = c => c.Shows("model") });
-        m.Blocks.Add(new StatBlock("framegen", c => L(c, "framegen", "FRAME GEN"), c => Live(c, MetricNames.RenderRateHz, ValueFormat.Int0, "Hz"))
-        {
-            Visible = c => c.Shows("framegen"),
-            Detail = _ => "rendered",
-        });
+        // SR / RR / FG and the measured multiplier: DlssRows decides the words for every skin; a
+        // running feature lights its bullet, the block layout's way of saying "active"
+        m.Blocks.Add(new HeadingBlock(_ => "DLSS") { Visible = c => c.Shows("sr") || c.Shows("rr") || c.Shows("fg") || c.Shows("fgmult") });
+        m.Blocks.Add(DlssStat("sr", "SR", c => DlssRows.Feature(c, "sr")));
+        m.Blocks.Add(DlssStat("rr", "RR", c => DlssRows.Feature(c, "rr")));
+        m.Blocks.Add(DlssStat("fg", "FG", c => DlssRows.Feature(c, "fg")));
+        m.Blocks.Add(DlssStat("fgmult", "FG MULT", DlssRows.Multiplier));
         var graph = LineGraph(ctx);
         graph.VisibleWhen = c => c.Graphs("pclat");
         graph.Series.Add(new GraphSeries
@@ -412,8 +411,14 @@ public static class Models
         return m;
     }
 
-    private static Val Text(PanelContext c, string metric)
-        => !FpsIdle(c) && c.Metrics.Text(metric) is { Length: > 0 } s ? new Val(s) : Val.Na;
+    /// <summary>A DLSS row as a stat: idle and "could not tell" are both N/A here, the block
+    /// layout's single absent state.</summary>
+    private static StatBlock DlssStat(string key, string label, Func<PanelContext, DlssRow> row)
+        => new(key, c => L(c, key, label), c => row(c).Kind is DlssRowKind.Idle or DlssRowKind.Na ? Val.Na : new Val(row(c).Text))
+        {
+            Visible = c => c.Shows(key),
+            Token = c => row(c).IsActive ? "activeTitle" : "tabFill",
+        };
 
     // ---- Power ----
 

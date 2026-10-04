@@ -8,9 +8,8 @@ namespace Halo.Widgets.Skins.Rainformer;
 /// Dedicated latency + DLSS telemetry panel (user request 2026-07-19):
 ///   PC LAT (latency.pc.ms: PCL Stats markers + PresentMon's display segment) — headline, warn-colored
 ///   CLICK / INPUT photon latencies (moved here from the FPS panels)
-///   DLSS row: DLL version + loaded features (SR/FG/RR)
-///   MODEL row: Transformer/CNN + override-vs-game-DLL origin
-///   FRAME GEN row: effective multiplier (displayed ÷ simulated rate)
+///   SR / RR / FG rows: running + preset + mode, or loaded / off (NgxProvider, DlssRows)
+///   FG MULT row: measured multiplier, displayed ÷ rendered (fps.fg.multiplier)
 ///   PCL sparkline (autoscaled)
 /// Idle (no 3D app) dims like the FPS panels.
 /// </summary>
@@ -112,68 +111,14 @@ public static class LatencyPanel
             FixedH = 11,
         });
 
-        // DLSS: version + loaded features
-        p.Elements.Add(new TextEl { Text = c => c.Label("dlss", "DLSS:"), VisibleWhen = c => c.Shows("dlss"), Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", FixedH = 11, Advance = 2 });
-        p.Elements.Add(new TextEl
-        {
-            Text = c =>
-            {
-                if (IsIdle(c)) return "—";
-                bool sr = c.Metrics.Value(MetricNames.DlssSrPresent) > 0;
-                bool fg = c.Metrics.Value(MetricNames.DlssFgPresent) > 0;
-                bool rr = c.Metrics.Value(MetricNames.DlssRrPresent) > 0;
-                if (!sr && !fg && !rr) return "not loaded";
-                string feats = string.Join(" ", new[] { sr ? "SR" : null, fg ? "FG" : null, rr ? "RR" : null }.Where(x => x != null));
-                string ver = c.Metrics.Text(MetricNames.DlssVersion);
-                return ver.Length > 0 ? $"{ver} · {feats}" : feats;
-            },
-            VisibleWhen = c => c.Shows("dlss"),
-            Style = TextStyle.Text8,
-            Align = TextAlign.Right,
-            ColorFn = c => c.Color("dlss", "text2"),
-            WidthClip = 130,
-            SameRow = true,
-            FixedH = 11,
-        });
-
-        // MODEL: Transformer/CNN + override-vs-game origin
-        p.Elements.Add(new TextEl { Text = c => c.Label("model", "MODEL:"), VisibleWhen = c => c.Shows("model"), Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", FixedH = 11, Advance = 1 });
-        p.Elements.Add(new TextEl
-        {
-            Text = c =>
-            {
-                if (IsIdle(c)) return "—";
-                string m = c.Metrics.Text(MetricNames.DlssModel);
-                return m.Length > 0 ? m : "—";
-            },
-            VisibleWhen = c => c.Shows("model"),
-            Style = TextStyle.Text8,
-            Align = TextAlign.Right,
-            ColorFn = c => c.Color("model", "text2"),
-            WidthClip = 130,
-            SameRow = true,
-            FixedH = 11,
-        });
-
-        // FRAME GEN: effective multiplier
-        p.Elements.Add(new TextEl { Text = c => c.Label("framegen", "FRAME GEN:"), VisibleWhen = c => c.Shows("framegen"), Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", FixedH = 11, Advance = 1 });
-        p.Elements.Add(new TextEl
-        {
-            Text = c =>
-            {
-                if (IsIdle(c)) return "—";
-                bool fgLoaded = c.Metrics.Value(MetricNames.DlssFgPresent) > 0;
-                double ratio = FgMult(c);
-                if (ratio > 1.15) return $"{ValueFormat.Fixed(ratio, 1)}×";
-                return fgLoaded ? "loaded · 1.0×" : "off";
-            },
-            ColorFn = c => !IsIdle(c) && FgMult(c) > 1.15 ? "activeTitle" : c.Color("framegen", "text2"),
-            VisibleWhen = c => c.Shows("framegen"),
-            Style = TextStyle.Bold8,
-            Align = TextAlign.Right,
-            SameRow = true,
-            FixedH = 11,
-        });
+        // SR / RR / FG: running → "Preset D · Ultra Perf." in the active colour, else "loaded · 310.3.0"
+        // or "off" (DlssRows decides the words for every skin). Preset and mode exist only while an
+        // NVIDIA App override applies them.
+        AddDlssRow(p, "sr", "SR:", c => DlssRows.Feature(c, "sr"), TextStyle.Text8, advance: 2);
+        AddDlssRow(p, "rr", "RR:", c => DlssRows.Feature(c, "rr"), TextStyle.Text8, advance: 1);
+        AddDlssRow(p, "fg", "FG:", c => DlssRows.Feature(c, "fg"), TextStyle.Text8, advance: 1);
+        // FG MULT: the collector's measured displayed ÷ rendered (fps.fg.multiplier)
+        AddDlssRow(p, "fgmult", "FG MULT:", DlssRows.Multiplier, TextStyle.Bold8, advance: 1);
 
         // PCL sparkline (autoscaled), time-bucketed over graph.historyS
         p.Elements.Add(new GraphEl
@@ -222,13 +167,26 @@ public static class LatencyPanel
     private static double PcLatency(PanelContext c)
         => c.Metrics.TryValue(MetricNames.LatencyPcMs, out double v, maxAgeS: 3) ? v : 0;
 
-    /// <summary>Frame-gen multiplier = displayed rate ÷ true rendered (pre-FG) rate from PCL
-    /// simulation markers; falls back to PresentMon's sim-pacing ratio when render rate absent.</summary>
-    private static double FgMult(PanelContext c)
+    /// <summary>A label + right-aligned value pair. Running reads in <c>activeTitle</c>; "could not
+    /// tell" in <c>inactiveButton</c> like PC LAT's N/A; everything else in the row's own colour.</summary>
+    private static void AddDlssRow(Panel p, string key, string label, Func<PanelContext, DlssRow> row, TextStyle style, int advance)
     {
-        double displayed = c.Metrics.Value(MetricNames.FpsDisplayed);
-        if (c.Metrics.TryValue(MetricNames.RenderRateHz, out double render, maxAgeS: 3) && render > 1 && displayed > 1)
-            return Math.Clamp(displayed / render, 0.25, 8);
-        return c.Metrics.Value(MetricNames.FpsFgRatio);
+        p.Elements.Add(new TextEl { Text = c => c.Label(key, label), VisibleWhen = c => c.Shows(key), Style = TextStyle.Bold8, Align = TextAlign.Left, Color = "text", FixedH = 11, Advance = advance });
+        p.Elements.Add(new TextEl
+        {
+            Text = c => row(c).Text,
+            ColorFn = c => row(c).Kind switch
+            {
+                DlssRowKind.Active => "activeTitle",
+                DlssRowKind.Na => "inactiveButton",
+                _ => c.Color(key, "text2"),
+            },
+            VisibleWhen = c => c.Shows(key),
+            Style = style,
+            Align = TextAlign.Right,
+            WidthClip = 130,
+            SameRow = true,
+            FixedH = 11,
+        });
     }
 }

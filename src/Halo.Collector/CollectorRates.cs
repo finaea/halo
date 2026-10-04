@@ -53,4 +53,8 @@ internal static class CollectorRates
 
     /// <summary>PCL Stats marker aggregation window flush.</summary>
     public const double PclStats = 5;
+
+    /// <summary>NVAPI NGX override state: one driver call, 33–106 µs measured. 1 Hz is as fast as
+    /// a DLSS setting changes; the DLL-scan fallback inside runs every 10 s.</summary>
+    public const double Ngx = 1;
 }

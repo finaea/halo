@@ -175,8 +175,7 @@
     "proc.topram.8.name": "Halo.Widgets",
     "proc.topram.9.name": "svchost",
     "fps.app.name": "",
-    "dlss.version": "",
-    "dlss.model": ""
+    "dlss.version": ""
   },
   "na": [
     "fps.presented",
@@ -196,7 +195,17 @@
     "latency.queue.ms",
     "latency.render.ms",
     "latency.pc.ms",
-    "render.rate.hz"
+    "render.rate.hz",
+    "fps.fg.multiplier",
+    "dlss.sr.active",
+    "dlss.rr.active",
+    "dlss.fg.active",
+    "dlss.sr.preset",
+    "dlss.rr.preset",
+    "dlss.fg.preset",
+    "dlss.sr.mode",
+    "dlss.rr.mode",
+    "dlss.fg.mode"
   ],
   "series": {
     "cpu.total.pct": [

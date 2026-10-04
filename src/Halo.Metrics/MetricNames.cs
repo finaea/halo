@@ -117,13 +117,35 @@ public static class MetricNames
     public const string LatencyPcMs = "latency.pc.ms";
     public const string RenderRateHz = "render.rate.hz";                 // game-rendered (pre-frame-gen) rate from PCL simulation markers
     public const string FpsDisplayLatencyMs = "fps.displaylatency.ms";   // present→displayed (P2D) from PresentMon MsUntilDisplayed
+    /// <summary>Measured frame-generation multiplier: displayed rate ÷ game-rendered rate (Calc),
+    /// falling back to fps.fgratio when there are no Reflex markers. 1.0 = no generated frames.</summary>
+    public const string FpsFgMultiplier = "fps.fg.multiplier";
 
-    // ---- DLSS / NGX module inspection ----
+    // ---- DLSS (NgxProvider): NVIDIA's NGX override state over NVAPI, else a DLL scan ----
+    // present = the feature's DLL is in the game; active = the feature is created. preset and
+    // mode are the raw NVIDIA numbers (listed on the constants below) and are N/A unless an NVIDIA
+    // App override is applying them — nothing public reports a game's own choice.
     public const string DlssSrPresent = "dlss.sr.present";
     public const string DlssFgPresent = "dlss.fg.present";
     public const string DlssRrPresent = "dlss.rr.present";
+    public const string DlssSrActive = "dlss.sr.active";
+    public const string DlssRrActive = "dlss.rr.active";
+    public const string DlssFgActive = "dlss.fg.active";
+    /// <summary>NGX render preset: A=1 … F=6, J=10 … O=15, 0x00FFFFFF = Recommended.</summary>
+    public const string DlssSrPreset = "dlss.sr.preset";
+    public const string DlssRrPreset = "dlss.rr.preset";
+    public const string DlssFgPreset = "dlss.fg.preset";
+    /// <summary>NGX performance mode: 0 Performance, 1 Balanced, 2 Quality, 3 Ultra Performance,
+    /// 5 DLAA, 6 Custom.</summary>
+    public const string DlssSrMode = "dlss.sr.mode";
+    public const string DlssRrMode = "dlss.rr.mode";
+    /// <summary>Frame-generation mode: 0 Off, 1 Fixed, 2 Auto, 3 Dynamic.</summary>
+    public const string DlssFgMode = "dlss.fg.mode";
+    /// <summary>Super Resolution DLL file version, dotted ("310.3.0"); empty when the game has no
+    /// nvngx_dlss DLL of its own (an NVIDIA App override loads its copy under another name).</summary>
     public const string DlssVersion = "dlss.version";
-    public const string DlssModel = "dlss.model";        // "Transformer/CNN · override/game DLL"
+    [Obsolete("No longer published: it was a Transformer/CNN guess from the DLL version. Read dlss.sr.preset.")]
+    public const string DlssModel = "dlss.model";
 
     // ---- System / capabilities (what the System check page reads) ----
     public const string SysUptimeS = "sys.uptime.s";

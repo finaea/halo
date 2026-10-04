@@ -21,6 +21,8 @@ src\Halo.Widgets\bin\Debug\net10.0\win-x64\Halo.Widgets.exe        # widget wind
 src\Halo.Settings\bin\Debug\net10.0-windows\win-x64\Halo.Settings.exe
 # diagnostics: dump every metric in shared memory (--json for the documented shape)
 Halo.Collector.exe --dump [--json]
+# DLSS state of a game over NVAPI, decoded (read-only, safe next to a running collector):
+Halo.Collector.exe --ngx-smoketest [pid]
 # one-time upgrade of a pre-v2 config folder:
 Halo.Collector.exe --migrate-config <old config dir> [--to <dir>]
 # release build: all three exes over ONE shared self-contained runtime, into dist\app
@@ -277,6 +279,15 @@ the smoketests, and would delete the "degrades gracefully unelevated" property.
   succession" and `CpuId.Get`, both symptoms of this, and wrongly concluded the host's
   poll-failure retry path was safe. `Part.Cpu` still opts out of `rescan`, now only because it has
   nothing to re-enumerate.
+- **DLSS rows come from NVAPI first, the DLL scan second** (`NgxProvider`). An NVIDIA App
+  override loads DLSS from a `.bin` under `ProgramData\NVIDIA\NGX\models`, so a module scan sees
+  nothing (Cyberpunk 2077 ran RR and FG while the old scan said "not loaded"). Three rules: NVAPI
+  is **reference-counted and shared with the LHM GPU part** in this process, so exactly one
+  `NvAPI_Initialize`/`NvAPI_Unload` pair per `NvApi` instance; "active" keys on the `CREATED`
+  flag, never `EVALUATE`, which flickers with dynamic frame generation; and the runtime
+  `performanceMode` (3 = Ultra Performance) is **not** numbered like the DRS override setting
+  (3 = in-game). Preset and mode exist only while an override applies them — nothing public
+  reports a game's own choice.
 - PawnIO (`C:\Program Files\PawnIO`) is a **shared** driver — FanControl, LHM and HWiNFO use the
   same one. Halo's installer offers it (`Halo.Settings.exe --install-pawnio`, exit 3010 = reboot
   needed) and never removes it on uninstall.

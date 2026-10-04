@@ -110,6 +110,38 @@ if (args.Contains("--tap-smoketest"))
     return 0;
 }
 
+// --ngx-smoketest [pid]: read NVIDIA's NGX override state over NVAPI the way NgxProvider does and
+// print it decoded, five times a second apart. Read-only and attaches to nothing, so it is safe
+// next to a running collector. Without a pid it lists every process NVAPI has a record for.
+if (args.Contains("--ngx-smoketest"))
+{
+    Log.Init("ngx-smoketest", alsoConsole: true);
+    using var nvapi = NvApi.TryOpen(out string detail);
+    if (nvapi == null) { Console.WriteLine($"NVAPI unavailable: {detail}"); return 3; }
+    if (!nvapi.HasNgxOverrideState) { Console.WriteLine("driver has no NvAPI_NGX_GetNGXOverrideState (needs R570+)"); return 3; }
+    int ngxPid = args.Where(a => int.TryParse(a, out _)).Select(int.Parse).FirstOrDefault();
+    int[] pids = ngxPid != 0 ? [ngxPid] : System.Diagnostics.Process.GetProcesses().Select(p => p.Id).Where(id => id != 0).ToArray();
+    for (int s = 1; s <= (ngxPid != 0 ? 5 : 1); s++)
+    {
+        if (s > 1) Thread.Sleep(1000);
+        int records = 0;
+        foreach (int pid in pids)
+        {
+            int st = nvapi.GetNgxOverrideState(pid, out var state);
+            if (st == NvApi.DataNotFound && ngxPid == 0) continue;
+            if (st != NvApi.Ok) { Console.WriteLine($"t+{s}s pid {pid}: {nvapi.Describe(st)}"); continue; }
+            records++;
+            var (sr, rr, fg) = NgxDecode.Decode(state);
+            Console.WriteLine($"t+{s}s pid {pid}: SR=0x{state.SrMask:x} RR=0x{state.RrMask:x} FG=0x{state.FgMask:x} "
+                + $"renderPreset={state.RenderPreset} perfMode={state.PerformanceMode} fgPreset={state.FrameGenerationPreset} "
+                + $"fgMode={state.FrameGenerationMode} fgCount={state.FrameGenerationCount}");
+            Console.WriteLine($"         SR {sr} | RR {rr} | FG {fg}");
+        }
+        if (ngxPid == 0) Console.WriteLine($"{records} process(es) with an NGX override record");
+    }
+    return 0;
+}
+
 // Halo.Collector — elevated data process (plan §4). Single instance.
 // Versioned with the section: a v1 and a v2 collector write different sections and can coexist
 // while a machine is being upgraded, but only one of each may run.
@@ -169,6 +201,7 @@ AddProvider(new LhmProvider(LhmProvider.Part.SuperIo));  // fans/Vcore: 1 Hz (ca
 AddProvider(new LhmProvider(LhmProvider.Part.Storage));  // SMART temps: every 10 s
 AddProvider(new LhmProvider(LhmProvider.Part.Gpu));      // NVAPI extras: voltage, fan RPM
 AddProvider(new PresentMonProvider(configStore));        // frame data: event-driven
+AddProvider(new NgxProvider());                          // DLSS state of the tracked game: 1 Hz
 // NVIDIA PCL Stats ETW consumer: true Reflex PC latency + rendered (pre-FG) rate.
 // Explicit provider GUID from NVIDIA's reference pclstats.h TRACELOGGING_DEFINE_PROVIDER
 // (NOT the name-hash — the header declares it literally). Enabling the provider is the whole

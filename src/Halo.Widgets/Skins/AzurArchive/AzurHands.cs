@@ -95,7 +95,8 @@ internal sealed class FpsTagsEl(AzurCard card, StatBlock app, StatBlock dlss) : 
         var a = app.Visible?.Invoke(c) == false ? Val.Na : app.Value(c);
         var d = dlss.Visible?.Invoke(c) == false ? Val.Na : dlss.Value(c);
         _app = a.IsNa ? "" : a.Text;
-        _dlss = d.IsNa || d.Text.Length == 0 ? "" : "DLSS " + d.Text;
+        // blank version = DLSS is loaded but the DLL is NVIDIA App's override copy: still say DLSS
+        _dlss = d.IsNa ? "" : d.Text.Length == 0 ? "DLSS" : "DLSS " + d.Text;
         return _app + "|" + _dlss + "|" + Card.Missing;
     }
 

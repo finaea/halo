@@ -208,14 +208,19 @@ public static class PanelCatalog
                 new MetricSpec("display", "DISP", MetricNames.FpsDisplayLatencyMs, MetricUnit.Milliseconds, ColorToken: "text2"),
                 new MetricSpec("click", "CLICK", MetricNames.LatencyClickMs, MetricUnit.Milliseconds, ColorToken: "text2"),
                 new MetricSpec("input", "INPUT", MetricNames.LatencyAllInputMs, MetricUnit.Milliseconds, ColorToken: "text2"),
-                new MetricSpec("dlss", "DLSS:", MetricNames.DlssVersion, MetricUnit.Text, ColorToken: "text2"),
-                new MetricSpec("model", "MODEL:", MetricNames.DlssModel, MetricUnit.Text, ColorToken: "text2"),
-                new MetricSpec("framegen", "FRAME GEN:", MetricNames.RenderRateHz, MetricUnit.Hertz, ColorToken: "text2"),
+                // One row per DLSS feature: running + preset + mode, or loaded / off. Preset and
+                // mode come from NVIDIA's NGX override state, so they exist only while an NVIDIA App
+                // override applies them; the row's own key names the .present metric, the one that
+                // is always published while a game runs.
+                new MetricSpec("sr", "SR:", MetricNames.DlssSrPresent, MetricUnit.None, ColorToken: "text2"),
+                new MetricSpec("rr", "RR:", MetricNames.DlssRrPresent, MetricUnit.None, ColorToken: "text2"),
+                new MetricSpec("fg", "FG:", MetricNames.DlssFgPresent, MetricUnit.None, ColorToken: "text2"),
+                new MetricSpec("fgmult", "FG MULT:", MetricNames.FpsFgMultiplier, MetricUnit.None, ColorToken: "text2"),
             ],
             Options: [],
             Tokens: [.. Frame, "histogram", "activeTitle", "emptyBar", "solidLabel", "inactiveButton",
                      "devWarn1", "devWarn2", "devWarn3", "devWarn4", "devWarn5"],
-            Requires: "NVIDIA Reflex (PCL Stats) markers for PC latency"),
+            Requires: "NVIDIA Reflex (PCL Stats) markers for PC latency; NVIDIA driver R570+ for DLSS presets"),
 
         new PanelType("power", "Power",
             Metrics:

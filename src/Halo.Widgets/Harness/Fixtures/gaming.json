@@ -23,6 +23,13 @@
     "dlss.sr.present": 1,
     "dlss.fg.present": 1,
     "dlss.rr.present": 0,
+    "dlss.sr.active": 1,
+    "dlss.sr.preset": 11,
+    "dlss.sr.mode": 3,
+    "dlss.fg.active": 1,
+    "dlss.fg.preset": 1,
+    "dlss.fg.mode": 3,
+    "fps.fg.multiplier": 2.0,
     "cpu.clock.mhz": 5310,
     "cpu.package.power.w": 88,
     "cpu.vcore.v": 1.241,
@@ -242,7 +249,6 @@
   "text": {
     "fps.app.name": "Cyberpunk2077.exe",
     "dlss.version": "3.7.10",
-    "dlss.model": "Transformer · game DLL",
     "proc.topcpu.0.name": "Cyberpunk2077",
     "proc.topram.0.name": "Cyberpunk2077"
   },

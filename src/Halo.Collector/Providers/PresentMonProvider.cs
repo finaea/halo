@@ -78,8 +78,6 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
     private readonly List<FrameEntry> _pendingRing = new(256);
 
     private MetricSink? _sink;
-    private DateTime _nextNgxScan = DateTime.MinValue;
-    private int _ngxScannedPid;
     private long _nextSlowPublishQpc; // 1 Hz cadence for app name/refresh (constants between target changes)
     private long _idleSinceQpc;       // 0 once the current target has produced frames
     private bool _fpsIdleMode;        // relaxed flush + muted tap after 10 s without frames
@@ -101,7 +99,7 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
         // can attach to an already-installed running service without admin.
         // Each metric registers the cadence it really changes at, not the provider's ceiling:
         // stats publish once per poll, the lows are recomputed at LowsRateHz inside FrameStats,
-        // and the app name / refresh rate / DLSS scan run on their own slower timers.
+        // and the app name / refresh rate run on their own 1 Hz timer. DLSS state is NgxProvider's.
         sink.Register(MetricNames.FpsPresented, MetricType.Double, MetricUnit.Fps, Name, DefaultRateHz);
         sink.Register(MetricNames.FpsDisplayed, MetricType.Double, MetricUnit.Fps, Name, DefaultRateHz);
         sink.Register(MetricNames.FpsFrametimePresentedMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz);
@@ -127,11 +125,6 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
         // latency.pc.ms is owned by PclStatsProvider (true marker-based). PresentMon only
         // contributes the present->displayed (P2D) span it uniquely measures.
         sink.Register(MetricNames.FpsDisplayLatencyMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz);
-        sink.Register(MetricNames.DlssModel, MetricType.String, MetricUnit.Text, Name, 0.5);
-        sink.Register(MetricNames.DlssSrPresent, MetricType.Double, MetricUnit.None, Name, 0.5);
-        sink.Register(MetricNames.DlssFgPresent, MetricType.Double, MetricUnit.None, Name, 0.5);
-        sink.Register(MetricNames.DlssRrPresent, MetricType.Double, MetricUnit.None, Name, 0.5);
-        sink.Register(MetricNames.DlssVersion, MetricType.String, MetricUnit.Text, Name, 0.5);
 
         Stats.SetWindow(Settings.FrameLowsWindowS);
 
@@ -369,7 +362,6 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
             // and the presented panel rides its resolved fallback until the tap re-arms.
             _targetPid = pid;
             _targetName = name;
-            _nextNgxScan = DateTime.MinValue; // rescan DLSS on app switch
             _nextSlowPublishQpc = 0;          // republish name/refresh immediately
             Log2.Info($"target: {(pid == 0 ? "none" : $"{name} ({pid})")}");
         }
@@ -384,67 +376,11 @@ public sealed class PresentMonProvider(ConfigStore config) : ISensorProvider
             double hz = GetRefreshHz(hwnd);
             if (hz > 0) sink.Set(MetricNames.FpsRefreshHz, hz);
         }
-
-        if (_targetPid != 0 && DateTime.UtcNow >= _nextNgxScan)
-        {
-            _nextNgxScan = DateTime.UtcNow.AddSeconds(10);
-            ScanNgxModules(sink, _targetPid);
-        }
-        else if (_targetPid == 0)
-        {
-            sink.Set(MetricNames.DlssSrPresent, 0);
-            sink.Set(MetricNames.DlssFgPresent, 0);
-            sink.Set(MetricNames.DlssRrPresent, 0);
-        }
     }
 
     private static bool IsShellProcess(string name) => name.Length == 0 || name is "explorer" or "dwm" or "SearchHost"
         or "StartMenuExperienceHost" or "ShellExperienceHost" or "ApplicationFrameHost" or "TextInputHost"
         or "Halo.Widgets" or "Halo.Settings" or "LockApp" or "Rainmeter";
-
-    private void ScanNgxModules(MetricSink sink, int pid)
-    {
-        if (pid == _ngxScannedPid && _nextNgxScan != DateTime.MinValue) { }
-        _ngxScannedPid = pid;
-        bool sr = false, fg = false, rr = false;
-        string version = "";
-        int major = 0;
-        bool driverOverride = false;
-        try
-        {
-            using var proc = Process.GetProcessById(pid);
-            foreach (ProcessModule m in proc.Modules)
-            {
-                string f = m.ModuleName.ToLowerInvariant();
-                if (f.StartsWith("nvngx_dlssg")) { fg = true; }
-                else if (f.StartsWith("nvngx_dlssd")) { rr = true; }
-                else if (f.StartsWith("nvngx_dlss"))
-                {
-                    sr = true;
-                    version = m.FileVersionInfo.FileVersion ?? "";
-                    major = m.FileVersionInfo.FileMajorPart;
-                    // NVIDIA App / driver DLSS overrides load the DLL from the DriverStore
-                    // instead of the game folder — a reliable App-free override signal.
-                    string path = m.FileName ?? "";
-                    driverOverride = path.Contains("\\DriverStore\\", StringComparison.OrdinalIgnoreCase)
-                                  || path.Contains("\\FileRepository\\", StringComparison.OrdinalIgnoreCase);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Log2.Warn($"ngx scan pid {pid}: {ex.Message}"); // 32-bit/protected process etc.
-        }
-        sink.Set(MetricNames.DlssSrPresent, sr ? 1 : 0);
-        sink.Set(MetricNames.DlssFgPresent, fg ? 1 : 0);
-        sink.Set(MetricNames.DlssRrPresent, rr ? 1 : 0);
-        if (version.Length > 0) sink.SetString(MetricNames.DlssVersion, version);
-
-        // model family: DLL 310+ = DLSS4 transformer generation, older = CNN. The exact
-        // runtime preset without an override needs NGX hooking (out of scope, plan D5/§7).
-        string model = !sr ? "" : (major >= 310 ? "Transformer" : "CNN") + (driverOverride ? " · override" : " · game DLL");
-        sink.SetString(MetricNames.DlssModel, model);
-    }
 
     private static double GetRefreshHz(nint hwnd)
     {

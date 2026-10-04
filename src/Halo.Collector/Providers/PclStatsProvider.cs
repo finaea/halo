@@ -84,6 +84,10 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
         // each consumer so a third-party tool gets the same value Halo's own widget draws.
         sink.Register(MetricNames.LatencyPcMs, MetricType.Double, MetricUnit.Milliseconds, Name, DefaultRateHz,
             MetricSemantics.Calc, MetricFlags.Derived);
+        // Same reasoning: the FG multiplier was worked out inside one skin's widget and shown as a
+        // rendered rate by the other, so the two disagreed about the same game.
+        sink.Register(MetricNames.FpsFgMultiplier, MetricType.Double, MetricUnit.None, Name, DefaultRateHz,
+            MetricSemantics.Calc, MetricFlags.Derived);
 
         Guid guid = providerGuidOverride != Guid.Empty
             ? providerGuidOverride
@@ -267,6 +271,7 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
         PublishPcLatency(sink, eventsFresh && haveRender && render > 0, render, haveQueue ? queue : 0);
         if (renderHz > 0) sink.Set(MetricNames.RenderRateHz, renderHz);
         else if (!eventsFresh) sink.MarkStale(MetricNames.RenderRateHz);
+        PublishFgMultiplier(sink);
 
         if (_discovery && DateTime.UtcNow >= _nextHistLog)
         {
@@ -297,6 +302,33 @@ public sealed class PclStatsProvider(string providerName, Guid providerGuidOverr
         }
         double display = sink.TryGet(MetricNames.FpsDisplayLatencyMs, out double d, maxAgeS: 3) ? d : 0;
         sink.Set(MetricNames.LatencyPcMs, queue + render + display);
+    }
+
+    /// <summary>
+    /// Frame-generation multiplier = what reached the screen ÷ what the game rendered. Both halves
+    /// are read back from the section, the rendered rate included: the local window only closes
+    /// every ≥500 ms, so on most polls it has no fresh value and using it would blink the metric.
+    /// </summary>
+    private static void PublishFgMultiplier(MetricSink sink)
+    {
+        double? fallback = sink.TryGet(MetricNames.FpsFgRatio, out double ratio, maxAgeS: 3) ? ratio : null;
+        double? mult = sink.TryGet(MetricNames.FpsDisplayed, out double displayed, maxAgeS: 3)
+            && sink.TryGet(MetricNames.RenderRateHz, out double rendered, maxAgeS: 3)
+                ? FgMultiplier(displayed, rendered, fallback)
+                : FgMultiplier(0, 0, fallback);
+        if (mult is double m) sink.Set(MetricNames.FpsFgMultiplier, m);
+        else sink.MarkStale(MetricNames.FpsFgMultiplier);
+    }
+
+    /// <summary>
+    /// displayed ÷ rendered, clamped to 0.25–8 (the bounds the widget used before this moved here).
+    /// Without a usable rendered rate (no Reflex markers) it falls back to PresentMon's
+    /// sim-pacing ratio, fps.fgratio; with neither there is no reading.
+    /// </summary>
+    public static double? FgMultiplier(double displayed, double rendered, double? fgRatioFallback)
+    {
+        if (displayed > 1 && rendered > 1) return Math.Clamp(displayed / rendered, 0.25, 8);
+        return fgRatioFallback is > 0 and var f ? f : null;
     }
 
     /// <summary>Mean of samples newer than cutoff; trims older ones from the front. Caller holds _lock.</summary>

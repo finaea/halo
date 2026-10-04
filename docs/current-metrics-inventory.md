@@ -151,7 +151,7 @@ is shown in brackets.
 |---|---|---|---|
 | 1 | `net.ip.external` | **~300 s** | 5-minute refresh; off by default |
 | 2 | `drive.<x>.temp.c` | **~10.3 s** *(was ~30.5 s)* | 10 s SMART poll + a 258 ms read |
-| 3 | `dlss.*` | **~10.2 s** | 10 s NGX module scan |
+| 3 | `dlss.version`, and `dlss.*.present` for a game without an NVIDIA App override | **~10.2 s** | 10 s DLL scan (with an override, NVAPI answers at 1 Hz) |
 | 4 | `gpu.<i>.voltage.v` (LibreHardwareMonitor) | **~1.3 s** | 1 Hz poll + a 78 ms NVAPI sweep |
 | 5 | `proc.*` | **~1.22 s** | 1 Hz snapshot |
 | 6 | `ram.used.gb`, `drive.<x>.used.b`, IPs, uptime | **~1.22 s** | 1 Hz builtin poll |
@@ -183,7 +183,7 @@ widget from its options.
 | **cpu-ram** | `cpu.package.temp.c`, `cpu.total.pct`, `cpu.core.{n}.pct`, `cpu.clock.mhz`, `fan.{n}.rpm`, `ram.pct` | Per logical CPU | PawnIO for temperature, clock and fan |
 | **gpu** | `gpu.{gpu}.temp.c / usage.pct / vram.pct / fan.pct / clock.core.mhz / clock.mem.mhz` | One widget per GPU | NVIDIA driver for the full set |
 | **fps** | `fps.app.name`, `fps.{stream}`, `fps.low1.{stream}`, `fps.low01.{stream}`, `fps.frametime.{stream}.ms`, `…worst.ms`, `dlss.version` | — | PresentMon (elevated) |
-| **latency** | `latency.pc.ms`, `latency.queue.ms`, `latency.render.ms`, `fps.displaylatency.ms`, `latency.click.ms`, `latency.allinput.ms`, `dlss.version`, `dlss.model`, `render.rate.hz` | — | Reflex (PCL Stats) markers |
+| **latency** | `latency.pc.ms`, `latency.queue.ms`, `latency.render.ms`, `fps.displaylatency.ms`, `latency.click.ms`, `latency.allinput.ms`, `dlss.{sr,rr,fg}.present / .active / .preset`, `dlss.{sr,rr,fg}.mode`, `dlss.version`, `fps.fg.multiplier` | — | Reflex (PCL Stats) markers; NVIDIA driver R570+ for DLSS presets |
 | **power** | `cpu.vcore.v`, `gpu.{gpu}.voltage.v`, `cpu.package.power.w`, `gpu.{gpu}.power.w` (+ `.max`) | — | PawnIO for Vcore and package power |
 | **drives** | `drive.{x}.label / temp.c / used.b / total.b / write.bps / read.bps` | Per volume | PawnIO and SMART for temperatures |
 | **network** | `net.ip.external`, `net.ip.internal`, `net.down.bps`, `net.up.bps`, `net.down.bps.max`, `net.down.total.b` | — | Nothing |
@@ -192,14 +192,13 @@ widget from its options.
 | **topram** | `proc.topram.{agg}{n}.name / .ram.b / .cpu.pct` | Per rank (1–10) | Nothing |
 | **companion** | `sys.uptime.s` + the widget-side mood (`SystemMood`: temperatures against their warn steps, CPU load, presenting app, RAM, fan duty, network traffic) | — | Nothing |
 
-Three things the panels work out themselves instead of reading:
+Two things the panels work out themselves instead of reading:
 
 - **Fan percentage.** The collector publishes `fan.<n>.control.pct` when the SuperIO chip reports a
   PWM duty cycle for that channel, and nothing otherwise. On a board that does not expose one, the
   widget works out `rpm ÷ max`, where the maximum is a per-channel setting that defaults to the
   highest speed seen this session (at least 1500 rpm). The collector has no board-specific table
   of maximum speeds, and is not meant to.
-- **Frame generation multiplier.** `fps.displayed ÷ render.rate.hz`, falling back to `fps.fgratio`.
 - **Everything on the clock panel except uptime** — `DateTime.Now`, read once per widget tick.
 
 ---
@@ -397,6 +396,24 @@ used to be the frame count divided by the time from the oldest to the newest fra
 and k frames only span k−1 gaps, so every reading was exactly **1 fps** too high (a locked 60 fps
 showed 61 next to a FRAMETIME row of 16.7 ms). The rate now comes from the frame intervals
 themselves. The 1% and 0.1% lows were not affected, because they already worked from frametimes.
+
+### Changed on 2026-10-04: DLSS
+
+The `dlss.*` family moved from `presentmon` to a new `ngx` provider (1 Hz, no elevation needed).
+It reads NVIDIA's NGX override state through NVAPI, the same source NVIDIA's own overlay uses for
+its DLSS view, and falls back to the old DLL scan for a game that has no NVIDIA App override. The
+scan alone had missed overrides entirely, because an override loads its own copy of DLSS under a
+different file name.
+
+| Metric | Then | Now | Why |
+|---|---|---|---|
+| `dlss.{sr,rr,fg}.present` | presentmon · 0.5 | ngx · 1 | Also true when an NVIDIA App override has loaded the feature. A game the scan cannot open now reads N/A rather than 0. |
+| `dlss.{sr,rr,fg}.active` | Did not exist | ngx · 1 | 1 while the feature is created and running. N/A when nothing says. |
+| `dlss.{sr,rr,fg}.preset` | Did not exist | ngx · 1 | NVIDIA's preset number (A = 1 … O = 15). Only present while an override applies one. |
+| `dlss.{sr,rr}.mode`, `dlss.fg.mode` | Did not exist | ngx · 1 | Performance mode (3 = Ultra Performance, 5 = DLAA) and frame-generation mode (1 Fixed, 3 Dynamic), on the same terms. |
+| `dlss.version` | presentmon · `310,3,0,0` | ngx · 0.1 · `310.3.0` | Dotted. Empty under an override, whose DLSS file is not the game's. |
+| `dlss.model` | Transformer/CNN guess | Removed | It was a guess from the version number, and it was wrong under overrides. |
+| `fps.fg.multiplier` | Worked out by the widget | pclstats · calc, derived · 5 | `fps.displayed ÷ render.rate.hz`, falling back to `fps.fgratio`, so every skin shows one number. |
 
 ---
 

@@ -220,7 +220,9 @@ public static class FpsPanel
         bool sr = c.Metrics.Value(MetricNames.DlssSrPresent) == 1;
         bool fg = c.Metrics.Value(MetricNames.DlssFgPresent) == 1;
         bool rr = c.Metrics.Value(MetricNames.DlssRrPresent) == 1;
-        string s = $"DLSS {c.Metrics.Text(MetricNames.DlssVersion)} ";
+        // the version is blank under an NVIDIA App override (its DLL is not the game's nvngx_dlss)
+        string ver = c.Metrics.Text(MetricNames.DlssVersion);
+        string s = ver.Length > 0 ? $"DLSS {ver} " : "DLSS ";
         if (sr) s += "SR";
         if (fg) s += " FG";
         if (rr) s += " RR";
